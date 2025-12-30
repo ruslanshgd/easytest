@@ -1,0 +1,13 @@
+{
+  "name": "Изи Тест",
+  "id": "1587860401738140185",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "permissions": [],
+  "networkAccess": {
+    "allowedDomains": ["https://*.supabase.co"]
+  },
+  "documentAccess": "dynamic-page"
+}

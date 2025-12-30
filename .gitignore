@@ -45,8 +45,8 @@ Thumbs.db
 # Cursor/IDE
 .cursor/
 
-# Figma plugin (published in Community, not in repo)
-figma-plugin/
+# Figma plugin code is now in the repository
+# (see README.md for installation from Figma Community)
 
 # Temporary files
 *.tmp
