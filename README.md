@@ -106,6 +106,14 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 2. Проверьте, что все тесты проходят
 3. Обновите документацию при необходимости
 
+## ☕ Поддержка проекта
+
+Если проект оказался полезным, вы можете поддержать его развитие:
+
+[![DonationAlerts](https://img.shields.io/badge/DonationAlerts-Поддержать-FF6B6B?style=for-the-badge)](https://www.donationalerts.com/r/ruslan_uxui)
+
+**[Поддержать автора через DonationAlerts](https://www.donationalerts.com/r/ruslan_uxui)**
+
 ## 📄 Лицензия
 
 MIT License - см. файл [LICENSE](LICENSE) для деталей.
