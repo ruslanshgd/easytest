@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+
+# Environment variables (КРИТИЧНО: не коммитить секреты!)
+.env
+.env.local
+.env.*.local
+# Исключаем .env.example - его можно коммитить
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Cursor/IDE
+.cursor/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+

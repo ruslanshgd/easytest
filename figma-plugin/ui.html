@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Export Prototype JSON</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 16px;
+    }
+    button {
+      padding: 8px 12px;
+      background: #007AFF;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      width: 100%;
+      margin-bottom: 8px;
+    }
+    button:hover {
+      background: #0051D5;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .info {
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #333;
+    }
+    .url-container {
+      margin-top: 12px;
+      padding: 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      display: none;
+    }
+    .url-container.show {
+      display: block;
+    }
+    .url-input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .url-copy-btn {
+      background: #34C759;
+      font-size: 12px;
+      padding: 6px 10px;
+      margin-bottom: 0;
+    }
+    .url-copy-btn:hover {
+      background: #28A745;
+    }
+    .status {
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      display: none;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      display: block;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      display: block;
+    }
+    .status.loading {
+      background: #d1ecf1;
+      color: #0c5460;
+      display: block;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #ddd;
+      margin: 16px 0;
+    }
+    .settings-form {
+      display: none;
+      padding: 12px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .settings-form.show {
+      display: block;
+    }
+    .settings-form label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #333;
+    }
+    .settings-form input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      box-sizing: border-box;
+      margin-bottom: 12px;
+    }
+    .settings-form input:focus {
+      outline: none;
+      border-color: #007AFF;
+    }
+    .settings-form .help-text {
+      font-size: 11px;
+      color: #666;
+      margin-top: -8px;
+      margin-bottom: 12px;
+    }
+    .settings-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .settings-buttons button {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    .settings-btn {
+      background: #6c757d;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    .settings-btn:hover {
+      background: #5a6268;
+    }
+    .main-content {
+      display: none;
+    }
+    .main-content.show {
+      display: block;
+    }
+    .task-input-container {
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #f9f9f9;
+      border-radius: 4px;
+    }
+    .task-input-container label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #333;
+    }
+    .task-input-container textarea {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: Arial, sans-serif;
+      box-sizing: border-box;
+      resize: vertical;
+      min-height: 60px;
+      margin-bottom: 4px;
+    }
+    .task-input-container textarea:focus {
+      outline: none;
+      border-color: #007AFF;
+    }
+    .task-input-container .help-text {
+      font-size: 11px;
+      color: #666;
+    }
+    .task-input-container .char-count {
+      font-size: 11px;
+      color: #999;
+      text-align: right;
+      margin-top: 4px;
+    }
+    .task-input-container .char-count.warning {
+      color: #ff9800;
+    }
+    .task-input-container .char-count.error {
+      color: #f44336;
+    }
+  </style>
+</head>
+<body>
+  <!-- Форма настройки (онбординг) -->
+  <div id="settingsForm" class="settings-form">
+    <h3 style="margin-top: 0; margin-bottom: 12px;">⚙️ Настройка плагина</h3>
+    <p style="font-size: 12px; color: #666; margin-bottom: 12px;">
+      Укажите данные вашего Supabase проекта. Их можно найти в <strong>Supabase Dashboard → Settings → API</strong>
+    </p>
+    
+    <label for="supabaseUrl">Supabase URL:</label>
+    <input type="text" id="supabaseUrl" placeholder="Введите URL вашего Supabase проекта" />
+    <div class="help-text">Например: https://xxxxx.supabase.co (найдите в Supabase Dashboard → Settings → API)</div>
+    
+    <label for="supabaseKey">Supabase Anon Key:</label>
+    <input type="text" id="supabaseKey" placeholder="Введите Anon Key из Supabase" />
+    <div class="help-text">Anon/public ключ из Settings → API (длинная строка, начинается с eyJ...)</div>
+    
+    <label for="viewerUrl">Viewer URL (URL приложения для прохождения тестов):</label>
+    <input type="text" id="viewerUrl" placeholder="Введите URL вашего viewer приложения" />
+    <div class="help-text">URL приложения figma-viewer (для прохождения тестов респондентами). Для локальной разработки: http://localhost:5173, для production: https://your-viewer-domain.com</div>
+    
+    <label for="analyticsUrl" style="margin-top: 12px;">Analytics URL (URL приложения для аналитики):</label>
+    <input type="text" id="analyticsUrl" placeholder="Введите URL вашего analytics приложения" />
+    <div class="help-text">URL приложения figma-analytics (для просмотра аналитики и получения токена). Для локальной разработки: http://localhost:5174, для production: https://your-analytics-domain.com</div>
+    
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #ddd;">
+      <label for="accessToken" style="font-weight: 500;">Access Token (обязательно для создания прототипов):</label>
+      <input type="text" id="accessToken" placeholder="Вставьте токен после авторизации" style="width: 100%; margin-top: 4px; margin-bottom: 8px;" />
+      <button id="openAuth" style="width: 100%; padding: 6px 12px; background: #007AFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 4px;">
+        🔑 Получить токен (открыть Analytics)
+      </button>
+      <div class="help-text" style="margin-top: 4px;">
+        Нажмите "Получить токен" чтобы открыть приложение аналитики для авторизации. После входа скопируйте токен со страницы /token и вставьте его сюда.
+        <br/><strong>Важно:</strong> Используйте access_token из страницы /token в приложении figma-analytics, НЕ anon_key! 
+        <br/><strong>КРИТИЧНО:</strong> Access token обязателен - без него прототип не может быть создан. Прототипы должны быть привязаны к вашему аккаунту, чтобы вы видели их в аналитике.
+      </div>
+    </div>
+    
+    <div class="settings-buttons">
+      <button id="saveSettings">Сохранить настройки</button>
+      <button id="cancelSettings" style="background: #6c757d;">Отмена</button>
+    </div>
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">
+      <button id="resetSettings" style="background: #dc3545; width: 100%; margin-bottom: 0; font-size: 12px; padding: 6px 10px;">
+        🔄 Сбросить настройки (для тестирования)
+      </button>
+      <div style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;">
+        Удалит сохраненную конфигурацию и покажет форму онбординга
+      </div>
+    </div>
+  </div>
+
+  <!-- Основной контент -->
+  <div id="mainContent" class="main-content">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h3 style="margin: 0;">Экспорт прототипа</h3>
+      <button id="openSettings" class="settings-btn" style="width: auto; padding: 6px 12px; margin: 0;">⚙️</button>
+    </div>
+    <div class="info" id="info"></div>
+    
+    <div class="task-input-container">
+      <label for="taskDescription">Введите суть задания:</label>
+      <textarea 
+        id="taskDescription" 
+        placeholder="Например: Найдите способ добавить товар в корзину и перейти к оформлению заказа"
+        maxlength="250"
+      ></textarea>
+      <div class="help-text">Задание будет показано респонденту перед началом теста (рекомендуется до 250 символов)</div>
+      <div class="char-count" id="charCount">0 / 250</div>
+    </div>
+    
+    <button id="sendToTest">Отправить на тест</button>
+    <div class="status" id="status"></div>
+    <div class="url-container" id="urlContainer">
+      <label style="font-size: 12px; display: block; margin-bottom: 4px;">Ссылка для респондента:</label>
+      <input type="text" class="url-input" id="testUrl" readonly />
+      <button class="url-copy-btn" id="copyUrl">Копировать ссылку</button>
+    </div>
+  </div>
+
+  <script>
+    // Конфигурация Supabase (получаем от code.js через postMessage)
+    // Fallback значения на случай, если конфигурация не получена
+    let SUPABASE_URL = "";
+    let SUPABASE_ANON_KEY = "";
+    let VIEWER_URL = "";
+    let ANALYTICS_URL = "";
+    let ACCESS_TOKEN = "";
+    let configLoaded = false;
+
+    let latestData = null;
+
+    // Проверка валидности конфигурации
+    function isValidConfig() {
+      return SUPABASE_URL && 
+             SUPABASE_ANON_KEY && 
+             VIEWER_URL &&
+             SUPABASE_URL.startsWith("https://") &&
+             VIEWER_URL.startsWith("http");
+    }
+
+    // Показать/скрыть форму настройки
+    function showSettingsForm() {
+      document.getElementById("settingsForm").classList.add("show");
+      document.getElementById("mainContent").classList.remove("show");
+      
+      // Заполнить поля текущими значениями
+      document.getElementById("supabaseUrl").value = SUPABASE_URL || "";
+      document.getElementById("supabaseKey").value = SUPABASE_ANON_KEY || "";
+      document.getElementById("viewerUrl").value = VIEWER_URL || "";
+      document.getElementById("analyticsUrl").value = ANALYTICS_URL || "";
+      document.getElementById("accessToken").value = ACCESS_TOKEN || "";
+    }
+
+    function hideSettingsForm() {
+      document.getElementById("settingsForm").classList.remove("show");
+      if (isValidConfig()) {
+        document.getElementById("mainContent").classList.add("show");
+      }
+    }
+
+    // Сохранение настроек
+    function saveSettings() {
+      const url = document.getElementById("supabaseUrl").value.trim();
+      const key = document.getElementById("supabaseKey").value.trim();
+      const viewer = document.getElementById("viewerUrl").value.trim();
+      const analytics = document.getElementById("analyticsUrl").value.trim();
+      const token = document.getElementById("accessToken").value.trim();
+
+      // Валидация
+      if (!url || !url.startsWith("https://")) {
+        showStatus("⚠️ Укажите корректный Supabase URL (начинается с https://)", "error");
+        return;
+      }
+      if (!key || key.length < 50) {
+        showStatus("⚠️ Укажите корректный Supabase Anon Key", "error");
+        return;
+      }
+      if (!viewer || (!viewer.startsWith("http://") && !viewer.startsWith("https://"))) {
+        showStatus("⚠️ Укажите корректный Viewer URL (начинается с http:// или https://)", "error");
+        return;
+      }
+
+      // Обновляем конфигурацию
+      SUPABASE_URL = url;
+      SUPABASE_ANON_KEY = key;
+      VIEWER_URL = viewer;
+      ANALYTICS_URL = analytics;
+      ACCESS_TOKEN = token;
+
+      // Отправляем в code.js для сохранения
+      parent.postMessage({ 
+        pluginMessage: { 
+          type: "SAVE_CONFIG", 
+          config: { 
+            SUPABASE_URL: url, 
+            SUPABASE_ANON_KEY: key, 
+            VIEWER_URL: viewer,
+            ANALYTICS_URL: analytics,
+            ACCESS_TOKEN: token
+          } 
+        } 
+      }, "*");
+
+      showStatus("✓ Настройки сохранены!", "success");
+      setTimeout(() => {
+        hideSettingsForm();
+      }, 1000);
+    }
+
+    // Инициализация: проверяем конфигурацию при загрузке
+    function initUI() {
+      if (!isValidConfig()) {
+        // Показываем форму настройки, если конфигурация не валидна
+        showSettingsForm();
+      } else {
+        // Показываем основной контент
+        document.getElementById("mainContent").classList.add("show");
+      }
+    }
+
+    function generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      // Получаем конфигурацию от code.js
+      if (msg.type === "CONFIG" && msg.config) {
+        // Если конфигурация пустая (после сброса), используем пустые строки
+        SUPABASE_URL = msg.config.SUPABASE_URL || "";
+        SUPABASE_ANON_KEY = msg.config.SUPABASE_ANON_KEY || "";
+        VIEWER_URL = msg.config.VIEWER_URL || "";
+        ANALYTICS_URL = msg.config.ANALYTICS_URL || "";
+        ACCESS_TOKEN = msg.config.ACCESS_TOKEN || "";
+        configLoaded = true;
+        console.log("Config received from code.js:", { SUPABASE_URL, VIEWER_URL, ANALYTICS_URL });
+        
+        // Инициализируем UI после получения конфигурации
+        initUI();
+      }
+
+      if (msg.type === "EXPORT_JSON") {
+        latestData = msg.data;
+
+        const info = msg.info || {};
+        const infoEl = document.getElementById("info");
+        
+        // БЕЗОПАСНО: Используем textContent и создание элементов вместо innerHTML для предотвращения XSS
+        // Функция для экранирования HTML сущностей
+        function escapeHtml(text) {
+          if (!text) return "";
+          const div = document.createElement("div");
+          div.textContent = text;
+          return div.innerHTML;
+        }
+        
+        // Безопасно создаем HTML, экранируя пользовательские данные
+        const startFrameName = escapeHtml(info.startFrameName || "не определен");
+        const endFrameName = escapeHtml(info.endFrameName || "не определен");
+        const endFrameId = escapeHtml(info.endFrameId || latestData.end);
+        const endFrameMarker = info.endFrameFoundByMarker ? " ✓" : " ⚠️ (автоопределение)";
+        
+        infoEl.innerHTML =
+          "<strong>Стартовый:</strong> " + startFrameName + "<br>" +
+          "<strong>Финальный:</strong> " + endFrameName + endFrameMarker + "<br>" +
+          "<small>ID финального: " + endFrameId + "</small>" +
+          (!info.endFrameFoundByMarker ? "<br><small style='color: #ff9800;'>💡 Добавьте [final] в название финального фрейма</small>" : "");
+      }
+    };
+
+    document.getElementById("sendToTest").onclick = async () => {
+      if (!latestData) {
+        showStatus("JSON пока не получен", "error");
+        return;
+      }
+
+      // Проверяем конфигурацию перед отправкой
+      if (!isValidConfig()) {
+        showStatus("⚠️ Сначала настройте плагин (нажмите ⚙️)", "error");
+        showSettingsForm();
+        return;
+      }
+
+      const statusEl = document.getElementById("status");
+      const sendBtn = document.getElementById("sendToTest");
+      const urlContainer = document.getElementById("urlContainer");
+
+      sendBtn.disabled = true;
+      showStatus("Отправка в Supabase...", "loading");
+
+      try {
+        // Генерируем UUID только для прототипа
+        // Сессия будет создаваться только при открытии ссылки в браузере
+        const prototypeId = generateUUID();
+        
+        // Получаем задание из поля ввода
+        const taskDescription = document.getElementById("taskDescription").value.trim();
+        
+        // Валидация задания
+        if (!taskDescription || taskDescription.length === 0) {
+          showStatus("⚠️ Пожалуйста, введите задание для респондента", "error");
+          sendBtn.disabled = false;
+          return;
+        }
+        
+        if (taskDescription.length > 250) {
+          showStatus("⚠️ Задание не должно превышать 250 символов", "error");
+          sendBtn.disabled = false;
+          return;
+        }
+
+        // Получаем user_id из access token (если он указан)
+        // ВАЖНО: ACCESS_TOKEN должен быть access_token от авторизованного пользователя, НЕ anon_key!
+        let userId = null;
+        let useAccessToken = false;
+        if (ACCESS_TOKEN && ACCESS_TOKEN.trim()) {
+          // Проверяем, что это не anon_key (anon key обычно короче и начинается с eyJ, но не является access_token)
+          // Простая проверка: access_token обычно длиннее и работает с /auth/v1/user
+          try {
+            const userResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+              headers: {
+                "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+                "apikey": SUPABASE_ANON_KEY
+              }
+            });
+            if (userResponse.ok) {
+              const userData = await userResponse.json();
+              userId = userData.id;
+              useAccessToken = true;
+              console.log("Access token valid, user_id:", userId);
+            } else {
+              // Если запрос не успешен, токен невалидный
+              console.warn("Access token invalid or expired. Error:", userResponse.status);
+              showStatus("⚠️ Access token недействителен. Прототип не может быть создан без привязки к аккаунту. Пожалуйста, обновите access token на странице /token", "warning");
+            }
+          } catch (error) {
+            console.error("Error validating access token:", error);
+            // Если ошибка при проверке токена, не создаем прототип
+            showStatus("⚠️ Ошибка проверки access token. Прототип не может быть создан без привязки к аккаунту. Пожалуйста, обновите access token на странице /token", "warning");
+          }
+        }
+
+        // КРИТИЧНО: Прототип должен быть создан с user_id
+        // Если userId отсутствует, не создаем прототип
+        if (!userId) {
+          showStatus("❌ Ошибка: Не удалось получить user_id из access token. Прототип не может быть создан без привязки к аккаунту. Пожалуйста, обновите access token на странице /token", "error");
+          sendBtn.disabled = false;
+          return;
+        }
+        
+        // 1. Создаем прототип в Supabase
+        const prototypeBody = {
+          id: prototypeId,
+          data: latestData,
+          task_description: taskDescription,
+          user_id: userId  // Обязательно добавляем user_id
+        };
+
+        // Используем access_token только если он валидный, иначе используем anon_key
+        const authHeader = useAccessToken && ACCESS_TOKEN 
+          ? `Bearer ${ACCESS_TOKEN.trim()}` 
+          : `Bearer ${SUPABASE_ANON_KEY}`;
+
+        let prototypeResponse = await fetch(`${SUPABASE_URL}/rest/v1/prototypes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": authHeader,
+            "Prefer": "return=representation"
+          },
+          body: JSON.stringify(prototypeBody)
+        });
+
+        if (!prototypeResponse.ok) {
+          const errorText = await prototypeResponse.text();
+          
+          // Специальная обработка ошибки невалидного JWT токена
+          if (prototypeResponse.status === 401 && errorText.includes("JWT")) {
+            console.warn("Invalid access token format, cannot create prototype without user_id");
+            
+            // КРИТИЧНО: Не создаем прототип без user_id
+            // Прототипы должны быть привязаны к пользователю для правильной изоляции данных
+            showStatus("❌ Ошибка: Неверный access token. Прототип не может быть создан без привязки к аккаунту. Пожалуйста, обновите access token на странице /token", "error");
+            sendBtn.disabled = false;
+            return;
+          } else {
+            throw new Error(`Ошибка создания прототипа: ${prototypeResponse.status} - ${errorText}`);
+          }
+        }
+
+        // 2. Генерируем URL для теста с prototypeId
+        // Сессия будет создана автоматически при открытии ссылки
+        // Убираем лишний слэш, если VIEWER_URL заканчивается на /
+        const viewerUrl = VIEWER_URL.endsWith('/') ? VIEWER_URL.slice(0, -1) : VIEWER_URL;
+        const testUrl = `${viewerUrl}/prototype/${prototypeId}`;
+        document.getElementById("testUrl").value = testUrl;
+        urlContainer.classList.add("show");
+        
+        // Прототип всегда создается с user_id (иначе не создается)
+        showStatus("✓ Прототип успешно отправлен с привязкой к аккаунту! Скопируйте ссылку.", "success");
+
+      } catch (error) {
+        console.error("Error:", error);
+        showStatus(`Ошибка: ${error.message}`, "error");
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+
+    document.getElementById("copyUrl").onclick = () => {
+      const urlInput = document.getElementById("testUrl");
+      urlInput.select();
+      document.execCommand("copy");
+      showStatus("✓ Ссылка скопирована в буфер обмена!", "success");
+      setTimeout(() => {
+        const statusEl = document.getElementById("status");
+        statusEl.classList.remove("success");
+        statusEl.classList.remove("show");
+      }, 2000);
+    };
+
+    function showStatus(message, type) {
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = message;
+      statusEl.className = "status " + type;
+    }
+
+    // Обновление счетчика символов
+    const taskDescriptionInput = document.getElementById("taskDescription");
+    const charCountEl = document.getElementById("charCount");
+    
+    taskDescriptionInput.addEventListener("input", () => {
+      const length = taskDescriptionInput.value.length;
+      charCountEl.textContent = `${length} / 250`;
+      if (length > 250) {
+        charCountEl.className = "char-count error";
+      } else if (length > 200) {
+        charCountEl.className = "char-count warning";
+      } else {
+        charCountEl.className = "char-count";
+      }
+    });
+
+    // Сброс настроек
+    function resetSettings() {
+      if (confirm("Вы уверены, что хотите сбросить настройки? Это удалит сохраненную конфигурацию.")) {
+        // Отправляем запрос на удаление конфигурации
+        parent.postMessage({
+          pluginMessage: {
+            type: "RESET_CONFIG"
+          }
+        }, "*");
+
+        // Очищаем локальные переменные
+        SUPABASE_URL = "";
+        SUPABASE_ANON_KEY = "";
+        VIEWER_URL = "";
+        ANALYTICS_URL = "";
+        ACCESS_TOKEN = "";
+
+        // Очищаем поля формы
+        document.getElementById("supabaseUrl").value = "";
+        document.getElementById("supabaseKey").value = "";
+        document.getElementById("viewerUrl").value = "";
+        document.getElementById("analyticsUrl").value = "";
+        document.getElementById("accessToken").value = "";
+
+        showSettingsForm();
+
+        showStatus("✓ Настройки сброшены! Заполните форму заново.", "success");
+      }
+    }
+
+    // Обработчики для формы настройки
+    document.getElementById("saveSettings").onclick = saveSettings;
+    document.getElementById("openAuth").onclick = () => {
+      // Получаем URL из поля ввода (если форма открыта) или из глобальной переменной
+      const analyticsUrlInput = document.getElementById("analyticsUrl");
+      const analyticsUrlValue = analyticsUrlInput ? analyticsUrlInput.value.trim() : "";
+      const analyticsUrlToUse = analyticsUrlValue || ANALYTICS_URL;
+      
+      if (!analyticsUrlToUse) {
+        showStatus("⚠️ Сначала укажите Analytics URL в настройках", "error");
+        return;
+      }
+      
+      // Убираем лишний слэш, если URL заканчивается на /
+      const analyticsUrl = analyticsUrlToUse.endsWith('/') ? analyticsUrlToUse.slice(0, -1) : analyticsUrlToUse;
+      const authUrl = `${analyticsUrl}/token`;
+      
+      console.log("Opening auth URL:", authUrl);
+      
+      // Отправляем сообщение в code.js для открытия браузера
+      try {
+        // Используем window.parent для надежности
+        const target = window.parent || parent;
+        target.postMessage({ 
+          pluginMessage: { 
+            type: "OPEN_AUTH", 
+            url: authUrl 
+          } 
+        }, "*");
+        console.log("Message sent to code.js, URL:", authUrl);
+        showStatus("✓ Открываю Analytics в браузере...", "loading");
+      } catch (error) {
+        console.error("Error sending message to code.js:", error);
+        showStatus("❌ Ошибка при открытии браузера: " + error.message, "error");
+      }
+    };
+    document.getElementById("cancelSettings").onclick = () => {
+      if (isValidConfig()) {
+        hideSettingsForm();
+      } else {
+        showStatus("⚠️ Настройки обязательны для работы плагина", "error");
+      }
+    };
+    document.getElementById("openSettings").onclick = showSettingsForm;
+    document.getElementById("resetSettings").onclick = resetSettings;
+
+    // Инициализация при загрузке (если конфигурация уже есть в fallback)
+    setTimeout(() => {
+      if (!configLoaded) {
+        initUI();
+      }
+    }, 100);
+  </script>
+</body>
+</html>
