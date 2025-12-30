@@ -45,6 +45,9 @@ Thumbs.db
 # Cursor/IDE
 .cursor/
 
+# Figma plugin (published in Community, not in repo)
+figma-plugin/
+
 # Temporary files
 *.tmp
 *.temp

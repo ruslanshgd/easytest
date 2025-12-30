@@ -64,7 +64,7 @@ npm install
 ```
 
 **For figma-plugin:**
-Nothing to install — this is a ready plugin.
+The plugin is installed via Figma Community, see details in [Part 3](#part-3-installing-plugin-in-figma).
 
 ### Step 3: Set Up Supabase
 
@@ -171,20 +171,12 @@ Opens at http://localhost:5174 (or another port, check terminal)
 
 ## Part 3: Installing Plugin in Figma
 
-### Option 1: Local Development
+The plugin is published in Figma Community and can be installed automatically:
 
-1. Open Figma Desktop (not web version)
-2. Create or open a file
-3. Menu → Plugins → Development → Import plugin from manifest...
-4. Select `figma-plugin/manifest.json` file
-5. Plugin appears in the list
-
-### Option 2: Publish to Community
-
-1. Go to https://www.figma.com/community
-2. Create developer account
-3. Upload plugin via Developer Dashboard
-4. After moderation, plugin will be available to everyone
+1. Open Figma Desktop or web version
+2. Go to: [EasyTest in Figma Community](https://www.figma.com/community/plugin/1587860401738140185)
+3. Click "Install" button
+4. The plugin will appear in the menu: **Plugins → ИзиТест**
 
 ### First Plugin Setup
 
