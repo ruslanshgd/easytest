@@ -190,6 +190,14 @@
     .task-input-container .char-count.error {
       color: #f44336;
     }
+    .mode-btn.active {
+      background: #007AFF !important;
+      color: white !important;
+    }
+    .mode-btn:not(.active) {
+      background: #e0e0e0 !important;
+      color: #333 !important;
+    }
   </style>
 </head>
 <body>
@@ -227,6 +235,14 @@
         <br/><strong>Важно:</strong> Используйте access_token из страницы /token в приложении figma-analytics, НЕ anon_key! 
         <br/><strong>КРИТИЧНО:</strong> Access token обязателен - без него прототип не может быть создан. Прототипы должны быть привязаны к вашему аккаунту, чтобы вы видели их в аналитике.
       </div>
+      
+      <label for="figmaToken" style="font-weight: 500; margin-top: 16px; display: block;">Figma Personal Access Token (для REST API):</label>
+      <input type="text" id="figmaToken" placeholder="figd_..." style="width: 100%; margin-top: 4px; margin-bottom: 8px;" />
+      <div class="help-text" style="margin-top: 4px;">
+        Требуется для импорта прототипов по Share ссылке через REST API.
+        <br/>Получить можно в <a href="https://www.figma.com/settings" target="_blank" style="color: #007AFF;">Figma Settings → Personal Access Tokens</a>
+        <br/><strong>Опционально:</strong> Нужен только если используете режим "По Share ссылке"
+      </div>
     </div>
     
     <div class="settings-buttons">
@@ -249,6 +265,39 @@
       <h3 style="margin: 0;">Экспорт прототипа</h3>
       <button id="openSettings" class="settings-btn" style="width: auto; padding: 6px 12px; margin: 0;">⚙️</button>
     </div>
+    
+    <!-- Поле для Share ссылки -->
+    <div id="shareLinkContainer" style="display: block; margin-bottom: 16px; padding: 12px; background: #f9f9f9; border-radius: 4px;">
+      <label for="shareLink" style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500;">Figma Share ссылка:</label>
+      <input 
+        type="text" 
+        id="shareLink" 
+        placeholder="https://www.figma.com/design/..." 
+        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; box-sizing: border-box; margin-bottom: 8px;"
+      />
+      <div class="help-text" style="font-size: 11px; color: #666; margin-bottom: 8px;">
+        1. Откройте файл в Figma<br/>
+        2. Нажмите Share в правом верхнем углу<br/>
+        3. Скопируйте ссылку (design/proto/file)<br/>
+        4. Вставьте ссылку сюда<br/>
+        <strong>Важно:</strong> Файл должен быть открыт в Figma для экспорта изображений
+      </div>
+      <button id="importFromLink" style="width: 100%; padding: 8px; background: #34C759; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 8px;">
+        🔍 Импортировать прототип
+      </button>
+      <div class="status" id="importStatus" style="margin-top: 0; margin-bottom: 8px;"></div>
+      <div id="flowsContainer" style="display: none; margin-top: 12px;">
+        <label style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500;">Выберите flow (starting point):</label>
+        <div id="flowsRadioContainer" style="display: none; margin-bottom: 8px;"></div>
+        <select id="flowsSelect" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; box-sizing: border-box; margin-bottom: 8px; display: none;">
+          <option value="">Загрузка flows...</option>
+        </select>
+        <button id="useSelectedFlow" style="width: 100%; padding: 8px; background: #007AFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          ✅ Использовать выбранный flow
+        </button>
+      </div>
+    </div>
+    
     <div class="info" id="info"></div>
     
     <div class="task-input-container">
@@ -280,8 +329,14 @@
     let ANALYTICS_URL = "";
     let ACCESS_TOKEN = "";
     let configLoaded = false;
+    
+    // Для REST API подхода
+    let FIGMA_ACCESS_TOKEN = ""; // Personal Access Token для Figma REST API
+    let currentFileData = null; // Данные из REST API
+    let availableFlows = []; // Найденные flows (starting points)
 
     let latestData = null;
+    let currentSelectedFlowId = null; // Хранит ID выбранного flow
 
     // Проверка валидности конфигурации
     function isValidConfig() {
@@ -303,6 +358,7 @@
       document.getElementById("viewerUrl").value = VIEWER_URL || "";
       document.getElementById("analyticsUrl").value = ANALYTICS_URL || "";
       document.getElementById("accessToken").value = ACCESS_TOKEN || "";
+      document.getElementById("figmaToken").value = FIGMA_ACCESS_TOKEN || "";
     }
 
     function hideSettingsForm() {
@@ -319,6 +375,7 @@
       const viewer = document.getElementById("viewerUrl").value.trim();
       const analytics = document.getElementById("analyticsUrl").value.trim();
       const token = document.getElementById("accessToken").value.trim();
+      const figmaToken = document.getElementById("figmaToken").value.trim();
 
       // Валидация
       if (!url || !url.startsWith("https://")) {
@@ -340,19 +397,21 @@
       VIEWER_URL = viewer;
       ANALYTICS_URL = analytics;
       ACCESS_TOKEN = token;
+      FIGMA_ACCESS_TOKEN = figmaToken; // Сохраняем Figma Personal Access Token
 
       // Отправляем в code.js для сохранения
-      parent.postMessage({ 
-        pluginMessage: { 
-          type: "SAVE_CONFIG", 
-          config: { 
-            SUPABASE_URL: url, 
-            SUPABASE_ANON_KEY: key, 
+      parent.postMessage({
+        pluginMessage: {
+          type: "SAVE_CONFIG",
+          config: {
+            SUPABASE_URL: url,
+            SUPABASE_ANON_KEY: key,
             VIEWER_URL: viewer,
             ANALYTICS_URL: analytics,
-            ACCESS_TOKEN: token
-          } 
-        } 
+            ACCESS_TOKEN: token,
+            FIGMA_ACCESS_TOKEN: figmaToken
+          }
+        }
       }, "*");
 
       showStatus("✓ Настройки сохранены!", "success");
@@ -392,6 +451,7 @@
         VIEWER_URL = msg.config.VIEWER_URL || "";
         ANALYTICS_URL = msg.config.ANALYTICS_URL || "";
         ACCESS_TOKEN = msg.config.ACCESS_TOKEN || "";
+        FIGMA_ACCESS_TOKEN = msg.config.FIGMA_ACCESS_TOKEN || "";
         configLoaded = true;
         console.log("Config received from code.js:", { SUPABASE_URL, VIEWER_URL, ANALYTICS_URL });
         
@@ -425,7 +485,13 @@
           "<strong>Финальный:</strong> " + endFrameName + endFrameMarker + "<br>" +
           "<small>ID финального: " + endFrameId + "</small>" +
           (!info.endFrameFoundByMarker ? "<br><small style='color: #ff9800;'>💡 Добавьте [final] в название финального фрейма</small>" : "");
+        
+        // Показываем уведомление
+        showImportStatus("✓ Прототип сгенерирован из Share ссылки! Теперь можно отправить на тест.", "success");
       }
+      
+      // Обработка ответов от code.js для получения данных файла (используется внутри getFileDataFromREST)
+      // Эти сообщения обрабатываются через Promise в getFileDataFromREST, но можно добавить дополнительную обработку
     };
 
     document.getElementById("sendToTest").onclick = async () => {
@@ -509,9 +575,10 @@
         }
         
         // 1. Создаем прототип в Supabase
+        // ВАЖНО: flowId сохраняется в JSON данных прототипа (latestData.flowId), а не в отдельной колонке БД
         const prototypeBody = {
           id: prototypeId,
-          data: latestData,
+          data: latestData, // latestData уже содержит flowId в JSON (добавлено в code.js)
           task_description: taskDescription,
           user_id: userId  // Обязательно добавляем user_id
         };
@@ -585,6 +652,13 @@
       statusEl.textContent = message;
       statusEl.className = "status " + type;
     }
+    
+    // Функция для показа статуса импорта (показывается под кнопкой "Импортировать прототип")
+    function showImportStatus(message, type) {
+      const importStatusEl = document.getElementById("importStatus");
+      importStatusEl.textContent = message;
+      importStatusEl.className = "status " + type;
+    }
 
     // Обновление счетчика символов
     const taskDescriptionInput = document.getElementById("taskDescription");
@@ -618,6 +692,7 @@
         VIEWER_URL = "";
         ANALYTICS_URL = "";
         ACCESS_TOKEN = "";
+        FIGMA_ACCESS_TOKEN = "";
 
         // Очищаем поля формы
         document.getElementById("supabaseUrl").value = "";
@@ -625,6 +700,7 @@
         document.getElementById("viewerUrl").value = "";
         document.getElementById("analyticsUrl").value = "";
         document.getElementById("accessToken").value = "";
+        document.getElementById("figmaToken").value = "";
 
         showSettingsForm();
 
@@ -677,6 +753,667 @@
     };
     document.getElementById("openSettings").onclick = showSettingsForm;
     document.getElementById("resetSettings").onclick = resetSettings;
+
+    // Парсинг Figma Share ссылки
+    function parseFigmaShareLink(url) {
+      try {
+        // Поддерживаем форматы:
+        // 1. https://www.figma.com/design/{file_key}/{file_name}?node-id={node-id}&t=...
+        // 2. https://www.figma.com/proto/{file_key}/{file_name}?node-id={node-id}&t=...
+        // 3. https://www.figma.com/file/{file_key}/{file_name}?node-id={node-id}&t=...
+        const urlObj = new URL(url);
+        const pathParts = urlObj.pathname.split('/').filter(p => p); // Убираем пустые части
+        
+        // Ищем design, proto или file в пути
+        let fileKeyIndex = -1;
+        const possibleTypes = ['design', 'proto', 'file'];
+        
+        for (let i = 0; i < pathParts.length; i++) {
+          if (possibleTypes.includes(pathParts[i].toLowerCase()) && i + 1 < pathParts.length) {
+            fileKeyIndex = i + 1;
+            break;
+          }
+        }
+        
+        if (fileKeyIndex === -1 || fileKeyIndex >= pathParts.length) {
+          console.warn("Could not find file key in URL:", url);
+          return null;
+        }
+        
+        const fileKey = pathParts[fileKeyIndex];
+        const nodeId = urlObj.searchParams.get('node-id');
+        
+        // Декодируем node-id если он закодирован (например, "0%3A1" -> "0:1")
+        const decodedNodeId = nodeId ? decodeURIComponent(nodeId) : null;
+        
+        console.log("Parsed Figma link:", { fileKey, nodeId: decodedNodeId, originalUrl: url });
+        
+        return { fileKey, nodeId: decodedNodeId };
+      } catch (error) {
+        console.error("Error parsing Figma share link:", error);
+        return null;
+      }
+    }
+    
+    // Получение данных файла через REST API (через code.js для обхода CSP)
+    function getFileDataFromREST(fileKey, figmaToken) {
+      return new Promise((resolve, reject) => {
+        // Создаем обработчик для ответа
+        const messageHandler = (event) => {
+          const msg = event.data.pluginMessage;
+          if (msg.type === "FIGMA_FILE_FETCHED") {
+            window.removeEventListener("message", messageHandler);
+            resolve(msg.fileData);
+          } else if (msg.type === "FIGMA_FILE_FETCH_ERROR") {
+            window.removeEventListener("message", messageHandler);
+            reject(new Error(msg.error));
+          }
+        };
+        
+        window.addEventListener("message", messageHandler);
+        
+        // Отправляем запрос в code.js
+        parent.postMessage({
+          pluginMessage: {
+            type: "FETCH_FIGMA_FILE",
+            fileKey: fileKey,
+            figmaToken: figmaToken
+          }
+        }, "*");
+        
+        // Таймаут на случай, если ответ не придет
+        setTimeout(() => {
+          window.removeEventListener("message", messageHandler);
+          reject(new Error("Timeout: не удалось получить данные файла"));
+        }, 30000); // 30 секунд
+      });
+    }
+    
+    // Поиск starting points (flows) в данных файла
+    // ВАЖНО: Всегда ищем все flows с prototypeStartingPoint === true (основной критерий для flows)
+    // Если есть node-id в URL, добавляем его в список (но не дублируем, если он уже есть как prototypeStartingPoint)
+    function findStartingPoints(fileData, nodeIdFromUrl = null) {
+      const startingPoints = [];
+      let totalFrames = 0;
+      let framesWithReactions = 0;
+      let urlFlowId = null; // ID flow из URL (будет использоваться для предвыбора)
+      
+      // Вспомогательная функция для поиска узла по ID
+      function findNodeById(node, targetId) {
+        if (!node) return null;
+        if (node.id === targetId) return node;
+        if (node.children) {
+          for (const child of node.children) {
+            const found = findNodeById(child, targetId);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+      
+      // Если есть nodeId из URL, запоминаем его ID (но не добавляем сразу)
+      // Будем добавлять только если его нет в списке flows с prototypeStartingPoint
+      if (nodeIdFromUrl) {
+        // Преобразуем формат "143-552" в "143:552" (REST API использует двоеточия)
+        const normalizedNodeId = nodeIdFromUrl.replace(/-/g, ':');
+        urlFlowId = normalizedNodeId;
+        console.log("URL nodeId detected:", normalizedNodeId, "(will be added if not found in prototypeStartingPoint flows)");
+      }
+      
+      // ВАЖНО: Сначала обходим документ и ищем ВСЕ flows с prototypeStartingPoint === true
+      // Это основной критерий для flows в Figma (согласно REST API documentation)
+      function traverseNode(node, path = []) {
+        if (!node) return;
+        
+        // Считаем фреймы
+        if (node.type === "FRAME") {
+          totalFrames++;
+          
+          // Проверяем reactions на самом фрейме
+          const hasReactions = node.reactions && Array.isArray(node.reactions) && node.reactions.length > 0;
+          
+          // Также проверяем, есть ли reactions на дочерних элементах
+          let hasReactionsInChildren = false;
+          if (node.children) {
+            for (const child of node.children) {
+              if (child.reactions && Array.isArray(child.reactions) && child.reactions.length > 0) {
+                hasReactionsInChildren = true;
+                break;
+              }
+            }
+          }
+          
+          // ВАЖНО: Основной критерий для flow - prototypeStartingPoint === true
+          // Согласно документации REST API, flows определяются через prototypeStartingPoint
+          const isStartingPoint = node.prototypeStartingPoint === true;
+          
+          // Добавляем только flows с prototypeStartingPoint === true (явно помеченные как starting points)
+          // Это соответствует логике Figma, где flows создаются через прототипирование
+          if (isStartingPoint) {
+            // Проверяем, не является ли это дубликатом
+            const existing = startingPoints.find(sp => sp.id === node.id);
+            if (!existing) {
+              const isFromUrl = urlFlowId && node.id === urlFlowId;
+              startingPoints.push({
+                id: node.id,
+                name: node.name || `Flow ${startingPoints.length + 1}`,
+                path: [...path, node.name || node.id],
+                isExplicit: true, // Явно помечен как starting point
+                fromUrl: isFromUrl, // Отмечен, если это flow из URL
+                hasReactions: hasReactions,
+                hasReactionsInChildren: hasReactionsInChildren
+              });
+              console.log("Found prototypeStartingPoint flow:", node.name, node.id, isFromUrl ? "(from URL)" : "");
+            }
+          }
+          
+          // Также считаем frames с reactions для статистики
+          if (hasReactions || hasReactionsInChildren) {
+            framesWithReactions++;
+          }
+        }
+        
+        // Рекурсивно обходим дочерние узлы
+        if (node.children) {
+          node.children.forEach(child => {
+            traverseNode(child, [...path, node.name || node.id]);
+          });
+        }
+      }
+      
+      // ВАЖНО: Сначала проверяем fileData.flowStartingPoints
+      // Согласно REST API документации, flows хранятся в массиве fileData.flowStartingPoints
+      // Каждый flow имеет nodeId и name
+      if (fileData.flowStartingPoints && Array.isArray(fileData.flowStartingPoints)) {
+        console.log("Found flowStartingPoints in fileData:", fileData.flowStartingPoints.length, "flows");
+        
+        // Вспомогательная функция для поиска фрейма по ID
+        function findFrameByIdInDocument(node, targetId) {
+          if (!node) return null;
+          if (node.id === targetId && node.type === "FRAME") return node;
+          if (node.children) {
+            for (const child of node.children) {
+              const found = findFrameByIdInDocument(child, targetId);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+        
+        // Получаем информацию о странице для каждого flow
+        function getFramePath(node, targetId, path = []) {
+          if (!node) return null;
+          if (node.id === targetId && node.type === "FRAME") {
+            return [...path, node.name || node.id];
+          }
+          if (node.children) {
+            for (const child of node.children) {
+              const result = getFramePath(child, targetId, [...path, node.name || node.id]);
+              if (result) return result;
+            }
+          }
+          return null;
+        }
+        
+        fileData.flowStartingPoints.forEach(flow => {
+          console.log("Processing flow from flowStartingPoints:", flow.name, flow.nodeId);
+          
+          let foundFrame = null;
+          let framePath = null;
+          
+          // Ищем фрейм в документе
+          if (fileData.document && fileData.document.children) {
+            for (const page of fileData.document.children) {
+              foundFrame = findFrameByIdInDocument(page, flow.nodeId);
+              if (foundFrame) {
+                framePath = getFramePath(page, flow.nodeId, [page.name || "Page"]);
+                break;
+              }
+            }
+          }
+          
+          if (foundFrame) {
+            const existing = startingPoints.find(sp => sp.id === flow.nodeId);
+            if (!existing) {
+              const isFromUrl = urlFlowId && flow.nodeId === urlFlowId;
+              startingPoints.push({
+                id: flow.nodeId,
+                name: flow.name || foundFrame.name || `Flow ${startingPoints.length + 1}`,
+                path: framePath || [foundFrame.name || flow.nodeId],
+                isExplicit: true, // Из flowStartingPoints - явно помечен
+                fromUrl: isFromUrl,
+                hasReactions: false,
+                hasReactionsInChildren: false
+              });
+              console.log("✓ Added flow from fileData.flowStartingPoints:", flow.name, flow.nodeId, isFromUrl ? "(from URL)" : "");
+            } else {
+              // Обновляем существующий flow
+              existing.name = flow.name || existing.name;
+              existing.isExplicit = true;
+              if (urlFlowId && flow.nodeId === urlFlowId) {
+                existing.fromUrl = true;
+              }
+              console.log("✓ Updated existing flow from fileData.flowStartingPoints:", flow.name, flow.nodeId);
+            }
+          } else {
+            console.warn("Flow frame not found in document:", flow.name, flow.nodeId);
+          }
+        });
+      } else {
+        console.log("No flowStartingPoints found in fileData, searching by prototypeStartingPoint property on frames");
+      }
+      
+      // Также обходим документ и ищем все flows с prototypeStartingPoint === true
+      // (на случай, если flowStartingPoints не заполнен, но flows есть)
+      if (fileData.document && fileData.document.children) {
+        fileData.document.children.forEach(page => {
+          traverseNode(page, [page.name || "Page"]);
+        });
+      }
+      
+      // Если есть node-id в URL, но он не найден в flows с prototypeStartingPoint, добавляем его
+      if (urlFlowId) {
+        const urlFlowExists = startingPoints.find(sp => sp.id === urlFlowId);
+        if (!urlFlowExists) {
+          console.log("URL nodeId not found in prototypeStartingPoint flows, searching for it...");
+          
+          // Ищем узел из URL в документе
+          if (fileData.document && fileData.document.children) {
+            let foundNode = null;
+            let foundPage = null;
+            
+            for (const page of fileData.document.children) {
+              if (page.id === urlFlowId) {
+                // Если nodeId указывает на страницу, ищем первый фрейм на этой странице
+                if (page.children) {
+                  for (const child of page.children) {
+                    if (child.type === "FRAME") {
+                      foundNode = child;
+                      foundPage = page;
+                      console.log("Found first FRAME on page from URL:", child.name, child.id);
+                      break;
+                    }
+                  }
+                }
+                break;
+              }
+              
+              foundNode = findNodeById(page, urlFlowId);
+              if (foundNode) {
+                foundPage = page;
+                
+                if (foundNode.type === "FRAME") {
+                  break;
+                } else {
+                  // Если это не фрейм, ищем первый фрейм-потомок
+                  function findFirstFrame(node) {
+                    if (node.type === "FRAME") return node;
+                    if (node.children) {
+                      for (const child of node.children) {
+                        const frame = findFirstFrame(child);
+                        if (frame) return frame;
+                      }
+                    }
+                    return null;
+                  }
+                  const firstFrame = findFirstFrame(foundNode);
+                  if (firstFrame) {
+                    foundNode = firstFrame;
+                    break;
+                  } else {
+                    foundNode = null;
+                  }
+                }
+              }
+            }
+            
+            if (foundNode && foundNode.type === "FRAME") {
+              startingPoints.push({
+                id: foundNode.id,
+                name: foundNode.name || "Flow from URL",
+                path: [foundPage.name || "Page", foundNode.name || foundNode.id],
+                isExplicit: false, // Не явно помечен как prototypeStartingPoint
+                fromUrl: true, // Но добавлен из URL
+                hasReactions: false,
+                hasReactionsInChildren: false
+              });
+              console.log("Added flow from URL (not in prototypeStartingPoint):", foundNode.name, foundNode.id);
+            } else {
+              console.warn("Node from URL not found or is not a FRAME:", urlFlowId);
+            }
+          }
+        } else {
+          // Отмечаем существующий flow как fromUrl
+          const existingFlow = startingPoints.find(sp => sp.id === urlFlowId);
+          if (existingFlow) {
+            existingFlow.fromUrl = true;
+            console.log("Marked existing flow as fromUrl:", existingFlow.name, existingFlow.id);
+          }
+        }
+      }
+      
+      console.log("findStartingPoints: Total frames:", totalFrames, "Frames with reactions:", framesWithReactions, "Found starting points:", startingPoints.length);
+      
+      // Сортируем: сначала flow из URL, потом остальные по имени
+      startingPoints.sort((a, b) => {
+        // Приоритет: fromUrl > остальные по имени
+        if (a.fromUrl && !b.fromUrl) return -1;
+        if (!a.fromUrl && b.fromUrl) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      
+      console.log("Found starting points:", startingPoints.length, startingPoints);
+      
+      return startingPoints;
+    }
+    
+    // Импорт прототипа по Share ссылке
+    async function importFromShareLink() {
+      const shareLink = document.getElementById("shareLink").value.trim();
+      
+      if (!shareLink) {
+        showImportStatus("⚠️ Введите Share ссылку", "error");
+        return;
+      }
+      
+      // Парсим ссылку
+      const parsed = parseFigmaShareLink(shareLink);
+      if (!parsed || !parsed.fileKey) {
+        showImportStatus("❌ Неверный формат Share ссылки. Поддерживаются форматы:\n- https://www.figma.com/design/...\n- https://www.figma.com/proto/...\n- https://www.figma.com/file/...", "error");
+        return;
+      }
+      
+      // Валидация fileKey (должен быть не пустым и содержать только допустимые символы)
+      if (!parsed.fileKey || parsed.fileKey.length < 10) {
+        showImportStatus("❌ Неверный формат file key в ссылке", "error");
+        return;
+      }
+      
+      // Проверяем наличие Figma Personal Access Token
+      if (!FIGMA_ACCESS_TOKEN || FIGMA_ACCESS_TOKEN.trim().length === 0) {
+        showImportStatus("⚠️ Требуется Figma Personal Access Token. Добавьте его в настройках (⚙️).", "error");
+        showSettingsForm();
+        // Фокусируемся на поле для токена
+        setTimeout(() => {
+          const tokenInput = document.getElementById("figmaToken");
+          if (tokenInput) {
+            tokenInput.focus();
+            tokenInput.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }, 100);
+        return;
+      }
+      
+      // Валидация формата токена (должен начинаться с figd_)
+      if (!FIGMA_ACCESS_TOKEN.startsWith("figd_")) {
+        showImportStatus("⚠️ Неверный формат Figma Personal Access Token. Токен должен начинаться с 'figd_'.", "error");
+        showSettingsForm();
+        return;
+      }
+      
+      showImportStatus("Загрузка данных из Figma REST API...", "loading");
+      
+      try {
+        // СНАЧАЛА получаем starting points через Plugin API (как делает конкурент)
+        console.log("Requesting starting points via Plugin API...");
+        const pluginStartingPoints = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Timeout waiting for starting points"));
+          }, 5000);
+          
+          const messageHandler = (event) => {
+            if (event.data.pluginMessage) {
+              const msg = event.data.pluginMessage;
+              if (msg.type === "STARTING_POINTS") {
+                clearTimeout(timeout);
+                window.removeEventListener("message", messageHandler);
+                resolve(msg.data);
+              } else if (msg.type === "STARTING_POINTS_ERROR") {
+                clearTimeout(timeout);
+                window.removeEventListener("message", messageHandler);
+                reject(new Error(msg.error));
+              }
+            }
+          };
+          
+          window.addEventListener("message", messageHandler);
+          parent.postMessage({ pluginMessage: { type: "GET_STARTING_POINTS" } }, "*");
+        });
+        
+        console.log("Received starting points from Plugin API:", pluginStartingPoints);
+        
+        // Преобразуем flows из Plugin API в наш формат
+        let flows = pluginStartingPoints.map(flow => {
+          const isFromUrl = parsed.nodeId && flow.nodeId.replace(/:/g, '-') === parsed.nodeId;
+          return {
+            id: flow.nodeId,
+            name: flow.name,
+            path: [flow.name], // Упрощенный path, так как Plugin API не дает полный путь
+            isExplicit: true,
+            fromUrl: isFromUrl,
+            hasReactions: false,
+            hasReactionsInChildren: false
+          };
+        });
+        
+        // FALLBACK: Если flows не найдены через Plugin API, но есть nodeId в URL, добавляем его
+        if (flows.length === 0 && parsed.nodeId) {
+          console.log("No flows found via Plugin API, trying to add flow from URL nodeId:", parsed.nodeId);
+          
+          // Получаем данные файла через REST API для поиска фрейма по nodeId
+          const fileData = await getFileDataFromREST(parsed.fileKey, FIGMA_ACCESS_TOKEN);
+          currentFileData = fileData;
+          
+          // Нормализуем nodeId из URL (формат "143-552" -> "143:552")
+          const normalizedNodeId = parsed.nodeId.replace(/-/g, ':');
+          
+          // Вспомогательная функция для поиска узла по ID в REST API данных
+          function findNodeById(node, targetId) {
+            if (!node) return null;
+            if (node.id === targetId) return node;
+            if (node.children) {
+              for (const child of node.children) {
+                const found = findNodeById(child, targetId);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          
+          // Ищем фрейм по nodeId в документе
+          let foundNode = null;
+          let foundPage = null;
+          
+          if (fileData.document && fileData.document.children) {
+            for (const page of fileData.document.children) {
+              if (page.id === normalizedNodeId) {
+                // Если nodeId указывает на страницу, ищем первый фрейм на этой странице
+                if (page.children) {
+                  for (const child of page.children) {
+                    if (child.type === "FRAME") {
+                      foundNode = child;
+                      foundPage = page;
+                      break;
+                    }
+                  }
+                }
+                break;
+              }
+              
+              foundNode = findNodeById(page, normalizedNodeId);
+              if (foundNode) {
+                foundPage = page;
+                
+                if (foundNode.type === "FRAME") {
+                  break;
+                } else {
+                  // Если это не фрейм, ищем первый фрейм-потомок
+                  function findFirstFrame(node) {
+                    if (node.type === "FRAME") return node;
+                    if (node.children) {
+                      for (const child of node.children) {
+                        const frame = findFirstFrame(child);
+                        if (frame) return frame;
+                      }
+                    }
+                    return null;
+                  }
+                  const firstFrame = findFirstFrame(foundNode);
+                  if (firstFrame) {
+                    foundNode = firstFrame;
+                    break;
+                  } else {
+                    foundNode = null;
+                  }
+                }
+              }
+            }
+          }
+          
+          if (foundNode && foundNode.type === "FRAME") {
+            flows = [{
+              id: foundNode.id,
+              name: foundNode.name || "Flow from URL",
+              path: [foundPage.name || "Page", foundNode.name || foundNode.id],
+              isExplicit: false, // Не явно помечен как prototypeStartingPoint
+              fromUrl: true, // Но добавлен из URL
+              hasReactions: false,
+              hasReactionsInChildren: false
+            }];
+            console.log("✓ Added flow from URL as fallback:", foundNode.name, foundNode.id);
+          } else {
+            console.warn("Could not find frame from URL nodeId:", normalizedNodeId);
+          }
+        } else {
+          // Если flows найдены, все равно получаем данные файла для генерации прототипа
+          const fileData = await getFileDataFromREST(parsed.fileKey, FIGMA_ACCESS_TOKEN);
+          currentFileData = fileData;
+        }
+        
+        availableFlows = flows;
+        
+        if (flows.length === 0) {
+          showImportStatus("⚠️ Starting points не найдены в файле.", "error");
+          return;
+        }
+        
+        // Показываем выбор flows
+        const flowsSelect = document.getElementById("flowsSelect");
+        const flowsRadioContainer = document.getElementById("flowsRadioContainer");
+        const useSelectedFlowBtn = document.getElementById("useSelectedFlow");
+        
+        // Очищаем контейнеры
+        flowsSelect.innerHTML = '<option value="">Выберите flow...</option>';
+        flowsRadioContainer.innerHTML = "";
+        
+        // ВАЖНО: Всегда показываем выбор flows через выпадающий список (select)
+        flowsSelect.style.display = "block";
+        flowsRadioContainer.style.display = "none";
+        
+        // Находим flow из URL для предвыбора
+        const urlFlowIndex = flows.findIndex(f => f.fromUrl);
+        let defaultFlowId = null;
+        
+        flows.forEach((flow, index) => {
+          const option = document.createElement("option");
+          option.value = flow.id;
+          let marker = "";
+          if (flow.fromUrl) {
+            marker = "🔗 "; // Маркер для starting point из URL
+            defaultFlowId = flow.id;
+          } else if (flow.isExplicit) {
+            marker = "⭐ "; // Маркер для явно помеченного starting point
+          }
+          option.textContent = `${marker}${flow.name} (${flow.path.join(' → ')})`;
+          flowsSelect.appendChild(option);
+        });
+        
+        // Предвыбираем flow из URL, если он есть, иначе первый
+        if (defaultFlowId) {
+          flowsSelect.value = defaultFlowId;
+        } else if (flows.length > 0) {
+          flowsSelect.value = flows[0].id;
+        }
+        
+        document.getElementById("flowsContainer").style.display = "block";
+        const explicitCount = flows.filter(f => f.isExplicit || f.fromUrl).length;
+        const fromUrlCount = flows.filter(f => f.fromUrl).length;
+        let statusMsg = `✓ Найдено ${flows.length} flow(s)`;
+        if (fromUrlCount > 0) {
+          statusMsg += `, ${fromUrlCount} из URL`;
+        }
+        if (explicitCount > 0 && fromUrlCount === 0) {
+          statusMsg += `, ${explicitCount} явно помеченных`;
+        }
+        statusMsg += `. Выберите нужный.`;
+        showImportStatus(statusMsg, "success");
+        
+      } catch (error) {
+        console.error("Error importing from share link:", error);
+        
+        // Более детальная обработка ошибок
+        let errorMessage = "Ошибка при импорте";
+        if (error.message.includes("401") || error.message.includes("403")) {
+          errorMessage = "❌ Ошибка авторизации. Проверьте правильность Figma Personal Access Token в настройках.";
+        } else if (error.message.includes("404")) {
+          errorMessage = "❌ Файл не найден. Проверьте правильность Share ссылки и доступ к файлу.";
+        } else if (error.message.includes("429")) {
+          errorMessage = "❌ Превышен лимит запросов к Figma API. Подождите немного и попробуйте снова.";
+        } else {
+          errorMessage = `❌ Ошибка: ${error.message}`;
+        }
+        
+        showImportStatus(errorMessage, "error");
+      }
+    }
+    
+    // Использование выбранного flow
+    async function useSelectedFlow(flowId = null) {
+      let selectedFlowId = flowId;
+      
+      // Если flowId не передан, получаем из select
+      if (!selectedFlowId) {
+        const flowsSelect = document.getElementById("flowsSelect");
+        if (flowsSelect) {
+          selectedFlowId = flowsSelect.value;
+        }
+      }
+      
+      if (!selectedFlowId) {
+        showImportStatus("⚠️ Выберите flow", "error");
+        return;
+      }
+      
+      if (!currentFileData) {
+        showImportStatus("❌ Данные файла не загружены", "error");
+        return;
+      }
+      
+      showImportStatus("Генерация прототипа из выбранного flow...", "loading");
+      
+      // Сохраняем выбранный flow ID
+      currentSelectedFlowId = selectedFlowId;
+      
+      // Отправляем сообщение в code.js для генерации прототипа из REST API данных
+      parent.postMessage({
+        pluginMessage: {
+          type: "GENERATE_FROM_REST_API",
+          fileData: currentFileData,
+          selectedFlowId: selectedFlowId
+        }
+      }, "*");
+    }
+    
+    // Обработчики
+    document.getElementById("importFromLink").addEventListener("click", function(e) {
+      e.preventDefault();
+      importFromShareLink();
+    });
+    
+    document.getElementById("useSelectedFlow").addEventListener("click", function(e) {
+      e.preventDefault();
+      useSelectedFlow();
+    });
 
     // Инициализация при загрузке (если конфигурация уже есть в fallback)
     setTimeout(() => {

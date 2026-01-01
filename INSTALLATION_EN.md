@@ -186,7 +186,35 @@ The plugin is published in Figma Community and can be installed automatically:
    - **Supabase Anon Key** — anon key from Supabase
    - **Viewer URL** — for local development: `http://localhost:5173`
    - **Analytics URL** — for local development: `http://localhost:5174`
+   - **Figma Personal Access Token** — token for Figma REST API access (get it in Figma Settings → Account → Personal Access Tokens)
 3. Click "Save Settings"
+
+### Working with Prototypes and Flows
+
+**Creating Prototype in Figma:**
+1. Create a prototype with flows (starting points) in Figma
+2. For each flow, define a final screen — add `[final]` to the frame name
+3. Make sure each flow has its own final screen (they can differ)
+
+**Importing Prototype in Plugin:**
+1. In Figma, copy Share link (Share → Copy link)
+2. Run ИзиТест plugin
+3. Click "Импортировать прототип" (Import prototype)
+4. Paste Share link
+5. If the file has multiple flows, select the needed one from the dropdown
+6. Click "Использовать выбранный flow" (Use selected flow)
+7. Check that the plugin correctly identified start and final screens
+
+**Sending for Testing:**
+1. Enter task description for respondents (up to 250 characters)
+2. Click "Отправить на тест" (Send for testing)
+3. Copy the link for respondents
+4. Respondents will open the link in browser and complete the test
+
+**Important:**
+- Each flow has its own screens and final screen
+- Analytics shows only screens from the selected flow
+- When creating multiple prototypes from the same file with different flows, each will have its own screens in analytics
 
 ---
 

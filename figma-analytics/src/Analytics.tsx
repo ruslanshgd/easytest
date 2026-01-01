@@ -31,6 +31,15 @@ interface SessionEvent {
   timestamp: string; // В БД поле называется timestamp
   x?: number; // Координата X для кликов в пустую область
   y?: number; // Координата Y для кликов в пустую область
+  // Поля для событий скролла
+  scroll_x?: number;
+  scroll_y?: number;
+  scroll_depth_x?: number;
+  scroll_depth_y?: number;
+  scroll_direction?: string;
+  scroll_type?: string; // Тип скролла: vertical, horizontal, both
+  is_nested?: boolean;
+  frame_id?: string;
 }
 
 interface Screen {
@@ -64,6 +73,7 @@ interface Proto {
   protoVersion: string;
   start: string;
   end: string;
+  flowId?: string; // ID выбранного flow (опционально для обратной совместимости)
   screens: Screen[];
   hotspots: Hotspot[];
   edges: Edge[];
@@ -87,6 +97,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   const [prototypes, setPrototypes] = useState<Record<string, Proto>>({}); // prototype_id -> Proto
   const [prototypeTaskDescriptions, setPrototypeTaskDescriptions] = useState<Record<string, string | null>>({}); // prototype_id -> task_description
   const [sessionPrototypeIds, setSessionPrototypeIds] = useState<Record<string, string>>({}); // session_id -> prototype_id
+  const [prototypeFlowIds, setPrototypeFlowIds] = useState<Record<string, string | null>>({}); // prototype_id -> flow_id (для фильтрации экранов)
   const [heatmapFilterSessions, setHeatmapFilterSessions] = useState<Set<string>>(new Set()); // Фильтр хитмапа по сессиям (множественный выбор) - для глобального хитмапа
   const [taskHeatmapFilterSessions, setTaskHeatmapFilterSessions] = useState<Record<string, Set<string>>>({}); // Фильтр хитмапа по сессиям для каждого task group (prototype_id -> Set<session_id>)
   const [selectedHeatmapScreen, setSelectedHeatmapScreen] = useState<{ screen: Screen; proto: Proto; clicks: Array<{ x: number; y: number; count: number }> } | null>(null); // Выбранный экран для overlay
@@ -268,6 +279,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       setSessionEvents(eventsBySession);
 
       // Сохраняем соответствие session_id -> prototype_id
+      // flowId будет загружен из JSON данных прототипа в loadPrototypes
       const sessionProtoMap: Record<string, string> = {};
       (sessionsData || []).forEach(session => {
         if ((session as any).prototype_id) {
@@ -613,6 +625,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       }
 
       // Загружаем только прототипы текущего пользователя
+      // flowId читается из JSON данных прототипа (data.flowId)
       const { data: prototypesData, error: protoError } = await supabase
         .from("prototypes")
         .select("id, data, task_description")
@@ -627,14 +640,24 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       if (prototypesData) {
         const prototypesMap: Record<string, Proto> = {};
         const taskDescriptionsMap: Record<string, string | null> = {};
+        const flowIdMap: Record<string, string | null> = {};
         prototypesData.forEach(p => {
           if (p.data) {
             prototypesMap[p.id] = p.data as Proto;
+            // flowId читается из JSON данных прототипа (data.flowId)
+            if ((p.data as any).flowId) {
+              flowIdMap[p.id] = (p.data as any).flowId;
+            } else {
+              flowIdMap[p.id] = null;
+            }
+          } else {
+            flowIdMap[p.id] = null;
           }
           taskDescriptionsMap[p.id] = p.task_description || null;
         });
         setPrototypes(prev => ({ ...prev, ...prototypesMap }));
         setPrototypeTaskDescriptions(prev => ({ ...prev, ...taskDescriptionsMap }));
+        setPrototypeFlowIds(prev => ({ ...prev, ...flowIdMap }));
       }
     } catch (err) {
       console.error("Analytics: Unexpected error loading prototypes", err);
@@ -689,6 +712,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     screen_id: string | null;
     clicks: string; // Все клики через запятую
     isClickGroup: boolean; // true если это группа кликов, false если отдельное событие
+    scroll_type?: string; // Тип скролла для событий scroll
   }> => {
     const result: Array<{
       timestamp: string;
@@ -775,6 +799,39 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           currentScreenId = event.screen_id;
           currentScreenClicks = [event];
         }
+      }
+      // События скролла
+      else if (event.event_type === "scroll") {
+        // Сохраняем предыдущие клики (если есть) перед событием скролла
+        if (currentScreenClicks.length > 0 && currentScreenId) {
+          const clicksList = currentScreenClicks.map(click => {
+            if (click.hotspot_id) {
+              return getHotspotName(sessionId, click.hotspot_id, click.screen_id);
+            } else {
+              return getScreenName(sessionId, click.screen_id);
+            }
+          });
+
+          result.push({
+            timestamp: currentScreenClicks[0].timestamp,
+            event_type: "clicks",
+            screen_id: currentScreenId,
+            clicks: clicksList.join(", "),
+            isClickGroup: true
+          });
+
+          currentScreenClicks = [];
+        }
+
+        // Добавляем событие скролла с типом скролла
+        result.push({
+          timestamp: event.timestamp,
+          event_type: event.event_type,
+          screen_id: event.screen_id,
+          clicks: "-",
+          isClickGroup: false,
+          scroll_type: event.scroll_type // Передаем тип скролла
+        });
       }
       // Остальные события (completed, aborted, closed)
       else {
@@ -903,9 +960,16 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     const translations: Record<string, string> = {
       "screen_load": "Загрузка экрана",
       "hotspot_click": "Клик по области",
+      "click": "Клик в пустую область",
+      "scroll": "Скролл",
+      "scroll_start": "Начало скролла",
+      "scroll_end": "Конец скролла",
       "completed": "Пройден",
       "aborted": "Сдался",
-      "closed": "Закрыл тест"
+      "closed": "Закрыл тест",
+      "overlay_open": "Открыт оверлей",
+      "overlay_close": "Закрыт оверлей",
+      "overlay_swap": "Переключил оверлей"
     };
     return translations[eventType] || eventType;
   };
@@ -1537,31 +1601,53 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
               ? getAbandonedScreens(heatmapFilterSessions, undefined)
               : { closedScreens: new Set<string>(), abortedScreens: new Set<string>() };
             // Собираем ТОЛЬКО уникальные экраны (screens) из прототипов, НЕ hotspots
+            // ВАЖНО: Фильтруем экраны по flow_id - показываем только экраны из прототипов с одинаковым flow_id
             // Используем Map для устранения дубликатов по screen.id
             const screensMap = new Map<string, { screen: Screen; proto: Proto }>();
             
-            Object.values(prototypes).forEach(proto => {
-              // Собираем все screen IDs, которые реально участвуют в flow
-              // Экраны прототипа - это те, которые являются start, end или участвуют в edges
-              const validScreenIds = new Set<string>();
+            // Собираем flow_id из выбранных сессий (для фильтрации)
+            const selectedPrototypeIds = new Set<string>();
+            const selectedFlowIds = new Set<string | null>();
+            
+            // Если выбраны конкретные сессии, фильтруем по их flow_id
+            const sessionsToUse = heatmapFilterSessions.size > 0 
+              ? sessions.filter(s => heatmapFilterSessions.has(s.id))
+              : sessions;
+            
+            sessionsToUse.forEach(session => {
+              const prototypeId = sessionPrototypeIds[session.id];
+              if (prototypeId) {
+                selectedPrototypeIds.add(prototypeId);
+                const flowId = prototypeFlowIds[prototypeId];
+                if (flowId !== undefined) {
+                  selectedFlowIds.add(flowId);
+                }
+              }
+            });
+            
+            // Если есть flow_id для фильтрации (и не все null), используем его, иначе показываем все экраны
+            const hasNonNullFlowIds = Array.from(selectedFlowIds).some(fid => fid !== null);
+            const shouldFilterByFlowId = selectedFlowIds.size > 0 && hasNonNullFlowIds;
+            
+            Object.keys(prototypes).forEach(prototypeId => {
+              const proto = prototypes[prototypeId];
               
-              if (proto.start) validScreenIds.add(proto.start);
-              if (proto.end) validScreenIds.add(proto.end);
+              // Если фильтруем по flow_id, показываем только экраны из прототипов с тем же flow_id
+              if (shouldFilterByFlowId) {
+                const protoFlowId = prototypeFlowIds[prototypeId];
+                // Пропускаем прототипы без flow_id или с другим flow_id
+                if (protoFlowId === null || !selectedFlowIds.has(protoFlowId)) {
+                  return;
+                }
+              }
               
-              // Добавляем все screen IDs, которые встречаются в edges
-              (proto.edges || []).forEach(edge => {
-                validScreenIds.add(edge.from);
-                validScreenIds.add(edge.to);
-              });
-              
+              // ВАЖНО: Показываем ВСЕ экраны из proto.screens, а не только start, end и edges
+              // Это правильно, так как все экраны в proto.screens являются полноценными экранами прототипа
+              // Hotspots (элементы типа Frame 4, Frame 5) НЕ добавляются в proto.screens, так что фильтрация не нужна
               proto.screens.forEach(screen => {
-                // Включаем только те screens, которые реально участвуют в flow прототипа
-                // Это исключает элементы типа Frame 4, Frame 5, которые являются hotspots внутри других экранов
-                if (validScreenIds.has(screen.id)) {
-                  // Добавляем только если экран еще не был добавлен (уникальность по screen.id)
-                  if (!screensMap.has(screen.id)) {
-                    screensMap.set(screen.id, { screen, proto });
-                  }
+                // Добавляем все экраны, если они еще не были добавлены (уникальность по screen.id)
+                if (!screensMap.has(screen.id)) {
+                  screensMap.set(screen.id, { screen, proto });
                 }
               });
             });
@@ -2093,12 +2179,21 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                   background: groupedEvent.event_type === "completed" ? "#4caf50" : 
                                             groupedEvent.event_type === "clicks" ? "#2196f3" :
                                             groupedEvent.event_type === "hotspot_click" ? "#2196f3" :
+                                            groupedEvent.event_type === "scroll" ? "#9c27b0" :
+                                            groupedEvent.event_type === "scroll_start" ? "#9c27b0" :
+                                            groupedEvent.event_type === "scroll_end" ? "#9c27b0" :
                                             groupedEvent.event_type === "closed" ? "#f44336" :
                                             groupedEvent.event_type === "aborted" ? "#ff9800" : "#ff9800",
                                   color: "white",
                                   fontSize: 11
                                 }}>
                                   {groupedEvent.event_type === "clicks" ? "Клики" : translateEventType(groupedEvent.event_type)}
+                                  {/* Показываем тип скролла для событий скролла */}
+                                  {groupedEvent.event_type === "scroll" && groupedEvent.scroll_type && (
+                                    <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.9 }}>
+                                      ({groupedEvent.scroll_type === "vertical" ? "верт." : groupedEvent.scroll_type === "horizontal" ? "гор." : "оба"})
+                                    </span>
+                                  )}
                                 </span>
                               </td>
                               <td style={{ padding: "8px", fontSize: 11 }}>
