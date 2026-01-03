@@ -133,7 +133,27 @@ In Supabase Dashboard:
 2. Create tables (if you have SQL script, run it)
 3. Configure RLS (Row Level Security) policies
 
-### Step 5: Configure Environment Variables
+### Step 5: Configure Figma OAuth (Embed Kit 2.0)
+
+For click analytics and screen transition tracking to work:
+
+1. Go to [Figma Developer Console](https://www.figma.com/developers/apps)
+2. Click **Create new app**
+3. Fill the form:
+   - **App name**: your app name (e.g., "EasyTest Viewer")
+   - **Website URL**: your viewer URL (e.g., `https://viewer.your-domain.com`)
+4. In **Allowed origins** section, add domains:
+   - For development: `http://localhost:5173`
+   - For production: `https://viewer.your-domain.com`
+5. Save and copy the **Client ID**
+6. Open `figma-viewer/src/TestView.tsx` and update the constant:
+   ```typescript
+   const FIGMA_CLIENT_ID = "your-client-id";
+   ```
+
+> **Important:** Without Figma OAuth setup, embed events (clicks, transitions) won't be tracked in analytics.
+
+### Step 6: Configure Environment Variables
 
 **For figma-viewer:**
 
@@ -151,7 +171,7 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### Step 6: Run Locally
+### Step 7: Run Locally
 
 **Run figma-viewer:**
 ```bash

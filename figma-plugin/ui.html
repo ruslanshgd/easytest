@@ -333,6 +333,7 @@
     // Для REST API подхода
     let FIGMA_ACCESS_TOKEN = ""; // Personal Access Token для Figma REST API
     let currentFileData = null; // Данные из REST API
+    let currentFileKey = null; // fileKey из Share ссылки (для figmaFileId)
     let availableFlows = []; // Найденные flows (starting points)
 
     let latestData = null;
@@ -1203,6 +1204,7 @@
           // Получаем данные файла через REST API для поиска фрейма по nodeId
           const fileData = await getFileDataFromREST(parsed.fileKey, FIGMA_ACCESS_TOKEN);
           currentFileData = fileData;
+          currentFileKey = parsed.fileKey; // НОВОЕ: Сохраняем fileKey для передачи в generateFromRESTAPI
           
           // Нормализуем nodeId из URL (формат "143-552" -> "143:552")
           const normalizedNodeId = parsed.nodeId.replace(/-/g, ':');
@@ -1288,6 +1290,7 @@
           // Если flows найдены, все равно получаем данные файла для генерации прототипа
           const fileData = await getFileDataFromREST(parsed.fileKey, FIGMA_ACCESS_TOKEN);
           currentFileData = fileData;
+          currentFileKey = parsed.fileKey; // НОВОЕ: Сохраняем fileKey для передачи в generateFromRESTAPI
         }
         
         availableFlows = flows;
@@ -1399,7 +1402,8 @@
         pluginMessage: {
           type: "GENERATE_FROM_REST_API",
           fileData: currentFileData,
-          selectedFlowId: selectedFlowId
+          selectedFlowId: selectedFlowId,
+          fileKey: currentFileKey // НОВОЕ: Передаем fileKey для figmaFileId
         }
       }, "*");
     }

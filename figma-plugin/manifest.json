@@ -7,7 +7,7 @@
   "editorType": ["figma"],
   "permissions": [],
   "networkAccess": {
-    "allowedDomains": ["https://*.supabase.co"]
+    "allowedDomains": ["https://*.supabase.co", "https://api.figma.com"]
   },
   "documentAccess": "dynamic-page"
 }

@@ -182,6 +182,23 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
         return;
       }
 
+      // ДИАГНОСТИКА: Логируем загруженные события
+      console.log("Analytics: Events loaded from Supabase", {
+        totalEvents: eventsData?.length || 0,
+        sessionIds: sessionIds.length,
+        eventTypes: eventsData ? [...new Set(eventsData.map(e => e.event_type))] : [],
+        sampleEvents: eventsData?.slice(0, 5).map(e => ({
+          id: e.id,
+          event_type: e.event_type,
+          session_id: e.session_id,
+          screen_id: e.screen_id,
+          hotspot_id: e.hotspot_id,
+          x: e.x,
+          y: e.y,
+          timestamp: e.timestamp
+        })) || []
+      });
+
       // Группируем события по сессиям
       const eventsBySession: Record<string, SessionEvent[]> = {};
       (eventsData || []).forEach(event => {
@@ -189,6 +206,16 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           eventsBySession[event.session_id] = [];
         }
         eventsBySession[event.session_id].push(event as SessionEvent);
+      });
+
+      // ДИАГНОСТИКА: Логируем группировку событий
+      console.log("Analytics: Events grouped by session", {
+        sessionsWithEvents: Object.keys(eventsBySession).length,
+        eventsPerSession: Object.entries(eventsBySession).map(([sessionId, events]) => ({
+          sessionId,
+          eventCount: events.length,
+          eventTypes: [...new Set(events.map(e => e.event_type))]
+        }))
       });
 
       // Формируем список сессий с метриками
@@ -720,6 +747,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       screen_id: string | null;
       clicks: string;
       isClickGroup: boolean;
+      scroll_type?: string; // Тип скролла для событий scroll
     }> = [];
 
     // Сортируем события по времени
@@ -750,7 +778,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
             event_type: "clicks",
             screen_id: currentScreenId,
             clicks: clicksList.join(", "),
-            isClickGroup: true
+            isClickGroup: true,
+            scroll_type: undefined
           });
 
           currentScreenClicks = [];
@@ -765,7 +794,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           event_type: event.event_type,
           screen_id: event.screen_id,
           clicks: "-",
-          isClickGroup: false
+          isClickGroup: false,
+          scroll_type: undefined
         });
       }
       // Если это клик (hotspot_click или click)
@@ -817,7 +847,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
             event_type: "clicks",
             screen_id: currentScreenId,
             clicks: clicksList.join(", "),
-            isClickGroup: true
+            isClickGroup: true,
+            scroll_type: undefined
           });
 
           currentScreenClicks = [];
@@ -850,7 +881,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
             event_type: "clicks",
             screen_id: currentScreenId,
             clicks: clicksList.join(", "),
-            isClickGroup: true
+            isClickGroup: true,
+            scroll_type: undefined
           });
 
           currentScreenClicks = [];
@@ -862,7 +894,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           event_type: event.event_type,
           screen_id: event.screen_id,
           clicks: getHotspotName(sessionId, event.hotspot_id, event.screen_id),
-          isClickGroup: false
+          isClickGroup: false,
+          scroll_type: undefined
         });
       }
     });
@@ -1360,9 +1393,26 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       const events = sessionEvents[session.id] || [];
       const prototypeId = sessionPrototypeIds[session.id];
       
-      if (!prototypeId || !prototypes[prototypeId]) return;
+      if (!prototypeId || !prototypes[prototypeId]) {
+        console.warn("Analytics: calculateHeatmapData - missing prototype", {
+          sessionId: session.id,
+          prototypeId,
+          hasPrototype: !!prototypes[prototypeId]
+        });
+        return;
+      }
       
       const proto = prototypes[prototypeId];
+      
+      // ДИАГНОСТИКА: Логируем события для хитмапа
+      console.log("Analytics: calculateHeatmapData processing session", {
+        sessionId: session.id,
+        prototypeId,
+        totalEvents: events.length,
+        eventTypes: [...new Set(events.map(e => e.event_type))],
+        hotspotClickEventsCount: events.filter(e => e.event_type === "hotspot_click" && e.hotspot_id && e.screen_id).length,
+        clickEventsCount: events.filter(e => e.event_type === "click" && e.screen_id && !e.hotspot_id).length
+      });
       
       // Находим все hotspot_click события (клики по хотспотам)
       const hotspotClickEvents = events.filter(e => e.event_type === "hotspot_click" && e.hotspot_id && e.screen_id);
@@ -1445,6 +1495,17 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     const result: Record<string, Array<{ x: number; y: number; count: number }>> = {};
     Object.keys(heatmapMap).forEach(screenId => {
       result[screenId] = Object.values(heatmapMap[screenId]);
+    });
+    
+    // ДИАГНОСТИКА: Логируем результат хитмапа
+    console.log("Analytics: calculateHeatmapData result", {
+      screensWithClicks: Object.keys(result).length,
+      totalClicks: Object.values(result).reduce((sum, clicks) => sum + clicks.reduce((s, c) => s + c.count, 0), 0),
+      clicksPerScreen: Object.entries(result).map(([screenId, clicks]) => ({
+        screenId,
+        clickCount: clicks.length,
+        totalClicks: clicks.reduce((sum, c) => sum + c.count, 0)
+      }))
     });
     
     return result;
@@ -1773,6 +1834,9 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                             {clicks.map((click, idx) => {
                               const opacity = maxCount > 0 ? Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5) : 0.5;
                               const size = Math.max(4, Math.min(20, 4 + (click.count / maxCount) * 16));
+                              // FIX: Используем одинаковый процент для width и height (относительно ширины)
+                              // чтобы круг не деформировался в эллипс
+                              const sizePercent = (size / screen.width) * 100;
                               return (
                                 <div
                                   key={idx}
@@ -1780,8 +1844,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                     position: "absolute",
                                     left: `${(click.x / screen.width) * 100}%`,
                                     top: `${(click.y / screen.height) * 100}%`,
-                                    width: `${(size / screen.width) * 100}%`,
-                                    height: `${(size / screen.height) * 100}%`,
+                                    width: `${sizePercent}%`,
+                                    // FIX: Пересчитываем height чтобы сохранить круглую форму
+                                    // height в % от высоты должен дать тот же пиксельный размер, что и width в % от ширины
+                                    height: `${sizePercent * (screen.width / screen.height)}%`,
                                     borderRadius: "50%",
                                     background: `rgba(255, 0, 0, ${opacity})`,
                                     transform: "translate(-50%, -50%)",
@@ -1875,15 +1941,18 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                     {selectedHeatmapScreen.clicks.map((click, idx) => {
                       const opacity = maxCount > 0 ? Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5) : 0.5;
                       const size = Math.max(8, Math.min(40, 8 + (click.count / maxCount) * 32));
+                      // FIX: Используем одинаковый процент для сохранения круглой формы
+                      const sizePercent = (size / selectedHeatmapScreen.screen.width) * 100;
+                      const { width: sw, height: sh } = selectedHeatmapScreen.screen;
                       return (
                         <div
                           key={idx}
                           style={{
                             position: "absolute",
-                            left: `${(click.x / selectedHeatmapScreen.screen.width) * 100}%`,
-                            top: `${(click.y / selectedHeatmapScreen.screen.height) * 100}%`,
-                            width: `${(size / selectedHeatmapScreen.screen.width) * 100}%`,
-                            height: `${(size / selectedHeatmapScreen.screen.height) * 100}%`,
+                            left: `${(click.x / sw) * 100}%`,
+                            top: `${(click.y / sh) * 100}%`,
+                            width: `${sizePercent}%`,
+                            height: `${sizePercent * (sw / sh)}%`,
                             borderRadius: "50%",
                             background: `rgba(255, 0, 0, ${opacity})`,
                             transform: "translate(-50%, -50%)",
@@ -2465,6 +2534,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                     {clicks.map((click, idx) => {
                                       const opacity = maxCount > 0 ? Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5) : 0.5;
                                       const size = Math.max(4, Math.min(20, 4 + (click.count / maxCount) * 16));
+                                      // FIX: Используем одинаковый процент для сохранения круглой формы
+                                      const sizePercent = (size / screen.width) * 100;
                                       return (
                                         <div
                                           key={idx}
@@ -2472,8 +2543,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                             position: "absolute",
                                             left: `${(click.x / screen.width) * 100}%`,
                                             top: `${(click.y / screen.height) * 100}%`,
-                                            width: `${(size / screen.width) * 100}%`,
-                                            height: `${(size / screen.height) * 100}%`,
+                                            width: `${sizePercent}%`,
+                                            height: `${sizePercent * (screen.width / screen.height)}%`,
                                             borderRadius: "50%",
                                             background: `rgba(255, 0, 0, ${opacity})`,
                                             transform: "translate(-50%, -50%)",

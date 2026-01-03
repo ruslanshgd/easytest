@@ -1,0 +1,26 @@
+/* Скрытие scrollbar для всех браузеров, но сохранение функциональности скролла */
+.hide-scrollbar {
+  /* Firefox */
+  scrollbar-width: none;
+  /* IE и Edge */
+  -ms-overflow-style: none;
+}
+
+/* WebKit браузеры (Chrome, Safari, Opera) */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Скрытие scrollbar для вложенных фреймов */
+.hide-scrollbar-nested {
+  /* Firefox */
+  scrollbar-width: none;
+  /* IE и Edge */
+  -ms-overflow-style: none;
+}
+
+/* WebKit браузеры (Chrome, Safari, Opera) */
+.hide-scrollbar-nested::-webkit-scrollbar {
+  display: none;
+}
+

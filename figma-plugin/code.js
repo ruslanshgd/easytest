@@ -228,11 +228,12 @@ figma.ui.onmessage = async (msg) => {
     try {
       const fileData = msg.fileData;
       const selectedFlowId = msg.selectedFlowId;
+      const fileKey = msg.fileKey; // НОВОЕ: fileKey из Share ссылки
       
-      console.log("Generating prototype from REST API data, flow ID:", selectedFlowId);
+      console.log("Generating prototype from REST API data, flow ID:", selectedFlowId, "fileKey:", fileKey);
       
       // Запускаем генерацию прототипа из REST API данных
-      await generateFromRESTAPI(fileData, selectedFlowId);
+      await generateFromRESTAPI(fileData, selectedFlowId, fileKey);
       
     } catch (error) {
       console.error("Error generating from REST API:", error);
@@ -281,6 +282,18 @@ function parseOverlayAction(reaction, overlayFrame) {
   // Также поддерживаем старый формат CLOSE_OVERLAY для обратной совместимости
   let overlayType = null;
   let overlayId = null;
+  
+  // ВАЖНО: Проверяем BACK ПЕРЕД другими проверками, так как это не требует overlayId
+  // Согласно Figma API: action.type === "BACK" навигирует к предыдущему открытому фрейму, выталкивая историю навигации
+  // См. https://developers.figma.com/docs/plugins/api/Action/#back-action
+  if (actionType === "BACK") {
+    console.log("parseOverlayAction: Parsed BACK action", {
+      actionType: actionType
+    });
+    return {
+      type: "BACK" // Используем внутреннее представление "BACK" для viewer
+    };
+  }
   
   // ВАЖНО: Проверяем CLOSE ПЕРЕД другими проверками, так как это не требует overlayId
   // Согласно Figma API: action.type === "CLOSE" закрывает текущий overlay
@@ -459,6 +472,274 @@ function parseOverlayAction(reaction, overlayFrame) {
     action: action
   });
   return null;
+}
+
+// Функция для экспорта Scene Graph из Frame (Phase 0)
+// Рекурсивно экспортирует структуру узлов с layout и style
+function exportSceneGraph(frame) {
+  if (!frame || frame.type !== "FRAME") {
+    console.warn("exportSceneGraph: Not a FRAME node", frame);
+    return null;
+  }
+  
+  // Экспортируем узлы рекурсивно
+  const nodes = [];
+  if (frame.children) {
+    for (let i = 0; i < frame.children.length; i++) {
+      const child = frame.children[i];
+      const node = exportSceneNode(child, frame.id);
+      if (node) {
+        nodes.push(node);
+      }
+    }
+  }
+  
+  // Получаем фон фрейма
+  const background = getFrameBackground(frame) || "transparent";
+  
+  return {
+    id: frame.id,
+    name: frame.name,
+    size: {
+      width: frame.width,
+      height: frame.height
+    },
+    background: background,
+    nodes: nodes
+  };
+}
+
+// Рекурсивная функция для экспорта узла Scene Graph
+function exportSceneNode(node, parentId) {
+  if (!node) return null;
+  
+  // Вычисляем координаты относительно родителя
+  // В Figma Plugin API: node.x и node.y - это координаты относительно родителя
+  const nodeX = node.x !== undefined ? node.x : 0;
+  const nodeY = node.y !== undefined ? node.y : 0;
+  
+  // Получаем rotation из transform (если есть)
+  let rotation = 0;
+  if (node.rotation !== undefined) {
+    rotation = node.rotation;
+  }
+  
+  // Получаем opacity
+  const opacity = node.opacity !== undefined ? node.opacity : 1;
+  
+  // Экспортируем style (fill, stroke, radius)
+  const style = exportNodeStyle(node);
+  
+  // Экспортируем children рекурсивно
+  const children = [];
+  if (node.children && node.children.length > 0) {
+    for (let i = 0; i < node.children.length; i++) {
+      const childNode = exportSceneNode(node.children[i], node.id);
+      if (childNode) {
+        children.push(childNode);
+      }
+    }
+  }
+  
+  const layout = {
+    x: nodeX,
+    y: nodeY,
+    width: node.width || 0,
+    height: node.height || 0,
+    rotation: rotation,
+    opacity: opacity
+  };
+  
+  // НОВОЕ: Экспорт AutoLayout свойств (для FrameNode)
+  if (node.layoutMode !== undefined) {
+    layout.layoutMode = node.layoutMode; // "HORIZONTAL" | "VERTICAL" | "NONE"
+    
+    // Padding
+    if (node.paddingLeft !== undefined) layout.paddingLeft = node.paddingLeft;
+    if (node.paddingRight !== undefined) layout.paddingRight = node.paddingRight;
+    if (node.paddingTop !== undefined) layout.paddingTop = node.paddingTop;
+    if (node.paddingBottom !== undefined) layout.paddingBottom = node.paddingBottom;
+    
+    // Gap (itemSpacing)
+    if (node.itemSpacing !== undefined) layout.itemSpacing = node.itemSpacing;
+    
+    // Alignment
+    if (node.primaryAxisAlignItems !== undefined) layout.primaryAxisAlignItems = node.primaryAxisAlignItems;
+    if (node.counterAxisAlignItems !== undefined) layout.counterAxisAlignItems = node.counterAxisAlignItems;
+  }
+  
+  const result = {
+    id: node.id,
+    parentId: parentId,
+    type: node.type,
+    name: node.name || node.id,
+    layout: layout,
+    style: style,
+    children: children.length > 0 ? children : undefined
+  };
+  
+  // НОВОЕ: Phase 1 - экспорт текстового контента для TEXT узлов
+  if (node.type === "TEXT" && node.characters !== undefined) {
+    result.text_content = node.characters;
+  }
+  
+  // НОВОЕ: Экспорт IMAGE узлов - получаем imageHash из fills
+  if (node.type === "RECTANGLE" || node.type === "ELLIPSE" || node.type === "POLYGON" || node.type === "STAR" || node.type === "VECTOR") {
+    // Проверяем fills на наличие изображения
+    if (node.fills && Array.isArray(node.fills)) {
+      for (let i = 0; i < node.fills.length; i++) {
+        const fill = node.fills[i];
+        if (fill.type === "IMAGE" && fill.imageHash) {
+          // Экспортируем imageHash - viewer будет использовать REST API для получения URL
+          result.imageHash = fill.imageHash;
+          result.type = "IMAGE"; // Меняем тип на IMAGE для корректного рендеринга
+          break;
+        }
+      }
+    }
+  }
+  
+  // НОВОЕ: Экспорт VECTOR узлов - получаем SVG данные
+  if (node.type === "VECTOR" && !result.imageHash) {
+    // Для VECTOR узлов можно экспортировать vectorPaths, но это сложно
+    // Пока оставляем как есть - viewer будет рендерить через stroke/fill
+    // TODO: Добавить экспорт SVG данных для VECTOR узлов
+  }
+  
+  return result;
+}
+
+// Функция для экспорта style узла (fill, stroke, radius)
+function exportNodeStyle(node) {
+  const style = {};
+  
+  // Экспортируем fill (fills)
+  if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+    const fill = node.fills[0];
+    if (fill.type === "SOLID") {
+      const color = fill.color;
+      const opacity = fill.opacity !== undefined ? fill.opacity : 1;
+      const r = Math.round(color.r * 255);
+      const g = Math.round(color.g * 255);
+      const b = Math.round(color.b * 255);
+      style.fill = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    // TODO: Phase 0 - пока только SOLID, градиенты в будущем
+  }
+  
+  // Экспортируем stroke (strokes)
+  if (node.strokes && Array.isArray(node.strokes) && node.strokes.length > 0) {
+    const stroke = node.strokes[0];
+    if (stroke.type === "SOLID") {
+      const color = stroke.color;
+      const opacity = stroke.opacity !== undefined ? stroke.opacity : 1;
+      const r = Math.round(color.r * 255);
+      const g = Math.round(color.g * 255);
+      const b = Math.round(color.b * 255);
+      style.stroke = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    // TODO: Поддержка других типов strokes в будущем
+  }
+  
+  // НОВОЕ: Экспорт strokeWeight и strokeAlign
+  if (node.strokeWeight !== undefined) {
+    style.strokeWeight = node.strokeWeight;
+  }
+  if (node.strokeAlign !== undefined) {
+    style.strokeAlign = node.strokeAlign; // "CENTER" | "INSIDE" | "OUTSIDE"
+  }
+  
+  // Экспортируем cornerRadius (radius)
+  if (node.cornerRadius !== undefined) {
+    style.radius = node.cornerRadius;
+  }
+  
+  // НОВОЕ: Экспорт отдельных радиусов для каждого угла
+  if (node.topLeftRadius !== undefined) style.topLeftRadius = node.topLeftRadius;
+  if (node.topRightRadius !== undefined) style.topRightRadius = node.topRightRadius;
+  if (node.bottomLeftRadius !== undefined) style.bottomLeftRadius = node.bottomLeftRadius;
+  if (node.bottomRightRadius !== undefined) style.bottomRightRadius = node.bottomRightRadius;
+  
+  // Экспортируем textStyle для TEXT узлов
+  if (node.type === "TEXT") {
+    const textStyle = {};
+    
+    if (node.fontName) {
+      textStyle.fontFamily = node.fontName.family;
+      textStyle.fontSize = node.fontSize || 16;
+      textStyle.fontWeight = node.fontWeight || 400;
+    }
+    
+    // НОВОЕ: Экспорт дополнительных текстовых свойств
+    if (node.lineHeight !== undefined) {
+      textStyle.lineHeight = node.lineHeight; // Может быть число или объект { value, unit }
+    }
+    if (node.letterSpacing !== undefined) {
+      textStyle.letterSpacing = node.letterSpacing; // Может быть объект { value, unit }
+    }
+    if (node.textAlignHorizontal !== undefined) {
+      textStyle.textAlignHorizontal = node.textAlignHorizontal; // "LEFT" | "CENTER" | "RIGHT" | "JUSTIFIED"
+    }
+    if (node.textAlignVertical !== undefined) {
+      textStyle.textAlignVertical = node.textAlignVertical; // "TOP" | "CENTER" | "BOTTOM"
+    }
+    if (node.textDecoration !== undefined) {
+      textStyle.textDecoration = node.textDecoration; // "NONE" | "UNDERLINE" | "STRIKETHROUGH"
+    }
+    if (node.textCase !== undefined) {
+      textStyle.textCase = node.textCase; // "ORIGINAL" | "UPPER" | "LOWER" | "TITLE"
+    }
+    
+    if (Object.keys(textStyle).length > 0) {
+      style.textStyle = textStyle;
+    }
+  }
+  
+  return Object.keys(style).length > 0 ? style : undefined;
+}
+
+// Функция для парсинга transition из reaction (Phase 0)
+function parseTransition(reaction) {
+  if (!reaction || !reaction.transition) {
+    return undefined;
+  }
+  
+  const transition = reaction.transition;
+  const result = {
+    type: transition.type || "INSTANT"
+  };
+  
+  // Добавляем duration, если есть
+  if (transition.duration !== undefined) {
+    result.duration = transition.duration;
+  }
+  
+  // Добавляем direction, если есть (для MOVE_IN, MOVE_OUT, PUSH, SLIDE_OVER, SLIDE_UNDER)
+  if (transition.direction) {
+    result.direction = transition.direction;
+  }
+  
+  // Добавляем easing, если есть
+  if (transition.easing) {
+    result.easing = transition.easing;
+  }
+  
+  // Добавляем easingFunctionCubicBezier, если есть
+  if (transition.easingFunctionCubicBezier) {
+    result.easingFunctionCubicBezier = transition.easingFunctionCubicBezier;
+  }
+  
+  // Добавляем easingFunctionSpring, если есть
+  if (transition.easingFunctionSpring) {
+    result.easingFunctionSpring = transition.easingFunctionSpring;
+  }
+  
+  // Добавляем matchLayers, если есть (для SMART_ANIMATE)
+  if (transition.matchLayers !== undefined) {
+    result.matchLayers = transition.matchLayers;
+  }
+  
+  return result;
 }
 
 // Функция для получения фона фрейма (fills)
@@ -660,6 +941,40 @@ async function exportFrameWithScrollData(frame, isTopLevel = false, excludeNeste
     console.log("  Restored visibility for nested scrollable frame:", hiddenNestedFrames[i].name);
   }
   
+  // НОВОЕ: Извлекаем fixed children (элементы, которые фиксированы при скролле)
+  // numberOfFixedChildren определяет, сколько первых дочерних элементов фиксированы
+  const numberOfFixedChildren = frame.numberOfFixedChildren || 0;
+  const fixedChildren = [];
+  
+  if (numberOfFixedChildren > 0 && frame.children && frame.children.length > 0) {
+    const frameX = frame.absoluteTransform[0][2];
+    const frameY = frame.absoluteTransform[1][2];
+    
+    // Берем первые numberOfFixedChildren элементов
+    const fixedChildrenNodes = frame.children.slice(0, numberOfFixedChildren);
+    
+    console.log("Frame:", frame.name, "has", numberOfFixedChildren, "fixed children:", fixedChildrenNodes.map(c => c.name));
+    
+    for (let i = 0; i < fixedChildrenNodes.length; i++) {
+      const child = fixedChildrenNodes[i];
+      const childX = child.absoluteTransform[0][2];
+      const childY = child.absoluteTransform[1][2];
+      
+      // Вычисляем относительные координаты относительно фрейма
+      const relativeX = childX - frameX;
+      const relativeY = childY - frameY;
+      
+      fixedChildren.push({
+        id: child.id,
+        name: child.name || child.id,
+        x: relativeX,
+        y: relativeY,
+        width: child.width,
+        height: child.height
+      });
+    }
+  }
+  
   return {
     image: fullContentBase64, // Полный контент или viewport (fallback)
     viewportImage: viewportBase64, // Всегда viewport для reference
@@ -673,7 +988,9 @@ async function exportFrameWithScrollData(frame, isTopLevel = false, excludeNeste
     contentHeight: contentBounds.contentHeight,
     contentOffsetX: contentBounds.contentOffsetX,
     contentOffsetY: contentBounds.contentOffsetY,
-    fullContentExported: fullContentExported
+    fullContentExported: fullContentExported,
+    numberOfFixedChildren: numberOfFixedChildren,
+    fixedChildren: fixedChildren
   };
 }
 
@@ -797,7 +1114,10 @@ async function processNestedFrames(frame, parentFrameId = null, rootFrame = null
     // Рекурсивно обрабатываем вложенные фреймы внутри вложенного
     // ВАЖНО: Передаем rootFrame дальше, чтобы координаты всегда вычислялись относительно основного экрана
     const deeperNested = await processNestedFrames(childFrame, childFrame.id, rootFrame);
-    nestedFrames.push(...deeperNested);
+    // ВАЖНО: Используем concat вместо spread operator для совместимости со старым синтаксисом
+    for (let i = 0; i < deeperNested.length; i++) {
+      nestedFrames.push(deeperNested[i]);
+    }
   }
   
   return nestedFrames;
@@ -918,7 +1238,7 @@ function collectPrototypeFrames(fileData, startingPointId) {
 // Функция для генерации прототипа из данных REST API
 // ВАЖНО: Использует подход из run() - собирает ВСЕ фреймы на странице, анализирует граф навигации,
 // определяет mainScreens, но обрабатывает hotspots для ВСЕХ фреймов
-async function generateFromRESTAPI(fileData, selectedFlowId) {
+async function generateFromRESTAPI(fileData, selectedFlowId, fileKeyFromShareLink) {
   try {
     figma.notify("🔄 Генерация прототипа из REST API данных...");
     
@@ -1145,8 +1465,36 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
       }
     }
     
+    // 5. Fallback: если нет достижимых top-level фреймов, используем любой достижимый фрейм
     if (!endFrame) {
-      throw new Error("Could not determine end frame for selected flow");
+      const reachableFrames = allPageFrames.filter(f => reachableFrameIds.has(f.id));
+      if (reachableFrames.length > 0) {
+        endFrame = reachableFrames[reachableFrames.length - 1];
+        console.log("Using last reachable frame as end (fallback, may not be top-level):", endFrame.name);
+      }
+    }
+    
+    // 6. Последний fallback: если только startFrame достижим, используем его как endFrame
+    if (!endFrame) {
+      if (reachableFrameIds.has(startFrame.id)) {
+        endFrame = startFrame;
+        console.log("Using startFrame as endFrame (only one reachable frame):", endFrame.name);
+      }
+    }
+    
+    if (!endFrame) {
+      // Детальное логирование для диагностики
+      console.error("Could not determine end frame. Debug info:", {
+        reachableFrameIds: Array.from(reachableFrameIds),
+        reachableFrameIdsCount: reachableFrameIds.size,
+        allPageFramesCount: allPageFrames.length,
+        topLevelFramesCount: allPageFrames.filter(isTopLevelFrame).length,
+        startFrameId: startFrame.id,
+        startFrameName: startFrame.name,
+        framesWithOutgoing: Array.from(framesWithOutgoing),
+        incomingTargets: Array.from(incomingTargets)
+      });
+      throw new Error("Could not determine end frame for selected flow. Check console for debug info.");
     }
     
     // Фильтрация основных экранов прототипа ТОЛЬКО из достижимых фреймов
@@ -1186,6 +1534,17 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
     for (let i = 0; i < allPageFrames.length; i++) {
       frameIdMap.set(allPageFrames[i].id, allPageFrames[i]);
     }
+    
+    // КРИТИЧНО: Создаем маппинг frame.id -> screenId (figmaNodeId) для правильной связи hotspots с экранами
+    // Этот маппинг будет заполнен при обработке mainFrames, когда мы узнаем figmaNodeId для каждого экрана
+    // ВАЖНО: Для фреймов, которые не в mainFrames, используем frame.id как screenId (fallback)
+    const frameIdToScreenIdMap = new Map(); // frame.id -> screenId (figmaNodeId)
+    
+    // КРИТИЧНО: Функция для получения screenId по frame.id
+    // Использует маппинг если доступен, иначе fallback на frame.id
+    const getScreenIdForFrame = (frameId) => {
+      return frameIdToScreenIdMap.get(frameId) || frameId;
+    };
     
     // ВАЖНО: Собираем overlay frames, которые упоминаются в reactions, чтобы добавить их в mainScreens
     // (overlay-фреймы могут не быть топ-уровневыми, но должны быть в screens)
@@ -1230,13 +1589,16 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
       }
     }
     
-    // Собираем screens с экспортом изображений (только mainFrames + overlay frames)
+    // Собираем screens с экспортом изображений (только mainFrames + overlay frames) - v1 формат
     const screens = [];
+    // НОВОЕ: Собираем scenes с экспортом Scene Graph - v2 формат (Phase 0)
+    const scenes = [];
+    
     for (let i = 0; i < mainFrames.length; i++) {
       const frame = mainFrames[i];
       const isTopLevel = frame.parent && frame.parent.type === "PAGE";
       
-      // Экспортируем фрейм с метаданными о скролле
+      // Экспортируем фрейм с метаданными о скролле (v1 формат - PNG)
       // ВАЖНО: При экспорте основного экрана исключаем вложенные scrollable фреймы,
       // чтобы они не попали в изображение (избегаем дублирования)
       const scrollData = await exportFrameWithScrollData(frame, isTopLevel, true);
@@ -1247,8 +1609,42 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
       
       console.log("generateFromRESTAPI: Frame", frame.name, "has", nestedFrames.length, "nested scrollable frames");
       
-      screens.push({
-        id: frame.id,
+      // НОВОЕ: Получаем figmaNodeId для этого экрана (format: pageId:nodeId)
+      // ВАЖНО: В Figma node.id уже содержит pageId в формате "pageId:nodeId"
+      // Но для Figma embed нужен формат "pageId:nodeId", где nodeId - это ID фрейма без pageId
+      // Проверяем формат frame.id - если он уже содержит ":", значит это "pageId:nodeId"
+      let figmaNodeId = null;
+      // Находим родительскую страницу (может быть не прямым родителем для вложенных фреймов)
+      let pageNode = frame.parent;
+      while (pageNode && pageNode.type !== "PAGE") {
+        pageNode = pageNode.parent;
+      }
+      if (pageNode && pageNode.type === "PAGE") {
+        const pageId = pageNode.id;
+        // ВАЖНО: frame.id может быть в формате "pageId:nodeId" или просто "nodeId"
+        // Для Figma embed нужен формат "pageId:nodeId", где nodeId - это ID фрейма
+        // Если frame.id уже содержит ":", значит это уже "pageId:nodeId" - используем как есть
+        // Если нет, формируем "pageId:nodeId"
+        const frameId = frame.id;
+        if (frameId.includes(":")) {
+          // frame.id уже в формате "pageId:nodeId" - используем как есть
+          figmaNodeId = frameId;
+          console.log("generateFromRESTAPI: Frame", frame.name, "figmaNodeId (from frame.id):", figmaNodeId);
+        } else {
+          // frame.id только nodeId - формируем "pageId:nodeId"
+          figmaNodeId = `${pageId}:${frameId}`;
+          console.log("generateFromRESTAPI: Frame", frame.name, "figmaNodeId (constructed):", figmaNodeId, "pageId:", pageId, "nodeId:", frameId);
+        }
+      } else {
+        console.warn("generateFromRESTAPI: Could not find page parent for frame", frame.name, frame.id);
+      }
+      
+      // v1 формат: screens с PNG изображениями (для обратной совместимости)
+      // КРИТИЧНО: Используем figmaNodeId для screen.id, чтобы обеспечить совпадение с figmaNodeId
+      // Это необходимо для правильной синхронизации экранов в viewer через PRESENTED_NODE_CHANGED
+      const screenId = figmaNodeId || frame.id; // Используем figmaNodeId если доступен, иначе fallback на frame.id
+      const screenData = {
+        id: screenId, // КРИТИЧНО: Используем figmaNodeId для совпадения с PRESENTED_NODE_CHANGED
         name: frame.name,
         // Используем viewport размеры как основные размеры экрана
         width: scrollData.viewportWidth || frame.width,
@@ -1266,8 +1662,47 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
         // Отступы не должны быть отрицательными
         contentOffsetX: Math.max(0, scrollData.contentOffsetX),
         contentOffsetY: Math.max(0, scrollData.contentOffsetY),
-        nestedFrames: nestedFrames.length > 0 ? nestedFrames : undefined
-      });
+        nestedFrames: nestedFrames.length > 0 ? nestedFrames : undefined,
+        // НОВОЕ: Fixed children (элементы, которые фиксированы при скролле)
+        numberOfFixedChildren: scrollData.numberOfFixedChildren || 0,
+        fixedChildren: scrollData.fixedChildren && scrollData.fixedChildren.length > 0 ? scrollData.fixedChildren : undefined,
+        // НОВОЕ: Figma node ID для canvas-based рендеринга
+        figmaNodeId: figmaNodeId
+      };
+      
+      // КРИТИЧНО: Сохраняем маппинг frame.id -> screenId для правильной связи hotspots с экранами
+      if (screenId) {
+        frameIdToScreenIdMap.set(frame.id, screenId);
+        console.log("generateFromRESTAPI: Mapped frame.id", frame.id, "-> screenId", screenId, "for frame", frame.name);
+      } else {
+        // Fallback: если screenId не доступен, используем frame.id
+        frameIdToScreenIdMap.set(frame.id, frame.id);
+        console.warn("generateFromRESTAPI: screenId not available for frame", frame.name, "using frame.id as screenId");
+      }
+      
+      screens.push(screenData);
+      
+      // НОВОЕ: v2 формат: scenes с Scene Graph (Phase 0)
+      try {
+        const scene = exportSceneGraph(frame);
+        if (scene) {
+          // КРИТИЧНО: Обновляем scene.id на figmaNodeId, если они отличаются
+          // Это необходимо для правильной синхронизации экранов в viewer через PRESENTED_NODE_CHANGED
+          if (figmaNodeId && scene.id !== figmaNodeId) {
+            console.log("generateFromRESTAPI: Updating scene.id from", scene.id, "to", figmaNodeId, "for frame", frame.name);
+            scene.id = figmaNodeId;
+          }
+          // НОВОЕ: Добавляем figmaNodeId в scene
+          scene.figmaNodeId = figmaNodeId;
+          scenes.push(scene);
+          console.log("generateFromRESTAPI: Exported Scene Graph for frame", frame.name, "nodes:", scene.nodes.length, "figmaNodeId:", figmaNodeId);
+        } else {
+          console.warn("generateFromRESTAPI: Failed to export Scene Graph for frame", frame.name);
+        }
+      } catch (error) {
+        console.error("generateFromRESTAPI: Error exporting Scene Graph for frame", frame.name, error);
+        // Не прерываем генерацию, продолжаем с остальными фреймами
+      }
     }
     
     // ВАЖНО: Hotspots собираются для ВСЕХ фреймов (как в run()), а не только для mainFrames
@@ -1358,24 +1793,83 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
           const overlayAction = parseOverlayAction(reaction, overlayFrame);
           
           // Определяем target для обычных переходов
+          // КРИТИЧНО: Обрабатываем Action "BACK" - возврат на предыдущий экран
+          // В Figma API действие "Back" может быть определено как:
+          // 1. action.type === "BACK" (Plugin API)
+          // 2. action.type === "NAVIGATE" && action.navigation === "BACK" (REST API)
           let target = null;
-          if (!overlayAction || overlayAction.type === "CLOSE_OVERLAY") {
+          const isBackAction = action.type === "BACK" || 
+                              (action.type === "NAVIGATE" && action.navigation === "BACK");
+          
+          if (isBackAction) {
+            // КРИТИЧНО: Для BACK действия destinationId может отсутствовать
+            // BACK возвращает на предыдущий экран динамически, поэтому target = null
+            // Viewer должен обработать это специально, отслеживая историю переходов
+            console.log("generateFromRESTAPI: Detected BACK action", {
+              nodeId: node.id,
+              nodeName: node.name,
+              frameId: frame.id,
+              frameName: frame.name,
+              actionType: action.type,
+              actionNavigation: action.navigation,
+              hasDestinationId: !!action.destinationId,
+              destinationId: action.destinationId
+            });
+            // КРИТИЧНО: Для BACK действия устанавливаем target = null
+            // Viewer должен обработать это через историю переходов
+            target = null;
+          } else if (!overlayAction || overlayAction.type === "CLOSE_OVERLAY") {
+            // Обычные переходы с destinationId
             if (action.destinationId) {
               target = action.destinationId;
             }
+          }
+          
+          // КРИТИЧНО: Определяем screenId для hotspot.frame
+          // Используем маппинг frame.id -> screenId, чтобы hotspot.frame совпадал с screen.id
+          // Это необходимо для правильной синхронизации экранов в viewer через PRESENTED_NODE_CHANGED
+          const hotspotFrameId = frameIdToScreenIdMap.get(frame.id) || frame.id; // Fallback на frame.id если маппинг не найден
+          
+          // КРИТИЧНО: Маппим target на screenId, если target существует
+          // Это необходимо для правильной синхронизации экранов в viewer
+          let targetScreenId = null;
+          if (target) {
+            targetScreenId = getScreenIdForFrame(target);
+            console.log("generateFromRESTAPI: Mapped hotspot target", {
+              nodeId: node.id,
+              nodeName: node.name,
+              frameId: frame.id,
+              frameName: frame.name,
+              hotspotFrameId: hotspotFrameId,
+              originalTarget: target,
+              targetScreenId: targetScreenId,
+              targetExistsInMap: frameIdToScreenIdMap.has(target)
+            });
+          } else {
+            console.log("generateFromRESTAPI: Hotspot has no target", {
+              nodeId: node.id,
+              nodeName: node.name,
+              frameId: frame.id,
+              frameName: frame.name,
+              hotspotFrameId: hotspotFrameId,
+              hasOverlayAction: !!overlayAction,
+              overlayActionType: overlayAction && overlayAction.type ? overlayAction.type : null,
+              actionType: action.type,
+              actionDestinationId: action.destinationId
+            });
           }
           
           // Создаем hotspot
           const hotspot = {
             id: node.id,
             name: node.name || node.id,
-            frame: frame.id,
+            frame: hotspotFrameId, // КРИТИЧНО: Используем screenId (figmaNodeId) вместо frame.id
             trigger: trigger,
             x: x,
             y: y,
             w: w,
             h: h,
-            target: target
+            target: targetScreenId // КРИТИЧНО: Используем screenId для target вместо frame.id
           };
           
           // Добавляем overlayAction, если есть
@@ -1387,12 +1881,27 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
           
           // Для обычных переходов добавляем edge
           if (target) {
-            edges.push({
-              from: frame.id,
-              to: target,
+            // НОВОЕ: Парсим transition из reaction (Phase 0)
+            const transition = parseTransition(reaction);
+            
+            // КРИТИЧНО: Используем screenId для edge.from и edge.to
+            // Это необходимо для правильной синхронизации экранов в viewer
+            const edgeFrom = getScreenIdForFrame(frame.id);
+            const edgeTo = getScreenIdForFrame(target);
+            
+            const edge = {
+              from: edgeFrom, // КРИТИЧНО: Используем screenId вместо frame.id
+              to: edgeTo, // КРИТИЧНО: Используем screenId для target вместо target
               id: node.id,
               trigger: trigger
-            });
+            };
+            
+            // Добавляем transition, если есть
+            if (transition) {
+              edge.transition = transition;
+            }
+            
+            edges.push(edge);
           }
         }
       }
@@ -1406,30 +1915,149 @@ async function generateFromRESTAPI(fileData, selectedFlowId) {
       )
     );
     
+    // НОВОЕ: Получаем метаданные Figma для canvas-based рендеринга
+    // ВАЖНО: figma.fileKey может быть null в некоторых случаях (например, в локальных файлах или при импорте через Share ссылку)
+    // Пытаемся получить fileKey из разных источников
+    let figmaFileId = figma.fileKey;
+    
+    // НОВОЕ: Если fileKey передан из Share ссылки, используем его (приоритет выше)
+    if (!figmaFileId && fileKeyFromShareLink) {
+      figmaFileId = fileKeyFromShareLink;
+      console.log("generateFromRESTAPI: Got figmaFileId from Share link fileKey:", figmaFileId);
+    }
+    
+    // Fallback: пытаемся получить из URL, если доступен
+    if (!figmaFileId) {
+      try {
+        if (figma.fileUrl) {
+          const urlMatch = figma.fileUrl.match(/\/file\/([a-zA-Z0-9]+)/);
+          if (urlMatch && urlMatch[1]) {
+            figmaFileId = urlMatch[1];
+            console.log("generateFromRESTAPI: Got figmaFileId from fileUrl:", figmaFileId);
+          }
+        }
+      } catch (e) {
+        console.warn("generateFromRESTAPI: Could not get figmaFileId from fileUrl:", e);
+      }
+    }
+    
+    // Логируем для диагностики
+    console.log("generateFromRESTAPI: figmaFileId:", figmaFileId, "figma.fileKey:", figma.fileKey, "figma.fileUrl:", figma.fileUrl);
+    
+    const figmaFileName = figma.root.name || "Untitled"; // Имя файла в Figma
+    
+    // figmaStartNodeId - это ID начального узла в формате pageId:nodeId
+    // ВАЖНО: В Figma node.id уже содержит pageId в формате "pageId:nodeId"
+    let figmaStartNodeId = null;
+    if (startFrame) {
+      const startFrameId = startFrame.id;
+      // ВАЖНО: startFrame.id может быть в формате "pageId:nodeId" или просто "nodeId"
+      // Если уже содержит ":", используем как есть, иначе формируем "pageId:nodeId"
+      if (startFrameId.includes(":")) {
+        figmaStartNodeId = startFrameId;
+        console.log("generateFromRESTAPI: figmaStartNodeId (from startFrame.id):", figmaStartNodeId, "from startFrame:", startFrame.name);
+      } else if (startFrame.parent && startFrame.parent.type === "PAGE") {
+        const pageId = startFrame.parent.id;
+        figmaStartNodeId = `${pageId}:${startFrameId}`;
+        console.log("generateFromRESTAPI: figmaStartNodeId (constructed):", figmaStartNodeId, "from startFrame:", startFrame.name, "pageId:", pageId, "nodeId:", startFrameId);
+      } else {
+        console.warn("generateFromRESTAPI: Could not generate figmaStartNodeId - startFrame.id format unknown and no page parent", {
+          startFrame: startFrame.name,
+          startFrameId: startFrameId,
+          parent: startFrame.parent ? startFrame.parent.type : null
+        });
+      }
+    } else {
+      console.warn("generateFromRESTAPI: Could not generate figmaStartNodeId - startFrame is missing");
+    }
+    
+    // КРИТИЧНО: Определяем screenId для start и end фреймов
+    // Используем маппинг если доступен, иначе fallback на frame.id
+    const startScreenId = startFrame ? getScreenIdForFrame(startFrame.id) : null;
+    const endScreenId = endFrame ? getScreenIdForFrame(endFrame.id) : null;
+    
+    if (startFrame && startScreenId !== startFrame.id) {
+      console.log("generateFromRESTAPI: Using screenId for start:", startScreenId, "instead of frame.id:", startFrame.id);
+    }
+    if (endFrame && endScreenId !== endFrame.id) {
+      console.log("generateFromRESTAPI: Using screenId for end:", endScreenId, "instead of frame.id:", endFrame.id);
+    }
+    
+    // НОВОЕ: Phase 0 - экспортируем v2 proto с scenes
+    // Для обратной совместимости также сохраняем screens (v1 формат)
     const output = {
       protoVersion: "v2",
-      start: startFrame.id,
-      end: endFrame.id,
+      start: startScreenId || (startFrame ? startFrame.id : null) || null, // КРИТИЧНО: Используем screenId вместо frame.id
+      end: endScreenId || (endFrame ? endFrame.id : null) || null, // КРИТИЧНО: Используем screenId вместо frame.id
       flowId: selectedFlowId, // Сохраняем ID выбранного flow
-      screens: screens,
+      scenes: scenes, // НОВОЕ: Scene Graph (v2 формат)
+      screens: screens, // v1 формат (для обратной совместимости и аналитики)
       hotspots: hotspots,
       edges: edges,
       targets: targets
     };
     
+    // НОВОЕ: Метаданные Figma для canvas-based рендеринга
+    // ВАЖНО: Сохраняем только если figmaFileId доступен
+    if (figmaFileId) {
+      output.figmaFileId = figmaFileId;
+      output.figmaStartNodeId = figmaStartNodeId;
+      output.figmaFileName = figmaFileName;
+      console.log("generateFromRESTAPI: ✅ Figma metadata saved successfully", {
+        figmaFileId: figmaFileId,
+        figmaStartNodeId: figmaStartNodeId,
+        figmaFileName: figmaFileName
+      });
+    } else {
+      console.warn("generateFromRESTAPI: ⚠️ Figma metadata NOT saved - figmaFileId is null/undefined", {
+        figmaFileKey: figma.fileKey,
+        figmaFileUrl: figma.fileUrl,
+        note: "This may happen with local files. Try opening the file from Figma web or ensure the file is saved to Figma cloud."
+      });
+    }
+    
     // Отправляем данные в UI
+    // ВАЖНО: Сериализуем через JSON.parse/stringify для очистки от символов и несериализуемых данных
     const endFrameFoundByMarker = /\[final\]/i.test(endFrame.name) || /\[end\]/i.test(endFrame.name);
     
-    figma.ui.postMessage({ 
-      type: "EXPORT_JSON", 
-      data: output,
-      info: {
+    try {
+      // Логируем метаданные перед отправкой
+      console.log("generateFromRESTAPI: Output metadata:", {
+        figmaFileId: output.figmaFileId || "MISSING",
+        figmaStartNodeId: output.figmaStartNodeId || "MISSING",
+        figmaFileName: output.figmaFileName || "MISSING",
+        hasFigmaMetadata: !!(output.figmaFileId && output.figmaStartNodeId && output.figmaFileName),
+        startFrameId: output.start,
         startFrameName: startFrame.name,
-        endFrameName: endFrame.name,
-        endFrameId: endFrame.id,
-        endFrameFoundByMarker: endFrameFoundByMarker
-      }
-    });
+        firstScreenFigmaNodeId: scenes.length > 0 ? scenes[0].figmaNodeId : (screens.length > 0 ? screens[0].figmaNodeId : null),
+        screensWithFigmaNodeId: screens.filter(function(s) { return s.figmaNodeId; }).length,
+        scenesWithFigmaNodeId: scenes.filter(function(s) { return s.figmaNodeId; }).length,
+        totalScreens: screens.length,
+        totalScenes: scenes.length
+      });
+      
+      // Сериализуем output через JSON для очистки от символов
+      const serializedOutput = JSON.parse(JSON.stringify(output));
+      
+      figma.ui.postMessage({ 
+        type: "EXPORT_JSON", 
+        data: serializedOutput,
+        info: {
+          startFrameName: startFrame.name,
+          endFrameName: endFrame.name,
+          endFrameId: endFrame.id,
+          endFrameFoundByMarker: endFrameFoundByMarker
+        }
+      });
+    } catch (serializeError) {
+      console.error("Error serializing output:", serializeError);
+      // Fallback: пытаемся отправить без сериализации (для отладки)
+      figma.ui.postMessage({ 
+        type: "EXPORT_JSON_ERROR", 
+        error: "Error serializing output: " + serializeError.message
+      });
+      throw new Error("Failed to serialize output: " + serializeError.message);
+    }
     
     figma.notify("✓ Прототип успешно сгенерирован из REST API данных!");
     

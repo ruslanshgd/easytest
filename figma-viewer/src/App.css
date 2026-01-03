@@ -1,6 +1,6 @@
 #root {
-  width: 100%;
-  min-height: 100vh;
+  /* Убрали width: 100% чтобы не создавать горизонтальный скролл */
+  /* Убрали min-height: 100vh чтобы не создавать лишние скроллы */
   display: flex;
   align-items: center;
   justify-content: center;

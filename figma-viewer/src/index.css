@@ -28,13 +28,13 @@ body {
   place-items: center;
   justify-content: center;
   min-width: 320px;
-  min-height: 100vh;
+  /* Убрали min-height: 100vh чтобы не создавать лишние скроллы */
   background-color: #f5f5f7;
 }
 
 #root {
-  width: 100%;
-  min-height: 100vh;
+  /* Убрали width: 100% чтобы не создавать горизонтальный скролл */
+  /* Убрали min-height: 100vh чтобы не создавать лишние скроллы */
   background-color: #f5f5f7;
 }
 

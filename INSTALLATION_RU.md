@@ -133,7 +133,27 @@ sudo ufw allow 5432/tcp
 2. Создайте таблицы (если есть SQL-скрипт, выполните его)
 3. Настройте RLS (Row Level Security) политики
 
-### Шаг 5: Настройте переменные окружения
+### Шаг 5: Настройте Figma OAuth (Embed Kit 2.0)
+
+Для работы аналитики кликов и отслеживания переходов между экранами:
+
+1. Перейдите в [Figma Developer Console](https://www.figma.com/developers/apps)
+2. Нажмите **Create new app**
+3. Заполните форму:
+   - **App name**: название вашего приложения (например, "ИзиТест Viewer")
+   - **Website URL**: URL вашего viewer (например, `https://viewer.ваш-домен.ru`)
+4. В разделе **Allowed origins** добавьте домены:
+   - Для разработки: `http://localhost:5173`
+   - Для продакшна: `https://viewer.ваш-домен.ru`
+5. Сохраните и скопируйте **Client ID**
+6. Откройте файл `figma-viewer/src/TestView.tsx` и обновите константу:
+   ```typescript
+   const FIGMA_CLIENT_ID = "ваш-client-id";
+   ```
+
+> **Важно:** Без настройки Figma OAuth события от embed (клики, переходы) не будут отслеживаться в аналитике.
+
+### Шаг 6: Настройте переменные окружения
 
 **Для figma-viewer:**
 
@@ -151,7 +171,7 @@ VITE_SUPABASE_URL=https://ваш-проект.supabase.co
 VITE_SUPABASE_ANON_KEY=ваш-anon-ключ
 ```
 
-### Шаг 6: Запустите локально
+### Шаг 7: Запустите локально
 
 **Запуск figma-viewer:**
 ```bash

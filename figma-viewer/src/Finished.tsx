@@ -9,6 +9,15 @@ export default function Finished() {
   const aborted = loc.state?.aborted;
   const sessionId = params.sessionId || loc.state?.sessionId || null;
   
+  // ДИАГНОСТИКА: Логируем загрузку компонента Finished
+  console.log("Finished: Component loaded", {
+    sessionId,
+    aborted,
+    pathname: loc.pathname,
+    state: loc.state,
+    params: params
+  });
+  
   const [item1, setItem1] = useState<number | null>(null);
   const [item2, setItem2] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<string>("");
