@@ -382,7 +382,7 @@ interface PrototypeBlockWrapperProps {
 }
 
 function PrototypeBlockWrapper({ prototypeId, instructions, onComplete }: PrototypeBlockWrapperProps) {
-  const navigate = useNavigate();
+  // const navigate = useNavigate(); // Reserved for future navigation needs
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [prototypeCompleted, setPrototypeCompleted] = useState(false);
 

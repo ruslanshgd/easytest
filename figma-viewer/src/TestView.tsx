@@ -35,7 +35,7 @@ interface TestViewProps {
 export default function TestView({ 
   sessionId: propSessionId, 
   prototypeIdOverride = null,
-  instructionsOverride = null,
+  instructionsOverride: _instructionsOverride = null, // eslint-disable-line @typescript-eslint/no-unused-vars
   onComplete = undefined,
   runIdOverride = null,
   blockIdOverride = null,

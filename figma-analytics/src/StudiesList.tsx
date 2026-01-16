@@ -43,9 +43,41 @@ import {
   FolderInput, 
   Trash2,
   ChevronRight,
-  GripVertical
+  GripVertical,
+  Layers,
+  MessageSquare,
+  ListChecks,
+  BarChart3,
+  Images,
+  FileText,
+  Timer,
+  ClipboardList,
+  Users
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Block type icons mapping
+const BLOCK_ICONS: Record<string, React.ElementType> = {
+  prototype: Layers,
+  open_question: MessageSquare,
+  choice: ListChecks,
+  scale: BarChart3,
+  preference: Images,
+  context: FileText,
+  five_seconds: Timer,
+  umux_lite: ClipboardList,
+};
+
+const BLOCK_COLORS: Record<string, string> = {
+  prototype: "bg-blue-100 text-blue-600",
+  open_question: "bg-yellow-100 text-yellow-600",
+  choice: "bg-green-100 text-green-600",
+  scale: "bg-orange-100 text-orange-600",
+  preference: "bg-pink-100 text-pink-600",
+  context: "bg-gray-100 text-gray-600",
+  five_seconds: "bg-red-100 text-red-600",
+  umux_lite: "bg-purple-100 text-purple-600",
+};
 
 interface Study {
   id: string;
@@ -67,6 +99,18 @@ interface FolderType {
 interface FolderWithCount extends FolderType {
   studiesCount: number;
   subFoldersCount: number;
+}
+
+interface StudyBlock {
+  id: string;
+  study_id: string;
+  type: string;
+  order_index: number;
+}
+
+interface StudyStats {
+  blocks: StudyBlock[];
+  sessionsCount: number;
 }
 
 export default function StudiesList() {
@@ -106,6 +150,9 @@ export default function StudiesList() {
   const [draggedItem, setDraggedItem] = useState<{ type: "study" | "folder"; id: string } | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [isDropTargetRoot, setIsDropTargetRoot] = useState(false);
+  
+  // Stats for studies (blocks and sessions count)
+  const [studyStats, setStudyStats] = useState<Record<string, StudyStats>>({});
 
   // Helper function to get team_id
   const getUserTeamId = async (userId: string): Promise<string | null> => {
@@ -217,7 +264,38 @@ export default function StudiesList() {
         return;
       }
 
-      setStudies((studiesData || []) as Study[]);
+      const loadedStudies = (studiesData || []) as Study[];
+      setStudies(loadedStudies);
+      
+      // Load blocks and sessions count for each study
+      if (loadedStudies.length > 0) {
+        const studyIds = loadedStudies.map(s => s.id);
+        
+        // Load blocks for all studies at once
+        const { data: blocksData } = await supabase
+          .from("study_blocks")
+          .select("id, study_id, type, order_index")
+          .in("study_id", studyIds)
+          .order("order_index", { ascending: true });
+        
+        // Load sessions count for all studies at once
+        const { data: sessionsData } = await supabase
+          .from("sessions")
+          .select("study_id")
+          .in("study_id", studyIds);
+        
+        // Group by study_id
+        const stats: Record<string, StudyStats> = {};
+        for (const study of loadedStudies) {
+          const studyBlocks = (blocksData || []).filter(b => b.study_id === study.id) as StudyBlock[];
+          const studySessions = (sessionsData || []).filter(s => s.study_id === study.id);
+          stats[study.id] = {
+            blocks: studyBlocks,
+            sessionsCount: studySessions.length
+          };
+        }
+        setStudyStats(stats);
+      }
     } catch (err) {
       console.error("Unexpected error loading data:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -995,11 +1073,14 @@ export default function StudiesList() {
           </Button>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-2">
           {studies.map(study => {
             const statusConfig = getStatusConfig(study.status);
             const isSelected = selectedStudies.has(study.id);
             const isBeingDragged = draggedItem?.type === "study" && draggedItem.id === study.id;
+            const stats = studyStats[study.id];
+            const blocks = stats?.blocks || [];
+            const sessionsCount = stats?.sessionsCount || 0;
             
             return (
               <Card
@@ -1013,75 +1094,117 @@ export default function StudiesList() {
                   isBeingDragged && "opacity-50"
                 )}
               >
-                <CardHeader className="p-4 pb-2">
-                  <div className="flex items-start gap-3">
-                    <div className="flex items-center gap-2 pt-1">
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelection(study.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <GripVertical className="h-4 w-4 text-muted-foreground/50 cursor-grab" />
-                    </div>
-                    <div 
-                      className="flex-1 min-w-0 cursor-pointer"
-                      onClick={() => !draggedItem && navigate(`/studies/${study.id}`)}
-                    >
-                      <CardTitle className="text-base mb-2 hover:text-primary transition-colors">
-                    {study.title}
-                      </CardTitle>
-                      <Badge variant={statusConfig.variant}>
+                <div className="flex items-center p-4 gap-4">
+                  {/* Checkbox & Drag handle */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleSelection(study.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <GripVertical className="h-4 w-4 text-muted-foreground/40 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                  
+                  {/* Block icons */}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {blocks.length > 0 ? (
+                      blocks.slice(0, 8).map((block, idx) => {
+                        const IconComponent = BLOCK_ICONS[block.type] || FileText;
+                        const colorClass = BLOCK_COLORS[block.type] || "bg-gray-100 text-gray-600";
+                        return (
+                          <div
+                            key={block.id}
+                            className={cn(
+                              "w-8 h-8 rounded-md flex items-center justify-center",
+                              colorClass
+                            )}
+                            title={block.type}
+                          >
+                            <IconComponent size={16} />
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center text-muted-foreground">
+                        <Plus size={16} />
+                      </div>
+                    )}
+                    {blocks.length > 8 && (
+                      <span className="text-xs text-muted-foreground ml-1">+{blocks.length - 8}</span>
+                    )}
+                  </div>
+                  
+                  {/* Title & Status */}
+                  <div 
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={() => !draggedItem && navigate(`/studies/${study.id}`)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium truncate hover:text-primary transition-colors">
+                        {study.title}
+                      </span>
+                      <Badge variant={statusConfig.variant} className="flex-shrink-0">
                         {statusConfig.label}
                       </Badge>
+                    </div>
                   </div>
+                  
+                  {/* Sessions count */}
+                  {sessionsCount > 0 && (
+                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-shrink-0">
+                      <Users size={14} />
+                      <span>{sessionsCount}</span>
+                    </div>
+                  )}
+                  
+                  {/* Date */}
+                  <div className="text-xs text-muted-foreground flex-shrink-0 w-24 text-right">
+                    {new Date(study.created_at).toLocaleDateString("ru-RU")}
                   </div>
-                </CardHeader>
-                <CardContent className="p-4 pt-2">
-                  <p className="text-xs text-muted-foreground">
-                    Создан: {new Date(study.created_at).toLocaleDateString("ru-RU")}
-                  </p>
-                </CardContent>
-                <CardFooter className="p-4 pt-0 flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => {
-                      setRenameTitle(study.title);
-                      setShowRenameModal(study.id);
-                    }}
-                  >
-                    <Pencil className="h-3 w-3 mr-1" />
-                    Переименовать
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleDuplicate(study)}>
-                        <Copy className="h-4 w-4 mr-2" />
-                        Копировать
-                      </DropdownMenuItem>
-                      {hasFolders && (
-                        <DropdownMenuItem onClick={() => setShowMoveModal(study.id)}>
-                          <FolderInput className="h-4 w-4 mr-2" />
-                          Переместить
+                  
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenameTitle(study.title);
+                        setShowRenameModal(study.id);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleDuplicate(study)}>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Копировать
                         </DropdownMenuItem>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem 
-                        className="text-destructive"
-                        onClick={() => setShowDeleteDialog(study)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Удалить
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </CardFooter>
+                        {hasFolders && (
+                          <DropdownMenuItem onClick={() => setShowMoveModal(study.id)}>
+                            <FolderInput className="h-4 w-4 mr-2" />
+                            Переместить
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => setShowDeleteDialog(study)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Удалить
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
               </Card>
             );
           })}

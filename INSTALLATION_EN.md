@@ -2,10 +2,12 @@
 
 ## What This Is
 
-Three tools for testing Figma prototypes:
+Three tools for UX testing with Figma prototypes:
 - **figma-plugin** — Figma plugin that creates prototypes
-- **figma-viewer** — web app where respondents test prototypes
-- **figma-analytics** — analytics dashboard showing test results
+- **figma-viewer** — web app where respondents take tests
+- **figma-analytics** — test builder and analytics dashboard
+
+Supported block types: Welcome screen, Prototype testing, Open questions, Single/Multiple choice, Scale, Card sorting, Tree testing, Completion screen.
 
 ---
 

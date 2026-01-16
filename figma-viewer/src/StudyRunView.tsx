@@ -162,7 +162,7 @@ function ImageModal({ imageUrl, onClose, onNext, onPrev, showNavigation = false,
 }
 
 // Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
 
 interface StudyData {
   study: {
@@ -627,7 +627,7 @@ function PreferenceBlock({ config, onSubmit }: PreferenceBlockProps) {
       const durationMs = Date.now() - startTime;
       // Подсчитываем победы
       const wins: { [key: number]: number } = {};
-      newResults.forEach((winner, i) => {
+      newResults.forEach((winner) => {
         wins[winner] = (wins[winner] || 0) + 1;
       });
       try {
@@ -786,6 +786,325 @@ function FiveSecondsBlock({ config, onComplete }: FiveSecondsBlockProps) {
   return null;
 }
 
+// ============= Типы для Tree Testing =============
+interface TreeTestingNode {
+  id: string;
+  name: string;
+  children: TreeTestingNode[];
+}
+
+// ============= Компонент Tree Testing =============
+interface TreeTestingBlockProps {
+  config: {
+    task: string;
+    description?: string;
+    tree: TreeTestingNode[];
+    correctAnswers: string[];
+    allowSkip: boolean;
+  };
+  onSubmit: (answer: any, durationMs: number) => Promise<void>;
+  onSkip?: () => Promise<void>;
+}
+
+function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
+  const [selectedPath, setSelectedPath] = useState<string[]>([]); // массив ID от корня до выбранного узла
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+  const [startTime] = useState(Date.now());
+
+  // Найти узел по ID
+  const findNode = (nodes: TreeTestingNode[], nodeId: string): TreeTestingNode | null => {
+    for (const node of nodes) {
+      if (node.id === nodeId) return node;
+      if (node.children.length > 0) {
+        const found = findNode(node.children, nodeId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Найти путь к узлу (массив ID от корня)
+  const findPathToNode = (nodes: TreeTestingNode[], targetId: string, currentPath: string[] = []): string[] | null => {
+    for (const node of nodes) {
+      const newPath = [...currentPath, node.id];
+      if (node.id === targetId) return newPath;
+      if (node.children.length > 0) {
+        const found = findPathToNode(node.children, targetId, newPath);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Получить имена узлов по пути
+  const getPathNames = (path: string[]): string[] => {
+    return path.map(id => {
+      const node = findNode(config.tree, id);
+      return node?.name || "";
+    }).filter(Boolean);
+  };
+
+  // Развернуть/свернуть узел
+  const toggleExpanded = (nodeId: string) => {
+    const newExpanded = new Set(expandedNodes);
+    if (newExpanded.has(nodeId)) {
+      newExpanded.delete(nodeId);
+    } else {
+      newExpanded.add(nodeId);
+    }
+    setExpandedNodes(newExpanded);
+  };
+
+  // Выбрать узел
+  const selectNode = (nodeId: string) => {
+    const path = findPathToNode(config.tree, nodeId);
+    if (path) {
+      setSelectedPath(path);
+      // Развернуть всех родителей
+      const newExpanded = new Set(expandedNodes);
+      path.forEach(id => newExpanded.add(id));
+      setExpandedNodes(newExpanded);
+    }
+  };
+
+  // Отправить ответ
+  const handleSubmit = async () => {
+    if (selectedPath.length === 0) return;
+    
+    setSubmitting(true);
+    const durationMs = Date.now() - startTime;
+    const selectedNodeId = selectedPath[selectedPath.length - 1];
+    const isCorrect = config.correctAnswers.includes(selectedNodeId);
+    
+    try {
+      await onSubmit({
+        selectedNodeId,
+        selectedPath,
+        pathNames: getPathNames(selectedPath),
+        isCorrect
+      }, durationMs);
+    } catch (err) {
+      console.error("Error submitting tree testing:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Пропустить
+  const handleSkip = async () => {
+    if (!config.allowSkip || !onSkip) return;
+    setSubmitting(true);
+    try {
+      await onSkip();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Рендер узла дерева
+  const renderTreeNode = (node: TreeTestingNode, depth: number = 0) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedNodes.has(node.id);
+    const isSelected = selectedPath.includes(node.id);
+    const isLeafSelected = selectedPath[selectedPath.length - 1] === node.id;
+
+    return (
+      <div key={node.id}>
+        <div
+          onClick={() => {
+            if (hasChildren) {
+              toggleExpanded(node.id);
+            }
+            selectNode(node.id);
+          }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "12px 16px",
+            marginLeft: depth * 24,
+            marginBottom: 4,
+            background: isLeafSelected ? "#e3f2fd" : isSelected ? "#f5f5f5" : "white",
+            border: isLeafSelected ? "2px solid #2196f3" : "1px solid #e0e0e0",
+            borderRadius: 8,
+            cursor: "pointer",
+            transition: "all 0.15s ease"
+          }}
+        >
+          {/* Иконка развернуть/свернуть */}
+          <span style={{ 
+            width: 20, 
+            height: 20, 
+            display: "flex", 
+            alignItems: "center", 
+            justifyContent: "center",
+            color: "#666"
+          }}>
+            {hasChildren ? (isExpanded ? "▼" : "▶") : ""}
+          </span>
+          
+          {/* Название */}
+          <span style={{ 
+            flex: 1, 
+            fontSize: 15, 
+            fontWeight: isLeafSelected ? 600 : 400,
+            color: isLeafSelected ? "#1976d2" : "#333"
+          }}>
+            {node.name}
+          </span>
+
+          {/* Индикатор выбора */}
+          {isLeafSelected && (
+            <span style={{
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              background: "#2196f3",
+              color: "white",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 14
+            }}>
+              ✓
+            </span>
+          )}
+        </div>
+
+        {/* Дочерние узлы */}
+        {hasChildren && isExpanded && (
+          <div>
+            {node.children.map(child => renderTreeNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const hasSelection = selectedPath.length > 0;
+
+  return (
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      minHeight: "100vh",
+      padding: "20px",
+      background: "#f5f5f7"
+    }}>
+      <div style={{
+        maxWidth: "800px",
+        width: "100%",
+        margin: "0 auto",
+        background: "white",
+        borderRadius: "12px",
+        padding: "32px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+      }}>
+        {/* Заголовок */}
+        <h2 style={{
+          margin: "0 0 12px 0",
+          fontSize: "24px",
+          fontWeight: 600,
+          color: "#333"
+        }}>
+          {config.task}
+        </h2>
+
+        {/* Описание */}
+        {config.description && (
+          <p style={{
+            margin: "0 0 24px 0",
+            color: "#666",
+            fontSize: "15px",
+            lineHeight: 1.5
+          }}>
+            {config.description}
+          </p>
+        )}
+
+        {/* Инструкция */}
+        <p style={{
+          margin: "0 0 20px 0",
+          color: "#999",
+          fontSize: "13px"
+        }}>
+          Выберите категорию, которая лучше всего соответствует заданию. Нажмите на категорию чтобы раскрыть подкатегории.
+        </p>
+
+        {/* Дерево */}
+        <div style={{
+          marginBottom: 24,
+          maxHeight: "50vh",
+          overflowY: "auto",
+          border: "1px solid #e0e0e0",
+          borderRadius: 8,
+          padding: 12
+        }}>
+          {config.tree.map(node => renderTreeNode(node))}
+        </div>
+
+        {/* Выбранный путь */}
+        {hasSelection && (
+          <div style={{
+            marginBottom: 24,
+            padding: "12px 16px",
+            background: "#e8f5e9",
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 8
+          }}>
+            <span style={{ color: "#2e7d32", fontWeight: 500 }}>Ваш выбор:</span>
+            <span style={{ color: "#333" }}>
+              {getPathNames(selectedPath).join(" › ")}
+            </span>
+          </div>
+        )}
+
+        {/* Кнопки */}
+        <div style={{ display: "flex", gap: 12 }}>
+          {config.allowSkip && (
+            <button
+              onClick={handleSkip}
+              disabled={submitting}
+              style={{
+                flex: 1,
+                padding: "14px 24px",
+                background: "#f5f5f5",
+                color: "#666",
+                border: "none",
+                borderRadius: "8px",
+                fontSize: "16px",
+                cursor: submitting ? "not-allowed" : "pointer"
+              }}
+            >
+              Пропустить
+            </button>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={!hasSelection || submitting}
+            style={{
+              flex: 1,
+              padding: "14px 24px",
+              background: hasSelection && !submitting ? "#007AFF" : "#ccc",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              fontSize: "16px",
+              fontWeight: 600,
+              cursor: hasSelection && !submitting ? "pointer" : "not-allowed"
+            }}
+          >
+            {submitting ? "Сохранение..." : "Подтвердить выбор"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============= Компонент UMUX Lite опрос =============
 interface UmuxLiteBlockProps {
   onSubmit: (item1: number, item2: number, feedback: string, durationMs: number) => Promise<void>;
@@ -858,6 +1177,492 @@ function UmuxLiteBlock({ onSubmit }: UmuxLiteBlockProps) {
         <button onClick={handleSubmit} disabled={submitting || item1 === null || item2 === null} style={{ width: "100%", padding: "14px 24px", background: (submitting || item1 === null || item2 === null) ? "#ccc" : "#007AFF", color: "#fff", border: "none", borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: (submitting || item1 === null || item2 === null) ? "not-allowed" : "pointer" }}>
           {submitting ? "Отправка..." : "Отправить"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ============= Компонент "Сортировка карточек" =============
+interface CardSortingCard {
+  id: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+}
+
+interface CardSortingCategory {
+  id: string;
+  name: string;
+}
+
+interface CardSortingBlockProps {
+  config: {
+    task: string;
+    sortingType: "open" | "closed";
+    cards: CardSortingCard[];
+    categories: CardSortingCategory[];
+    shuffleCards: boolean;
+    shuffleCategories: boolean;
+    allowPartialSort: boolean;
+    showImages?: boolean;
+    showDescriptions?: boolean;
+  };
+  onSubmit: (answer: any, durationMs: number) => Promise<void>;
+}
+
+function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
+  const [phase, setPhase] = useState<"intro" | "sorting">("intro");
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  
+  // Перемешиваем карточки и категории
+  const [shuffledCards] = useState(() => {
+    const cards = [...config.cards];
+    if (config.shuffleCards) {
+      for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+      }
+    }
+    return cards;
+  });
+  
+  const [shuffledCategories] = useState(() => {
+    const cats = [...config.categories];
+    if (config.shuffleCategories) {
+      for (let i = cats.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cats[i], cats[j]] = [cats[j], cats[i]];
+      }
+    }
+    return cats;
+  });
+  
+  // Карточки, которые ещё не отсортированы
+  const [unsortedCards, setUnsortedCards] = useState<CardSortingCard[]>(shuffledCards);
+  
+  // Распределение карточек по категориям: { categoryId: [card, ...] }
+  const [sortedCards, setSortedCards] = useState<Record<string, CardSortingCard[]>>({});
+  
+  // Пользовательские категории (для открытой сортировки)
+  const [userCategories, setUserCategories] = useState<CardSortingCategory[]>([]);
+  
+  // Перетаскиваемая карточка
+  const [draggingCard, setDraggingCard] = useState<CardSortingCard | null>(null);
+  
+  // Показать зону создания категории
+  const [showCreateCategoryZone, setShowCreateCategoryZone] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [pendingCardForNewCategory, setPendingCardForNewCategory] = useState<CardSortingCard | null>(null);
+  
+  const allCategories = [...shuffledCategories, ...userCategories];
+  const sortedCount = shuffledCards.length - unsortedCards.length;
+  
+  const handleStart = () => {
+    setPhase("sorting");
+    setStartTime(Date.now());
+  };
+  
+  const handleDragStart = (card: CardSortingCard) => {
+    setDraggingCard(card);
+  };
+  
+  const handleDragEnd = () => {
+    setDraggingCard(null);
+    setShowCreateCategoryZone(false);
+  };
+  
+  const handleDropOnCategory = (categoryId: string) => {
+    if (!draggingCard) return;
+    
+    // Удаляем из несортированных
+    setUnsortedCards(prev => prev.filter(c => c.id !== draggingCard.id));
+    
+    // Удаляем из других категорий если уже была отсортирована
+    setSortedCards(prev => {
+      const newSorted = { ...prev };
+      Object.keys(newSorted).forEach(catId => {
+        newSorted[catId] = newSorted[catId].filter(c => c.id !== draggingCard.id);
+      });
+      // Добавляем в новую категорию
+      if (!newSorted[categoryId]) {
+        newSorted[categoryId] = [];
+      }
+      newSorted[categoryId] = [...newSorted[categoryId], draggingCard];
+      return newSorted;
+    });
+    
+    setDraggingCard(null);
+    setShowCreateCategoryZone(false);
+  };
+  
+  const handleDropOnCreateCategory = () => {
+    if (!draggingCard || config.sortingType === "closed") return;
+    setPendingCardForNewCategory(draggingCard);
+    setDraggingCard(null);
+    setShowCreateCategoryZone(false);
+    setNewCategoryName("");
+  };
+  
+  const handleCreateCategory = () => {
+    if (!newCategoryName.trim() || !pendingCardForNewCategory) return;
+    
+    const newCat: CardSortingCategory = {
+      id: crypto.randomUUID(),
+      name: newCategoryName.trim()
+    };
+    
+    setUserCategories(prev => [...prev, newCat]);
+    
+    // Удаляем карточку из несортированных
+    setUnsortedCards(prev => prev.filter(c => c.id !== pendingCardForNewCategory.id));
+    
+    // Добавляем в новую категорию
+    setSortedCards(prev => ({
+      ...prev,
+      [newCat.id]: [pendingCardForNewCategory]
+    }));
+    
+    setPendingCardForNewCategory(null);
+    setNewCategoryName("");
+  };
+  
+  const handleCancelCreateCategory = () => {
+    setPendingCardForNewCategory(null);
+    setNewCategoryName("");
+  };
+  
+  const handleRemoveCategory = (categoryId: string) => {
+    // Вернуть карточки обратно в несортированные
+    const cardsToReturn = sortedCards[categoryId] || [];
+    setUnsortedCards(prev => [...prev, ...cardsToReturn]);
+    
+    // Удалить категорию
+    setUserCategories(prev => prev.filter(c => c.id !== categoryId));
+    setSortedCards(prev => {
+      const newSorted = { ...prev };
+      delete newSorted[categoryId];
+      return newSorted;
+    });
+  };
+  
+  const handleReturnCard = (card: CardSortingCard, fromCategoryId: string) => {
+    setSortedCards(prev => {
+      const newSorted = { ...prev };
+      newSorted[fromCategoryId] = newSorted[fromCategoryId].filter(c => c.id !== card.id);
+      return newSorted;
+    });
+    setUnsortedCards(prev => [...prev, card]);
+  };
+  
+  const canSubmit = config.allowPartialSort || unsortedCards.length === 0;
+  
+  const handleSubmit = async () => {
+    if (!canSubmit || !startTime) return;
+    
+    setSubmitting(true);
+    const durationMs = Date.now() - startTime;
+    
+    // Формируем результат
+    const result: Record<string, string[]> = {};
+    allCategories.forEach(cat => {
+      const cards = sortedCards[cat.id] || [];
+      if (cards.length > 0) {
+        result[cat.name] = cards.map(c => c.title);
+      }
+    });
+    
+    try {
+      await onSubmit({
+        categories: result,
+        unsortedCount: unsortedCards.length,
+        totalCards: shuffledCards.length,
+        sortingType: config.sortingType,
+        userCreatedCategories: userCategories.map(c => c.name)
+      }, durationMs);
+    } catch (err) {
+      console.error("Error submitting card sorting:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  
+  // Intro phase
+  if (phase === "intro") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 20, background: "#f5f5f7" }}>
+        <div style={{ maxWidth: 600, width: "100%", background: "white", borderRadius: 12, padding: 32, boxShadow: "0 2px 8px rgba(0,0,0,0.1)", textAlign: "center" }}>
+          <h2 style={{ margin: "0 0 24px 0", fontSize: 28, fontWeight: 700, color: "#333" }}>Сортировка карточек</h2>
+          <p style={{ margin: "0 0 16px 0", color: "#666", fontSize: 16, lineHeight: 1.6 }}>
+            Отсортируйте каждую карточку в категорию, которая вам кажется наиболее подходящей. Перетащите карточки в правую часть страницы, чтобы создать категории.
+          </p>
+          <p style={{ margin: "0 0 32px 0", color: "#999", fontSize: 14 }}>
+            Просто делайте то, что кажется вам наиболее подходящим, нет правильных или неправильных ответов.
+          </p>
+          <button
+            onClick={handleStart}
+            style={{
+              padding: "14px 32px",
+              background: "#007AFF",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 16,
+              fontWeight: 600,
+              cursor: "pointer"
+            }}
+          >
+            Начать
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  // Modal for creating new category
+  if (pendingCardForNewCategory) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 20, background: "#f5f5f7" }}>
+        <div style={{ maxWidth: 400, width: "100%", background: "white", borderRadius: 12, padding: 24, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }}>
+          <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600 }}>Создать новую категорию</h3>
+          <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#666" }}>
+            Карточка: <strong>{pendingCardForNewCategory.title}</strong>
+          </p>
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={e => setNewCategoryName(e.target.value)}
+            placeholder="Название категории"
+            autoFocus
+            style={{
+              width: "100%",
+              padding: "12px",
+              border: "1px solid #ddd",
+              borderRadius: 8,
+              fontSize: 14,
+              marginBottom: 16,
+              boxSizing: "border-box"
+            }}
+            onKeyDown={e => {
+              if (e.key === "Enter" && newCategoryName.trim()) {
+                handleCreateCategory();
+              }
+            }}
+          />
+          <div style={{ display: "flex", gap: 12 }}>
+            <button
+              onClick={handleCancelCreateCategory}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: "#f5f5f5",
+                color: "#666",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 14,
+                cursor: "pointer"
+              }}
+            >
+              Отмена
+            </button>
+            <button
+              onClick={handleCreateCategory}
+              disabled={!newCategoryName.trim()}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: newCategoryName.trim() ? "#007AFF" : "#ccc",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: newCategoryName.trim() ? "pointer" : "not-allowed"
+              }}
+            >
+              Создать
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Sorting phase
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: "#f5f5f7" }}>
+      {/* Left side - Unsorted cards */}
+      <div style={{ width: 280, padding: 20, borderRight: "1px solid #e0e0e0", background: "white", display: "flex", flexDirection: "column" }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>{config.task}</div>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>Карточки</div>
+          <div style={{ fontSize: 13, color: "#999" }}>{sortedCount} / {shuffledCards.length}</div>
+          <div style={{ marginTop: 8, height: 4, background: "#e0e0e0", borderRadius: 2 }}>
+            <div style={{ height: "100%", background: "#007AFF", borderRadius: 2, width: `${(sortedCount / shuffledCards.length) * 100}%`, transition: "width 0.3s" }} />
+          </div>
+        </div>
+        
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {unsortedCards.map(card => (
+            <div
+              key={card.id}
+              draggable
+              onDragStart={() => handleDragStart(card)}
+              onDragEnd={handleDragEnd}
+              style={{
+                padding: "12px 16px",
+                background: "#f7f7f5",
+                borderRadius: 8,
+                marginBottom: 8,
+                cursor: "grab",
+                border: "1px solid #e5e5e3",
+                transition: "box-shadow 0.2s"
+              }}
+              onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)"; }}
+              onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; }}
+            >
+              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                {config.showImages && card.imageUrl && (
+                  <img src={card.imageUrl} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                )}
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{card.title}</div>
+                  {config.showDescriptions && card.description && (
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{card.description}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          
+          {unsortedCards.length === 0 && (
+            <div style={{ textAlign: "center", padding: 20, color: "#999", fontSize: 14 }}>
+              Все карточки отсортированы
+            </div>
+          )}
+        </div>
+        
+        <button
+          onClick={handleSubmit}
+          disabled={!canSubmit || submitting}
+          style={{
+            marginTop: 16,
+            width: "100%",
+            padding: "14px",
+            background: canSubmit && !submitting ? "#007AFF" : "#ccc",
+            color: "white",
+            border: "none",
+            borderRadius: 8,
+            fontSize: 16,
+            fontWeight: 600,
+            cursor: canSubmit && !submitting ? "pointer" : "not-allowed"
+          }}
+        >
+          {submitting ? "Сохранение..." : "Завершить"}
+        </button>
+      </div>
+      
+      {/* Right side - Categories */}
+      <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 16 }}>
+          {allCategories.map(cat => {
+            const isUserCreated = userCategories.some(uc => uc.id === cat.id);
+            const categoryCards = sortedCards[cat.id] || [];
+            
+            return (
+              <div
+                key={cat.id}
+                onDragOver={e => { e.preventDefault(); }}
+                onDrop={() => handleDropOnCategory(cat.id)}
+                style={{
+                  background: "white",
+                  borderRadius: 12,
+                  border: draggingCard ? "2px dashed #007AFF" : "1px solid #e0e0e0",
+                  minHeight: 200,
+                  display: "flex",
+                  flexDirection: "column"
+                }}
+              >
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>{cat.name}</span>
+                  {isUserCreated && (
+                    <button
+                      onClick={() => handleRemoveCategory(cat.id)}
+                      style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 18 }}
+                      title="Удалить категорию"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <div style={{ flex: 1, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {categoryCards.length === 0 ? (
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#999", fontSize: 13 }}>
+                      Перетащите сюда, чтобы добавить в категорию
+                    </div>
+                  ) : (
+                    categoryCards.map(card => (
+                      <div
+                        key={card.id}
+                        style={{
+                          padding: "10px 12px",
+                          background: "#f7f7f5",
+                          borderRadius: 6,
+                          fontSize: 13,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 8
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, minWidth: 0 }}>
+                          {config.showImages && card.imageUrl && (
+                            <img src={card.imageUrl} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                          )}
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.title}</span>
+                        </div>
+                        <button
+                          onClick={() => handleReturnCard(card, cat.id)}
+                          style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 16, flexShrink: 0 }}
+                          title="Вернуть карточку"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          
+          {/* Create new category zone (only for open sorting) */}
+          {config.sortingType === "open" && (
+            <div
+              onDragOver={e => { 
+                e.preventDefault(); 
+                setShowCreateCategoryZone(true);
+              }}
+              onDragLeave={() => setShowCreateCategoryZone(false)}
+              onDrop={handleDropOnCreateCategory}
+              style={{
+                background: showCreateCategoryZone ? "#e3f2fd" : "#fafafa",
+                borderRadius: 12,
+                border: showCreateCategoryZone ? "2px dashed #007AFF" : "2px dashed #ccc",
+                minHeight: 200,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.2s"
+              }}
+            >
+              <div style={{ textAlign: "center", color: showCreateCategoryZone ? "#007AFF" : "#999" }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>+</div>
+                <div style={{ fontSize: 13 }}>Перетащите сюда, чтобы создать новую категорию</div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1072,6 +1877,22 @@ export default function StudyRunView() {
     await handleNextBlock();
   };
 
+  const handleTreeTestingSubmit = async (answer: any, durationMs: number) => {
+    if (!studyData) return;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
+    await submitBlockResponse(currentBlock.id, answer, durationMs);
+    await handleNextBlock();
+  };
+
+  const handleCardSortingSubmit = async (answer: any, durationMs: number) => {
+    if (!studyData) return;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
+    await submitBlockResponse(currentBlock.id, answer, durationMs);
+    await handleNextBlock();
+  };
+
   // Рендеринг
 
   if (loading) {
@@ -1162,6 +1983,17 @@ export default function StudyRunView() {
         />
       ) : currentBlock.type === "umux_lite" ? (
         <UmuxLiteBlock onSubmit={handleUmuxLiteSubmit} />
+      ) : currentBlock.type === "card_sorting" ? (
+        <CardSortingBlock
+          config={currentBlock.config}
+          onSubmit={handleCardSortingSubmit}
+        />
+      ) : currentBlock.type === "tree_testing" ? (
+        <TreeTestingBlock
+          config={currentBlock.config}
+          onSubmit={handleTreeTestingSubmit}
+          onSkip={handleNextBlock}
+        />
       ) : null}
     </div>
   );

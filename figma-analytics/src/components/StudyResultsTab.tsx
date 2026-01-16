@@ -37,7 +37,7 @@ interface StudyRun {
   client_meta: any;
 }
 
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
 
 interface StudyBlock {
   id: string;
@@ -84,7 +84,9 @@ const getBlockTypeColor = (type: BlockType): string => {
     context: "#607d8b",
     scale: "#ff9800",
     preference: "#e91e63",
-    five_seconds: "#795548"
+    five_seconds: "#795548",
+    card_sorting: "#00bcd4",
+    tree_testing: "#8bc34a"
   };
   return colors[type] || "#666";
 };
@@ -98,7 +100,9 @@ const getBlockTypeLabel = (type: BlockType): string => {
     context: "Контекст",
     scale: "Шкала",
     preference: "Предпочтение",
-    five_seconds: "5 секунд"
+    five_seconds: "5 секунд",
+    card_sorting: "Сортировка карточек",
+    tree_testing: "Тестирование дерева"
   };
   return labels[type] || type;
 };
@@ -758,6 +762,28 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
           winEntries.sort((a, b) => (b[1] as number) - (a[1] as number));
           return `Победы: ${winEntries.map(([idx, count]) => `${String.fromCharCode(65 + parseInt(idx))}:${count}`).join(", ")}`;
         }
+      }
+      
+      // Тестирование дерева (tree_testing)
+      if (blockType === "tree_testing" || answer.selectedPath !== undefined) {
+        const pathNames = answer.pathNames || [];
+        const isCorrect = answer.isCorrect;
+        const pathStr = pathNames.length > 0 ? pathNames.join(" › ") : "(не выбрано)";
+        if (isCorrect !== undefined) {
+          return `${pathStr} ${isCorrect ? "✅" : "❌"}`;
+        }
+        return pathStr;
+      }
+      
+      // Карточная сортировка (card_sorting)
+      if (blockType === "card_sorting" || answer.categories !== undefined) {
+        const categories = answer.categories || {};
+        const catEntries = Object.entries(categories);
+        if (catEntries.length === 0) return "(не отсортировано)";
+        return catEntries.map(([catName, cards]) => {
+          const cardList = Array.isArray(cards) ? cards : [];
+          return `${catName}: ${cardList.length} карт.`;
+        }).join(" | ");
       }
       
       // Если это массив, показываем элементы через запятую

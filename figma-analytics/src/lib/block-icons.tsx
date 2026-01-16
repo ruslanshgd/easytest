@@ -7,10 +7,12 @@ import {
   FileText, 
   Timer, 
   ClipboardList,
+  LayoutGrid,
+  GitBranch,
   type LucideIcon
 } from "lucide-react";
 
-export type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds";
+export type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
 
 interface BlockTypeConfig {
   value: BlockType;
@@ -26,6 +28,8 @@ export const BLOCK_TYPE_CONFIG: Record<BlockType, BlockTypeConfig> = {
   preference: { value: "preference", label: "Предпочтение", icon: Images },
   context: { value: "context", label: "Контекст", icon: FileText },
   five_seconds: { value: "five_seconds", label: "5 секунд", icon: Timer },
+  card_sorting: { value: "card_sorting", label: "Сортировка карточек", icon: LayoutGrid },
+  tree_testing: { value: "tree_testing", label: "Тестирование дерева", icon: GitBranch },
   umux_lite: { value: "umux_lite", label: "UMUX Lite", icon: ClipboardList },
 };
 

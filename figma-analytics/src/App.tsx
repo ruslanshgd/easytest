@@ -9,6 +9,7 @@ import StudiesList from "./StudiesList";
 import StudyDetail from "./StudyDetail";
 import ProfilePage from "./ProfilePage";
 import InvitePage from "./InvitePage";
+import { User } from "lucide-react";
 
 function App() {
   const location = useLocation();
@@ -53,49 +54,63 @@ function App() {
     return <Auth />;
   }
 
+  // Определяем, показывать ли шапку
+  // Показываем на главной "/" и "/studies" (списки), но НЕ на "/studies/:id" (внутри теста)
+  const isStudyDetailPage = /^\/studies\/[^/]+$/.test(location.pathname);
+  const showHeader = !isStudyDetailPage && 
+                     location.pathname !== "/profile" && 
+                     !location.pathname.startsWith("/token") &&
+                     !location.pathname.startsWith("/analytics") &&
+                     !location.pathname.startsWith("/prototypes") &&
+                     !location.pathname.startsWith("/invite");
 
   return (
     <div>
-      {/* Навигация в правом верхнем углу - скрываем на странице профиля */}
-      {location.pathname !== "/profile" && (
-        <div style={{
-          position: "fixed",
-          top: "10px",
-          right: "10px",
-          zIndex: 1000,
-          display: "flex",
-          gap: "0.5rem",
-          alignItems: "center",
-        }}>
+      {/* Шапка: ИзиТест слева, Профиль справа */}
+      {showHeader && (
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "0.75rem 1.5rem",
+            borderBottom: "1px solid #e5e5e3",
+            backgroundColor: "#ffffff",
+            position: "sticky",
+            top: 0,
+            zIndex: 1000,
+          }}
+        >
+          <Link
+            to="/"
+            style={{
+              fontSize: "1.25rem",
+              fontWeight: 600,
+              color: "#1f1f1f",
+              textDecoration: "none",
+            }}
+          >
+            ИзиТест
+          </Link>
           <Link
             to="/profile"
             style={{
               display: "flex",
               alignItems: "center",
+              gap: "0.5rem",
               padding: "0.5rem 1rem",
-              backgroundColor: "#007bff",
+              backgroundColor: "#2383e2",
               color: "white",
               textDecoration: "none",
-              borderRadius: "4px",
-              fontSize: "0.9rem",
-              fontWeight: "500",
+              borderRadius: "6px",
+              fontSize: "0.875rem",
+              fontWeight: 500,
             }}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              style={{ marginRight: "0.5rem" }}
-            >
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
+            <User size={16} />
             Профиль
           </Link>
-        </div>
+        </header>
       )}
       <Routes>
         {/* Главная страница показывает список studies */}

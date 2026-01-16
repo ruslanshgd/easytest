@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { isValidUUID } from "./utils/validation";
@@ -28,6 +28,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { 
   Layers, 
@@ -49,11 +55,17 @@ import {
   X,
   Check,
   Settings,
+  LayoutGrid,
+  GitBranch,
+  ChevronDown,
+  ChevronRight,
+  CheckCircle2,
+  Image as ImageIcon,
   type LucideIcon
 } from "lucide-react";
 
 // Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
 
 interface Study {
   id: string;
@@ -128,6 +140,47 @@ interface FiveSecondsConfig {
   imageUrl: string;
 }
 
+// Конфиг для типа "Карточная сортировка"
+interface CardSortingCard {
+  id: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+}
+
+interface CardSortingCategory {
+  id: string;
+  name: string;
+}
+
+interface CardSortingConfig {
+  task: string;
+  sortingType: "open" | "closed"; // открытая или закрытая сортировка
+  cards: CardSortingCard[];
+  categories: CardSortingCategory[];
+  shuffleCards: boolean;
+  shuffleCategories: boolean;
+  allowPartialSort: boolean; // разрешить не сортировать все карточки
+  showImages: boolean;
+  showDescriptions: boolean;
+}
+
+// Конфиг для типа "Тестирование дерева"
+interface TreeTestingNode {
+  id: string;
+  name: string;
+  children: TreeTestingNode[];
+  isCorrect?: boolean; // отмечен как верный ответ
+}
+
+interface TreeTestingConfig {
+  task: string;
+  description?: string;
+  tree: TreeTestingNode[];
+  correctAnswers: string[]; // массив ID узлов, которые являются верными ответами
+  allowSkip: boolean; // разрешить пропуск
+}
+
 const BLOCK_TYPES: { value: BlockType; label: string; Icon: LucideIcon }[] = [
   { value: "prototype", label: "Прототип", Icon: Layers },
   { value: "open_question", label: "Открытый вопрос", Icon: MessageSquare },
@@ -136,6 +189,8 @@ const BLOCK_TYPES: { value: BlockType; label: string; Icon: LucideIcon }[] = [
   { value: "preference", label: "Предпочтение", Icon: Images },
   { value: "context", label: "Контекст", Icon: FileText },
   { value: "five_seconds", label: "5 секунд", Icon: Timer },
+  { value: "card_sorting", label: "Сортировка карточек", Icon: LayoutGrid },
+  { value: "tree_testing", label: "Тестирование дерева", Icon: GitBranch },
   { value: "umux_lite", label: "UMUX Lite", Icon: ClipboardList },
 ];
 
@@ -150,11 +205,14 @@ export default function StudyDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddBlockModal, setShowAddBlockModal] = useState(false);
-  const [showRenameModal, setShowRenameModal] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"builder" | "results" | "share">("builder");
-  const [renameTitle, setRenameTitle] = useState("");
+  
+  // Инлайн редактирование названия
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   // Форма добавления блока
   const [newBlockType, setNewBlockType] = useState<BlockType>("prototype");
@@ -209,6 +267,34 @@ export default function StudyDetail() {
   const [fiveSecondsInstruction, setFiveSecondsInstruction] = useState("");
   const [fiveSecondsDuration, setFiveSecondsDuration] = useState(5);
   const [fiveSecondsImage, setFiveSecondsImage] = useState<{ file: File | null; url: string; uploading: boolean }>({ file: null, url: "", uploading: false });
+  
+  // Карточная сортировка
+  const [cardSortingTask, setCardSortingTask] = useState("");
+  const [cardSortingType, setCardSortingType] = useState<"open" | "closed">("open");
+  const [cardSortingCards, setCardSortingCards] = useState<Array<{ id: string; title: string; description: string; imageUrl: string; imageFile: File | null }>>([
+    { id: crypto.randomUUID(), title: "", description: "", imageUrl: "", imageFile: null }
+  ]);
+  const [cardSortingCategories, setCardSortingCategories] = useState<Array<{ id: string; name: string }>>([
+    { id: crypto.randomUUID(), name: "" }
+  ]);
+  const [cardSortingShuffleCards, setCardSortingShuffleCards] = useState(true);
+  const [cardSortingShuffleCategories, setCardSortingShuffleCategories] = useState(true);
+  const [cardSortingAllowPartialSort, setCardSortingAllowPartialSort] = useState(false);
+  const [cardSortingShowImages, setCardSortingShowImages] = useState(false);
+  const [cardSortingShowDescriptions, setCardSortingShowDescriptions] = useState(false);
+  const [showCardSortingCardsModal, setShowCardSortingCardsModal] = useState(false);
+  const [showCardSortingCategoriesModal, setShowCardSortingCategoriesModal] = useState(false);
+  
+  // Tree Testing
+  const [treeTestingTask, setTreeTestingTask] = useState("");
+  const [treeTestingDescription, setTreeTestingDescription] = useState("");
+  const [treeTestingTree, setTreeTestingTree] = useState<TreeTestingNode[]>([
+    { id: crypto.randomUUID(), name: "", children: [] }
+  ]);
+  const [treeTestingCorrectAnswers, setTreeTestingCorrectAnswers] = useState<string[]>([]);
+  const [treeTestingAllowSkip, setTreeTestingAllowSkip] = useState(false);
+  const [expandedTreeNodes, setExpandedTreeNodes] = useState<Set<string>>(new Set());
+
 
   const resetBlockForm = () => {
     setSelectedPrototypeId("");
@@ -250,6 +336,23 @@ export default function StudyDetail() {
     setFiveSecondsInstruction("");
     setFiveSecondsDuration(5);
     setFiveSecondsImage({ file: null, url: "", uploading: false });
+    // Card Sorting
+    setCardSortingTask("");
+    setCardSortingType("open");
+    setCardSortingCards([{ id: crypto.randomUUID(), title: "", description: "", imageUrl: "", imageFile: null }]);
+    setCardSortingCategories([{ id: crypto.randomUUID(), name: "" }]);
+    setCardSortingShuffleCards(true);
+    setCardSortingShuffleCategories(true);
+    setCardSortingAllowPartialSort(false);
+    setCardSortingShowImages(false);
+    setCardSortingShowDescriptions(false);
+    // Tree Testing
+    setTreeTestingTask("");
+    setTreeTestingDescription("");
+    setTreeTestingTree([{ id: crypto.randomUUID(), name: "", children: [] }]);
+    setTreeTestingCorrectAnswers([]);
+    setTreeTestingAllowSkip(false);
+    setExpandedTreeNodes(new Set());
     setEditingBlockId(null);
   };
 
@@ -319,6 +422,50 @@ export default function StudyDetail() {
         setFiveSecondsInstruction(block.config?.instruction || "");
         setFiveSecondsDuration(block.config?.duration || 5);
         setFiveSecondsImage({ file: null, url: block.config?.imageUrl || "", uploading: false });
+        break;
+
+      case "card_sorting":
+        setCardSortingTask(block.config?.task || "");
+        setCardSortingType(block.config?.sortingType || "open");
+        setCardSortingCards(
+          block.config?.cards?.length > 0
+            ? block.config.cards.map((c: any) => ({ ...c, imageFile: null }))
+            : [{ id: crypto.randomUUID(), title: "", description: "", imageUrl: "", imageFile: null }]
+        );
+        setCardSortingCategories(
+          block.config?.categories?.length > 0
+            ? block.config.categories
+            : [{ id: crypto.randomUUID(), name: "" }]
+        );
+        setCardSortingShuffleCards(block.config?.shuffleCards ?? true);
+        setCardSortingShuffleCategories(block.config?.shuffleCategories ?? true);
+        setCardSortingAllowPartialSort(block.config?.allowPartialSort || false);
+        setCardSortingShowImages(block.config?.showImages || false);
+        setCardSortingShowDescriptions(block.config?.showDescriptions || false);
+        break;
+
+      case "tree_testing":
+        setTreeTestingTask(block.config?.task || "");
+        setTreeTestingDescription(block.config?.description || "");
+        setTreeTestingTree(
+          block.config?.tree?.length > 0
+            ? block.config.tree
+            : [{ id: crypto.randomUUID(), name: "", children: [] }]
+        );
+        setTreeTestingCorrectAnswers(block.config?.correctAnswers || []);
+        setTreeTestingAllowSkip(block.config?.allowSkip || false);
+        // Развернуть все узлы по умолчанию при редактировании
+        const allNodeIds = new Set<string>();
+        const collectIds = (nodes: TreeTestingNode[]) => {
+          nodes.forEach(node => {
+            if (node.children.length > 0) {
+              allNodeIds.add(node.id);
+              collectIds(node.children);
+            }
+          });
+        };
+        collectIds(block.config?.tree || []);
+        setExpandedTreeNodes(allNodeIds);
         break;
     }
   };
@@ -420,6 +567,21 @@ export default function StudyDetail() {
     loadStudy();
   }, [studyId]);
 
+  // Фокус на инпут при начале редактирования названия
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [isEditingTitle]);
+
+  // Синхронизация editedTitle с study.title
+  useEffect(() => {
+    if (study) {
+      setEditedTitle(study.title);
+    }
+  }, [study?.title]);
+
   const handlePublish = async () => {
     if (!study || !studyId) return;
     if (blocks.length === 0) {
@@ -453,23 +615,6 @@ export default function StudyDetail() {
       setError(updateError.message);
       return;
     }
-    await loadStudy();
-  };
-
-  const handleRename = async () => {
-    if (!study || !studyId || !renameTitle.trim()) return;
-
-    const { error: updateError } = await supabase
-      .from("studies")
-      .update({ title: renameTitle.trim() })
-      .eq("id", studyId);
-
-    if (updateError) {
-      setError(updateError.message);
-      return;
-    }
-    setShowRenameModal(false);
-    setRenameTitle("");
     await loadStudy();
   };
 
@@ -697,6 +842,93 @@ export default function StudyDetail() {
           imageUrl: fiveSecondsImageUrl
         } as FiveSecondsConfig;
         break;
+
+      case "card_sorting":
+        if (!cardSortingTask.trim()) {
+          setError("Введите текст задания");
+          return;
+        }
+        const validCards = cardSortingCards.filter(c => c.title.trim());
+        if (validCards.length < 2) {
+          setError("Добавьте минимум 2 карточки с названиями");
+          return;
+        }
+        // Для закрытой сортировки нужны категории
+        if (cardSortingType === "closed") {
+          const validCategories = cardSortingCategories.filter(c => c.name.trim());
+          if (validCategories.length < 2) {
+            setError("Для закрытой сортировки добавьте минимум 2 категории");
+            return;
+          }
+        }
+        // Загружаем изображения карточек если они есть
+        const uploadedCards: CardSortingCard[] = [];
+        for (const card of cardSortingCards) {
+          if (!card.title.trim()) continue;
+          let cardImageUrl = card.imageUrl;
+          if (card.imageFile) {
+            const uploadedUrl = await uploadImage(card.imageFile);
+            if (!uploadedUrl) return;
+            cardImageUrl = uploadedUrl;
+          }
+          uploadedCards.push({
+            id: card.id,
+            title: card.title.trim(),
+            description: card.description?.trim() || undefined,
+            imageUrl: cardImageUrl || undefined
+          });
+        }
+        const validCategoriesForConfig = cardSortingCategories.filter(c => c.name.trim()).map(c => ({
+          id: c.id,
+          name: c.name.trim()
+        }));
+        blockData.config = {
+          task: cardSortingTask.trim(),
+          sortingType: cardSortingType,
+          cards: uploadedCards,
+          categories: validCategoriesForConfig,
+          shuffleCards: cardSortingShuffleCards,
+          shuffleCategories: cardSortingShuffleCategories,
+          allowPartialSort: cardSortingAllowPartialSort,
+          showImages: cardSortingShowImages,
+          showDescriptions: cardSortingShowDescriptions
+        } as CardSortingConfig;
+        break;
+
+      case "tree_testing":
+        if (!treeTestingTask.trim()) {
+          setError("Введите текст задания");
+          return;
+        }
+        // Рекурсивно подсчитываем количество узлов с названиями
+        const countValidNodes = (nodes: TreeTestingNode[]): number => {
+          return nodes.reduce((acc, node) => {
+            const selfCount = node.name.trim() ? 1 : 0;
+            return acc + selfCount + countValidNodes(node.children);
+          }, 0);
+        };
+        if (countValidNodes(treeTestingTree) < 2) {
+          setError("Добавьте минимум 2 категории с названиями");
+          return;
+        }
+        // Рекурсивно очищаем дерево от пустых узлов
+        const cleanTree = (nodes: TreeTestingNode[]): TreeTestingNode[] => {
+          return nodes
+            .filter(node => node.name.trim())
+            .map(node => ({
+              id: node.id,
+              name: node.name.trim(),
+              children: cleanTree(node.children)
+            }));
+        };
+        blockData.config = {
+          task: treeTestingTask.trim(),
+          description: treeTestingDescription.trim() || undefined,
+          tree: cleanTree(treeTestingTree),
+          correctAnswers: treeTestingCorrectAnswers,
+          allowSkip: treeTestingAllowSkip
+        } as TreeTestingConfig;
+        break;
     }
 
     if (isEditing) {
@@ -738,6 +970,79 @@ export default function StudyDetail() {
       setError(deleteError.message);
       return;
     }
+    await loadStudy();
+  };
+
+  // Быстрое добавление блока с дефолтными значениями
+  const handleQuickAddBlock = async (blockType: BlockType) => {
+    if (!studyId || study?.status !== "draft") return;
+
+    const maxOrderIndex = blocks.length > 0 ? Math.max(...blocks.map(b => b.order_index)) : -1;
+    
+    // Дефолтные конфиги для разных типов блоков
+    const defaultConfigs: Record<BlockType, any> = {
+      prototype: {},
+      open_question: { question: "Введите ваш вопрос", optional: false },
+      umux_lite: {},
+      choice: { 
+        question: "Введите вопрос", 
+        options: ["Вариант 1", "Вариант 2"], 
+        allowMultiple: false, 
+        shuffle: false, 
+        allowOther: false, 
+        allowNone: false, 
+        optional: false 
+      },
+      context: { title: "Заголовок", description: "" },
+      scale: { 
+        question: "Введите вопрос", 
+        scaleType: "numeric", 
+        min: 1, 
+        max: 5, 
+        optional: false 
+      },
+      preference: { 
+        question: "Какой вариант вам нравится больше?", 
+        comparisonType: "all", 
+        images: [], 
+        shuffle: false 
+      },
+      five_seconds: { instruction: "Посмотрите на изображение", duration: 5, imageUrl: "" },
+      card_sorting: { 
+        task: "Разложите карточки по категориям", 
+        sortingType: "open", 
+        cards: [], 
+        categories: [], 
+        shuffleCards: true, 
+        shuffleCategories: true, 
+        allowPartialSort: false, 
+        showImages: false, 
+        showDescriptions: false 
+      },
+      tree_testing: { 
+        task: "Найдите нужную категорию", 
+        tree: [{ id: crypto.randomUUID(), name: "Категория 1", children: [] }], 
+        correctAnswers: [], 
+        allowSkip: false 
+      }
+    };
+
+    const blockData: any = {
+      study_id: studyId,
+      type: blockType,
+      order_index: maxOrderIndex + 1,
+      config: defaultConfigs[blockType]
+    };
+
+    const { error: insertError } = await supabase
+      .from("study_blocks")
+      .insert([blockData]);
+
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
+
     await loadStudy();
   };
 
@@ -818,6 +1123,17 @@ export default function StudyDetail() {
         return `${block.config?.question || "Вопрос"} (${compTypes[block.config?.comparisonType as keyof typeof compTypes] || ""})`;
       case "five_seconds":
         return `${block.config?.instruction || "Инструкция"} (${block.config?.duration || 5} сек)`;
+      case "card_sorting":
+        const sortTypes = { open: "Открытая", closed: "Закрытая" };
+        return `${block.config?.task?.substring(0, 30) || "Задание"} (${sortTypes[block.config?.sortingType as keyof typeof sortTypes] || "Сортировка"}, ${block.config?.cards?.length || 0} карточек)`;
+      case "tree_testing":
+        const countTreeNodes = (nodes: any[]): number => {
+          if (!nodes) return 0;
+          return nodes.reduce((acc, node) => acc + 1 + countTreeNodes(node.children || []), 0);
+        };
+        const nodeCount = countTreeNodes(block.config?.tree || []);
+        const correctCount = block.config?.correctAnswers?.length || 0;
+        return `${block.config?.task?.substring(0, 30) || "Задание"} (${nodeCount} категорий, ${correctCount} верных)`;
       default:
         return "";
     }
@@ -862,67 +1178,142 @@ export default function StudyDetail() {
   };
   const status = statusConfig[study.status];
 
-  return (
-    <div className="container mx-auto p-6 max-w-5xl">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-2xl font-semibold">{study.title}</h1>
-            <Badge variant={status.variant}>{status.label}</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Создан: {new Date(study.created_at).toLocaleDateString("ru-RU")}
-          </p>
-        </div>
-        
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => navigate(-1)}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Назад
-          </Button>
-          <Button variant="ghost" onClick={() => { setRenameTitle(study.title); setShowRenameModal(true); }}>
-            <Pencil className="h-4 w-4 mr-2" />
-            Переименовать
-          </Button>
-          <Button variant="ghost" onClick={handleDuplicate}>
-            <Copy className="h-4 w-4 mr-2" />
-            Копировать
-          </Button>
-          <Button variant="destructive" onClick={handleDelete}>
-            <Trash2 className="h-4 w-4 mr-2" />
-            Удалить
-          </Button>
-        </div>
-      </div>
+  // Сохранение нового названия (инлайн редактирование)
+  const saveTitle = async () => {
+    if (editedTitle.trim() && editedTitle.trim() !== study.title) {
+      const { error: updateError } = await supabase
+        .from("studies")
+        .update({ title: editedTitle.trim() })
+        .eq("id", studyId);
 
-      {/* Status bar */}
-      <Card className="mb-6">
-        <CardContent className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <p className="text-sm text-muted-foreground">
-            {study.status === "draft" && "Тест в режиме черновика. Можно редактировать блоки."}
-            {study.status === "published" && "Тест опубликован. Редактирование заблокировано."}
-            {study.status === "stopped" && "Тестирование остановлено."}
-          </p>
-          <div className="flex gap-2">
+      if (!updateError) {
+        await loadStudy();
+      }
+    } else {
+      setEditedTitle(study.title);
+    }
+    setIsEditingTitle(false);
+  };
+
+  // Получить краткое название блока для сайдбара
+  const getBlockShortName = (block: StudyBlock, index: number): string => {
+    switch (block.type) {
+      case "prototype":
+        const proto = prototypes.find(p => p.id === block.prototype_id);
+        return proto?.task_description?.substring(0, 30) || `Прототип`;
+      case "open_question":
+        return block.config?.question?.substring(0, 30) || "Открытый вопрос";
+      case "umux_lite":
+        return "UMUX Lite";
+      case "choice":
+        return block.config?.question?.substring(0, 30) || "Выбор";
+      case "context":
+        return block.config?.title?.substring(0, 30) || "Контекст";
+      case "scale":
+        return block.config?.question?.substring(0, 30) || "Шкала";
+      case "preference":
+        return block.config?.question?.substring(0, 30) || "Предпочтение";
+      case "five_seconds":
+        return block.config?.instruction?.substring(0, 30) || "5 секунд";
+      case "card_sorting":
+        return block.config?.task?.substring(0, 30) || "Сортировка карточек";
+      case "tree_testing":
+        return block.config?.task?.substring(0, 30) || "Тестирование дерева";
+      default:
+        return `Блок ${index + 1}`;
+    }
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-background">
+      {/* Top Header */}
+      <div className="border-b border-border bg-background px-4 py-2">
+        <div className="flex items-center justify-between">
+          {/* Left: Back + Title */}
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Назад
+            </Button>
+            <div className="flex items-center gap-2">
+              {isEditingTitle ? (
+                <Input
+                  ref={titleInputRef}
+                  value={editedTitle}
+                  onChange={e => setEditedTitle(e.target.value)}
+                  onBlur={saveTitle}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") saveTitle();
+                    if (e.key === "Escape") {
+                      setEditedTitle(study.title);
+                      setIsEditingTitle(false);
+                    }
+                  }}
+                  className="h-8 text-base font-medium w-64"
+                />
+              ) : (
+                <h1 
+                  className="text-base font-medium cursor-pointer hover:bg-muted px-2 py-1 rounded transition-colors"
+                  onClick={() => {
+                    setEditedTitle(study.title);
+                    setIsEditingTitle(true);
+                  }}
+                >
+                  {study.title}
+                </h1>
+              )}
+              <Badge variant={status.variant}>{status.label}</Badge>
+            </div>
+          </div>
+
+          {/* Center: Tabs */}
+          <div className="flex gap-1">
+            {[
+              { key: "builder", label: "Тест" },
+              { key: "share", label: "Пригласить респондентов" },
+              { key: "results", label: "Отчет" }
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key as any)}
+                className={cn(
+                  "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+                  activeTab === tab.key 
+                    ? "bg-primary/10 text-primary" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleDuplicate}>
+              <Copy className="h-4 w-4" />
+            </Button>
             {study.status === "draft" && (
-              <Button onClick={handlePublish}>
+              <Button size="sm" onClick={handlePublish}>
                 <Rocket className="h-4 w-4 mr-2" />
                 Опубликовать
               </Button>
             )}
             {study.status === "published" && (
-              <Button variant="destructive" onClick={handleStop}>
+              <Button variant="destructive" size="sm" onClick={handleStop}>
                 <StopCircle className="h-4 w-4 mr-2" />
                 Остановить
               </Button>
             )}
+            <Button variant="ghost" size="sm" className="text-destructive" onClick={handleDelete}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {error && (
-        <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg mb-6 flex justify-between items-center">
+        <div className="bg-destructive/10 text-destructive px-4 py-2 text-sm flex justify-between items-center">
           <span>{error}</span>
           <Button variant="ghost" size="sm" onClick={() => setError(null)}>
             <X className="h-4 w-4" />
@@ -930,136 +1321,158 @@ export default function StudyDetail() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="mb-6">
-        <div className="flex gap-1 border-b border-border">
-          {[
-            { key: "builder", label: "Конструктор" },
-            { key: "results", label: "Результаты" },
-            { key: "share", label: "Поделиться" }
-          ].map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key as any)}
-              className={cn(
-                "px-6 py-3 text-sm font-medium transition-colors border-b-2 -mb-px",
-                activeTab === tab.key 
-                  ? "border-primary text-primary" 
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Builder Tab */}
-      {activeTab === "builder" && (
-        <div>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar - Block List */}
+        <div className="w-64 border-r border-border bg-muted/30 flex flex-col">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {blocks.map((block, index) => {
+              const typeInfo = getBlockTypeInfo(block.type);
+              const IconComponent = typeInfo.Icon;
+              
+              return (
+                <div
+                  key={block.id}
+                  draggable={isEditable}
+                  onDragStart={() => handleDragStart(block.id)}
+                  onDragOver={handleDragOver}
+                  onDrop={() => handleDrop(block.id)}
+                  className={cn(
+                    "flex items-center gap-2 p-3 rounded-lg transition-all group",
+                    "bg-background border border-border hover:border-primary/30",
+                    draggedBlockId === block.id && "opacity-50 border-dashed border-primary"
+                  )}
+                >
+                  {isEditable && (
+                    <GripVertical className="h-4 w-4 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-move" />
+                  )}
+                  <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-semibold text-primary">{index + 1}</span>
+                  </div>
+                  <div className="w-6 h-6 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+                    <IconComponent size={14} className="text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">
+                      {getBlockShortName(block, index)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            
+            {blocks.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                Нет блоков
+              </div>
+            )}
+          </div>
+          
+          {/* Add Block Button with Dropdown */}
           {isEditable && (
-            <div className="mb-4">
-              <Button onClick={() => setShowAddBlockModal(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Добавить блок
-              </Button>
+            <div className="p-3 border-t border-border">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span className="text-sm">Добавить блок</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  {BLOCK_TYPES.map(type => {
+                    const IconComponent = type.Icon;
+                    return (
+                      <DropdownMenuItem 
+                        key={type.value}
+                        onClick={() => handleQuickAddBlock(type.value)}
+                        className="gap-2 cursor-pointer"
+                      >
+                        <IconComponent size={16} className="text-muted-foreground" />
+                        <span>{type.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
-          
-          {!isEditable && (
-            <Card className="mb-4 border-warning/30 bg-warning/5">
-              <CardContent className="p-4 text-sm text-warning">
-                Редактирование заблокировано.
-              </CardContent>
-            </Card>
-          )}
+        </div>
 
-          {blocks.length === 0 ? (
-            <Card className="p-10 text-center">
-              <p className="text-muted-foreground">В этом тесте пока нет блоков.</p>
-              {isEditable && (
-                <Button className="mt-4" onClick={() => setShowAddBlockModal(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Добавить первый блок
-                </Button>
-              )}
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {blocks.map((block, index) => {
-                const typeInfo = getBlockTypeInfo(block.type);
-                const IconComponent = typeInfo.Icon;
-                return (
-                  <Card
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* Builder Tab */}
+            {activeTab === "builder" && (
+              <div className="max-w-3xl mx-auto space-y-4">
+                {!isEditable && (
+                  <Card className="mb-4 border-warning/30 bg-warning/5">
+                    <CardContent className="p-4 text-sm text-warning">
+                      Редактирование заблокировано — тест опубликован.
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Все блоки с инлайн редактированием */}
+                {blocks.map((block, index) => (
+                  <InlineBlockEditor
                     key={block.id}
-                    draggable={isEditable}
+                    block={block}
+                    index={index}
+                    isEditable={isEditable}
+                    prototypes={prototypes}
+                    onDelete={() => handleDeleteBlock(block.id)}
+                    onUpdate={loadStudy}
                     onDragStart={() => handleDragStart(block.id)}
                     onDragOver={handleDragOver}
                     onDrop={() => handleDrop(block.id)}
-                    className={cn(
-                      "transition-all",
-                      isEditable && "cursor-move",
-                      draggedBlockId === block.id && "opacity-50 border-dashed border-primary"
-                    )}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex justify-between items-start gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            {isEditable && <GripVertical className="h-4 w-4 text-muted-foreground/50" />}
-                            <Badge variant="default" className="gap-1.5">
-                              <IconComponent size={12} />
-                              {typeInfo.label}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">#{index + 1}</span>
-                            {block.config?.optional && (
-                              <span className="text-xs text-muted-foreground italic">(необязательный)</span>
-                            )}
-                          </div>
-                          <p className="text-sm">{getBlockDescription(block)}</p>
-                          {block.instructions && (
-                            <div className="mt-3 p-3 bg-muted rounded-md text-sm text-muted-foreground">
-                              <strong className="text-foreground">Инструкции:</strong> {block.instructions}
-                            </div>
-                          )}
-                        </div>
-                        {isEditable && (
-                          <div className="flex gap-2 flex-shrink-0">
-                            {block.type !== "umux_lite" && (
-                              <Button 
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  loadBlockForEdit(block);
-                                  setShowAddBlockModal(true);
-                                }}
-                              >
-                                <Pencil className="h-3 w-3 mr-1" />
-                                Редактировать
-                              </Button>
-                            )}
-                            <Button 
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => handleDeleteBlock(block.id)}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+                    isDragging={draggedBlockId === block.id}
+                  />
+                ))}
 
-      {activeTab === "results" && studyId && <StudyResultsTab studyId={studyId} blocks={blocks} />}
-      {activeTab === "share" && <StudyShareTab studyId={studyId || ""} studyStatus={study.status} shareToken={study.share_token} />}
+                {/* Пустое состояние */}
+                {blocks.length === 0 && (
+                  <Card className="p-10 text-center border-dashed">
+                    <div className="text-muted-foreground mb-4">
+                      В этом тесте пока нет блоков
+                    </div>
+                    {isEditable && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Добавить первый блок
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="center" className="w-56">
+                          {BLOCK_TYPES.map(type => {
+                            const IconComponent = type.Icon;
+                            return (
+                              <DropdownMenuItem 
+                                key={type.value}
+                                onClick={() => handleQuickAddBlock(type.value)}
+                                className="gap-2 cursor-pointer"
+                              >
+                                <IconComponent size={16} className="text-muted-foreground" />
+                                <span>{type.label}</span>
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {activeTab === "results" && studyId && <StudyResultsTab studyId={studyId} blocks={blocks} />}
+            {activeTab === "share" && <StudyShareTab studyId={studyId || ""} studyStatus={study.status} shareToken={study.share_token} />}
+          </div>
+        </div>
+      </div>
 
       {/* Add Block Modal */}
       <Dialog open={showAddBlockModal} onOpenChange={setShowAddBlockModal}>
@@ -1393,6 +1806,137 @@ export default function StudyDetail() {
                   </div>
                 </>
               )}
+
+              {/* Сортировка карточек */}
+              {newBlockType === "card_sorting" && (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Задание:</label>
+                    <textarea 
+                      value={cardSortingTask} 
+                      onChange={e => setCardSortingTask(e.target.value)} 
+                      placeholder="Например: Представьте, что вы совершаете покупки в интернет-магазине и вам нужно найти какую-то информацию. В этом задании приведён список разделов сайта. Ваша задача — разбить их по категориям так, как вам кажется логичным." 
+                      rows={3} 
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} 
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Тип сортировки</label>
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <button
+                        onClick={() => setCardSortingType("closed")}
+                        style={{
+                          flex: 1,
+                          padding: "16px",
+                          border: cardSortingType === "closed" ? "2px solid #2383e2" : "1px solid #ddd",
+                          borderRadius: 8,
+                          background: cardSortingType === "closed" ? "#e3f2fd" : "white",
+                          cursor: "pointer",
+                          textAlign: "left"
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Закрытая сортировка</div>
+                        <div style={{ fontSize: 13, color: "#666" }}>Респонденты группируют карточки в заранее определенные категории.</div>
+                      </button>
+                      <button
+                        onClick={() => setCardSortingType("open")}
+                        style={{
+                          flex: 1,
+                          padding: "16px",
+                          border: cardSortingType === "open" ? "2px solid #2383e2" : "1px solid #ddd",
+                          borderRadius: 8,
+                          background: cardSortingType === "open" ? "#e3f2fd" : "white",
+                          cursor: "pointer",
+                          textAlign: "left"
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Открытая сортировка</div>
+                        <div style={{ fontSize: 13, color: "#666" }}>Респонденты группируют карточки в категории, которые они создают сами; вы можете также добавить заранее определенные категории.</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Карточки */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Карточки</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <span style={{ fontSize: 14 }}>{cardSortingCards.filter(c => c.title.trim()).length} карточек</span>
+                      <Button variant="outline" size="sm" onClick={() => setShowCardSortingCardsModal(true)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Редактировать
+                      </Button>
+                    </div>
+                    <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8 }}>
+                      <ToggleSwitch label="Перемешивать карточки" checked={cardSortingShuffleCards} onChange={setCardSortingShuffleCards} />
+                      <ToggleSwitch label="Разрешить не сортировать все карточки" checked={cardSortingAllowPartialSort} onChange={setCardSortingAllowPartialSort} />
+                      {cardSortingAllowPartialSort && (
+                        <div style={{ marginLeft: 56, fontSize: 13, color: "#666", marginTop: -4, marginBottom: 8 }}>
+                          Если эта опция включена, респондент сможет завершить сортировку, даже если не все карточки отсортированы.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Категории */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Категории</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <span style={{ fontSize: 14 }}>{cardSortingCategories.filter(c => c.name.trim()).length} категорий</span>
+                      <Button variant="outline" size="sm" onClick={() => setShowCardSortingCategoriesModal(true)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Редактировать
+                      </Button>
+                    </div>
+                    <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8 }}>
+                      <ToggleSwitch label="Перемешивать категории" checked={cardSortingShuffleCategories} onChange={setCardSortingShuffleCategories} />
+                    </div>
+                  </div>
+
+                  {/* Превью */}
+                  <div style={{ padding: 16, background: "#e8f5e9", borderRadius: 8 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 12 }}>Сортировка карточек</div>
+                    <div style={{ background: "#c8e6c9", borderRadius: 8, padding: 16, marginBottom: 12 }}>
+                      <div style={{ display: "flex", gap: 16 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {[1, 2, 3, 4, 5].map(i => (
+                            <div key={i} style={{ width: 40, height: 24, background: "#333", borderRadius: 4 }} />
+                          ))}
+                        </div>
+                        <div style={{ display: "flex", gap: 12, flex: 1 }}>
+                          {[1, 2, 3].map(i => (
+                            <div key={i} style={{ width: 80, height: 100, border: "2px dashed #666", borderRadius: 8 }} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
+                      Отсортируйте каждую карточку в категорию, которая вам кажется наиболее подходящей. Перетащите карточки в правую часть страницы, чтобы создать категории.
+                    </div>
+                    <div style={{ fontSize: 13, color: "#666" }}>
+                      Просто делайте то, что кажется вам наиболее подходящим, нет правильных или неправильных ответов.
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Тестирование дерева */}
+              {newBlockType === "tree_testing" && (
+                <TreeTestingEditor
+                  task={treeTestingTask}
+                  setTask={setTreeTestingTask}
+                  description={treeTestingDescription}
+                  setDescription={setTreeTestingDescription}
+                  tree={treeTestingTree}
+                  setTree={setTreeTestingTree}
+                  correctAnswers={treeTestingCorrectAnswers}
+                  setCorrectAnswers={setTreeTestingCorrectAnswers}
+                  allowSkip={treeTestingAllowSkip}
+                  setAllowSkip={setTreeTestingAllowSkip}
+                  expandedNodes={expandedTreeNodes}
+                  setExpandedNodes={setExpandedTreeNodes}
+                />
+              )}
             </div>
 
           </div>
@@ -1408,32 +1952,1138 @@ export default function StudyDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Rename Modal */}
-      <Dialog open={showRenameModal} onOpenChange={setShowRenameModal}>
-        <DialogContent>
+      {/* Cards Modal for Card Sorting */}
+      <Dialog open={showCardSortingCardsModal} onOpenChange={setShowCardSortingCardsModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Переименовать тест</DialogTitle>
+            <DialogTitle>Карточки ({cardSortingCards.filter(c => c.title.trim()).length})</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="rename-input">Название</Label>
-              <Input 
-                id="rename-input"
-                value={renameTitle} 
-                onChange={e => setRenameTitle(e.target.value)} 
-                placeholder="Название теста" 
-                onKeyDown={e => { if (e.key === "Enter") handleRename(); }} 
-                autoFocus 
+            <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+              <ToggleSwitch 
+                label="Добавить изображения" 
+                checked={cardSortingShowImages} 
+                onChange={setCardSortingShowImages} 
+              />
+              <ToggleSwitch 
+                label="Добавить описания" 
+                checked={cardSortingShowDescriptions} 
+                onChange={setCardSortingShowDescriptions} 
               />
             </div>
+            <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
+              {cardSortingCards.map((card, i) => (
+                <div key={card.id} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
+                  {cardSortingShowImages && (
+                    <div style={{ width: 64, flexShrink: 0 }}>
+                      {card.imageUrl || card.imageFile ? (
+                        <div style={{ position: "relative" }}>
+                          <img 
+                            src={card.imageFile ? URL.createObjectURL(card.imageFile) : card.imageUrl} 
+                            alt="" 
+                            style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid #ddd" }} 
+                          />
+                          <button 
+                            onClick={() => {
+                              const newCards = [...cardSortingCards];
+                              newCards[i] = { ...newCards[i], imageUrl: "", imageFile: null };
+                              setCardSortingCards(newCards);
+                            }}
+                            style={{ position: "absolute", top: -8, right: -8, width: 20, height: 20, borderRadius: 10, background: "#c62828", color: "white", border: "none", fontSize: 12, cursor: "pointer" }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <label style={{ width: 64, height: 64, border: "2px dashed #ddd", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", background: "#fafafa" }}>
+                          <ImageIcon size={20} color="#999" />
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            style={{ display: "none" }} 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const newCards = [...cardSortingCards];
+                                newCards[i] = { ...newCards[i], imageFile: file };
+                                setCardSortingCards(newCards);
+                              }
+                            }} 
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <input 
+                      type="text" 
+                      value={card.title} 
+                      onChange={e => {
+                        const newCards = [...cardSortingCards];
+                        newCards[i] = { ...newCards[i], title: e.target.value };
+                        setCardSortingCards(newCards);
+                      }} 
+                      placeholder="Название карточки" 
+                      style={{ width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14, marginBottom: cardSortingShowDescriptions ? 8 : 0, background: "#f7f7f5" }} 
+                    />
+                    {cardSortingShowDescriptions && (
+                      <input 
+                        type="text" 
+                        value={card.description} 
+                        onChange={e => {
+                          const newCards = [...cardSortingCards];
+                          newCards[i] = { ...newCards[i], description: e.target.value };
+                          setCardSortingCards(newCards);
+                        }} 
+                        placeholder="Введите описание" 
+                        style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13, color: "#666" }} 
+                      />
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => {
+                      if (cardSortingCards.length > 1) {
+                        setCardSortingCards(cardSortingCards.filter((_, j) => j !== i));
+                      }
+                    }} 
+                    style={{ padding: 8, background: "transparent", border: "none", cursor: cardSortingCards.length > 1 ? "pointer" : "not-allowed", opacity: cardSortingCards.length > 1 ? 1 : 0.3 }}
+                  >
+                    <Trash2 size={18} color="#999" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <Button 
+              variant="outline" 
+              onClick={() => setCardSortingCards([...cardSortingCards, { id: crypto.randomUUID(), title: "", description: "", imageUrl: "", imageFile: null }])}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Карточка
+            </Button>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRenameModal(false)}>Отмена</Button>
-            <Button onClick={handleRename} disabled={!renameTitle.trim()}>Сохранить</Button>
+            <Button onClick={() => setShowCardSortingCardsModal(false)}>Готово</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Categories Modal for Card Sorting */}
+      <Dialog open={showCardSortingCategoriesModal} onOpenChange={setShowCardSortingCategoriesModal}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Категории ({cardSortingCategories.filter(c => c.name.trim()).length})</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
+              {cardSortingCategories.map((cat, i) => (
+                <div key={cat.id} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
+                  <input 
+                    type="text" 
+                    value={cat.name} 
+                    onChange={e => {
+                      const newCats = [...cardSortingCategories];
+                      newCats[i] = { ...newCats[i], name: e.target.value };
+                      setCardSortingCategories(newCats);
+                    }} 
+                    placeholder="Название категории" 
+                    style={{ flex: 1, padding: "10px 12px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14, background: "#f7f7f5" }} 
+                  />
+                  <button 
+                    onClick={() => {
+                      if (cardSortingCategories.length > 1) {
+                        setCardSortingCategories(cardSortingCategories.filter((_, j) => j !== i));
+                      }
+                    }} 
+                    style={{ padding: 8, background: "transparent", border: "none", cursor: cardSortingCategories.length > 1 ? "pointer" : "not-allowed", opacity: cardSortingCategories.length > 1 ? 1 : 0.3 }}
+                  >
+                    <X size={18} color="#999" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <Button 
+              variant="outline" 
+              onClick={() => setCardSortingCategories([...cardSortingCategories, { id: crypto.randomUUID(), name: "" }])}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Категория
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowCardSortingCategoriesModal(false)}>Готово</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ============= Компонент InlineBlockEditor =============
+interface InlineBlockEditorProps {
+  block: StudyBlock;
+  index: number;
+  isEditable: boolean;
+  prototypes: Prototype[];
+  onDelete: () => void;
+  onUpdate: () => Promise<void>;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  isDragging: boolean;
+}
+
+function InlineBlockEditor({
+  block,
+  index,
+  isEditable,
+  prototypes,
+  onDelete,
+  onUpdate,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  isDragging
+}: InlineBlockEditorProps) {
+  const typeInfo = BLOCK_TYPES.find(t => t.value === block.type) || BLOCK_TYPES[0];
+  const IconComponent = typeInfo.Icon;
+  
+  // Локальный стейт для редактирования
+  const [localConfig, setLocalConfig] = useState<any>(block.config || {});
+  const [localInstructions, setLocalInstructions] = useState(block.instructions || "");
+  const [localPrototypeId, setLocalPrototypeId] = useState(block.prototype_id || "");
+  const [saving, setSaving] = useState(false);
+
+  // Синхронизация при изменении block.config
+  useEffect(() => {
+    setLocalConfig(block.config || {});
+    setLocalInstructions(block.instructions || "");
+    setLocalPrototypeId(block.prototype_id || "");
+  }, [block.config, block.instructions, block.prototype_id]);
+
+  // Сохранение изменений с debounce
+  const saveChanges = async (updates: Partial<StudyBlock>) => {
+    if (!isEditable) return;
+    setSaving(true);
+    
+    const { error } = await supabase
+      .from("study_blocks")
+      .update(updates)
+      .eq("id", block.id);
+    
+    if (!error) {
+      await onUpdate();
+    }
+    setSaving(false);
+  };
+
+  // Debounced save для текстовых полей
+  const debouncedSave = useCallback(
+    debounce((updates: Partial<StudyBlock>) => saveChanges(updates), 500),
+    [block.id, isEditable]
+  );
+
+  // Обновление конфига
+  const updateConfig = (key: string, value: any) => {
+    const newConfig = { ...localConfig, [key]: value };
+    setLocalConfig(newConfig);
+    debouncedSave({ config: newConfig });
+  };
+
+  // Обновление инструкций (только для прототипа)
+  const updateInstructions = (value: string) => {
+    setLocalInstructions(value);
+    debouncedSave({ instructions: value });
+  };
+
+  // Обновление прототипа
+  const updatePrototype = (protoId: string) => {
+    setLocalPrototypeId(protoId);
+    saveChanges({ prototype_id: protoId });
+  };
+
+  return (
+    <Card 
+      draggable={isEditable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={cn(
+        "transition-all",
+        isDragging && "opacity-50 border-dashed border-primary"
+      )}
+    >
+      <CardContent className="p-4">
+        {/* Заголовок блока */}
+        <div className="flex items-center gap-3 mb-4">
+          {isEditable && (
+            <div className="cursor-grab active:cursor-grabbing">
+              <GripVertical className="h-5 w-5 text-muted-foreground/50 hover:text-muted-foreground" />
+            </div>
+          )}
+          
+          <div className="flex items-center gap-3 flex-1">
+            <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <span className="text-sm font-semibold text-primary">{index + 1}</span>
+            </div>
+            <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+              <IconComponent size={16} className="text-muted-foreground" />
+            </div>
+            <span className="font-medium text-sm">{typeInfo.label}</span>
+            {saving && <span className="text-xs text-muted-foreground">Сохранение...</span>}
+          </div>
+
+          {isEditable && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-destructive hover:text-destructive h-8 w-8 p-0"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+
+        {/* Поля редактирования в зависимости от типа */}
+        <div className="space-y-3 pl-11">
+          {/* Прототип */}
+          {block.type === "prototype" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Прототип</Label>
+                {prototypes.length === 0 ? (
+                  <div className="text-sm text-warning bg-warning/10 p-2 rounded">
+                    Нет прототипов. Создайте через Figma плагин.
+                  </div>
+                ) : (
+                  <select 
+                    value={localPrototypeId} 
+                    onChange={e => updatePrototype(e.target.value)}
+                    disabled={!isEditable}
+                    className="w-full p-2 text-sm border border-border rounded-md bg-background"
+                  >
+                    <option value="">Выберите прототип</option>
+                    {prototypes.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.task_description || p.id.substring(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Инструкции</Label>
+                <textarea 
+                  value={localInstructions} 
+                  onChange={e => updateInstructions(e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите инструкции для респондента"
+                  rows={2}
+                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Открытый вопрос */}
+          {block.type === "open_question" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
+                <textarea 
+                  value={localConfig.question || ""} 
+                  onChange={e => updateConfig("question", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите текст вопроса"
+                  rows={2}
+                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox 
+                  checked={localConfig.optional || false}
+                  onCheckedChange={(checked) => updateConfig("optional", checked)}
+                  disabled={!isEditable}
+                />
+                <span>Необязательный вопрос</span>
+              </label>
+            </>
+          )}
+
+          {/* UMUX Lite */}
+          {block.type === "umux_lite" && (
+            <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+              📋 Стандартный опрос UMUX Lite из 2 вопросов по шкале 1-7
+            </div>
+          )}
+
+          {/* Выбор */}
+          {block.type === "choice" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
+                <Input 
+                  value={localConfig.question || ""} 
+                  onChange={e => updateConfig("question", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите вопрос"
+                  className="text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Варианты ответа</Label>
+                <div className="space-y-2">
+                  {(localConfig.options || []).map((opt: string, i: number) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <span className="text-xs text-muted-foreground w-5">{String.fromCharCode(65 + i)}.</span>
+                      <Input 
+                        value={opt} 
+                        onChange={e => {
+                          const newOpts = [...(localConfig.options || [])];
+                          newOpts[i] = e.target.value;
+                          updateConfig("options", newOpts);
+                        }}
+                        disabled={!isEditable}
+                        className="text-sm flex-1"
+                        placeholder="Вариант ответа"
+                      />
+                      {isEditable && (localConfig.options?.length || 0) > 2 && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            const newOpts = (localConfig.options || []).filter((_: any, j: number) => j !== i);
+                            updateConfig("options", newOpts);
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {isEditable && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => updateConfig("options", [...(localConfig.options || []), ""])}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Добавить вариант
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox 
+                    checked={localConfig.allowMultiple || false}
+                    onCheckedChange={(checked) => updateConfig("allowMultiple", checked)}
+                    disabled={!isEditable}
+                  />
+                  <span>Несколько ответов</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox 
+                    checked={localConfig.shuffle || false}
+                    onCheckedChange={(checked) => updateConfig("shuffle", checked)}
+                    disabled={!isEditable}
+                  />
+                  <span>Перемешивать</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox 
+                    checked={localConfig.optional || false}
+                    onCheckedChange={(checked) => updateConfig("optional", checked)}
+                    disabled={!isEditable}
+                  />
+                  <span>Необязательный</span>
+                </label>
+              </div>
+            </>
+          )}
+
+          {/* Контекст */}
+          {block.type === "context" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Заголовок</Label>
+                <Input 
+                  value={localConfig.title || ""} 
+                  onChange={e => updateConfig("title", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите заголовок"
+                  className="text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Описание</Label>
+                <textarea 
+                  value={localConfig.description || ""} 
+                  onChange={e => updateConfig("description", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите описание"
+                  rows={3}
+                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Шкала */}
+          {block.type === "scale" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
+                <Input 
+                  value={localConfig.question || ""} 
+                  onChange={e => updateConfig("question", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите вопрос"
+                  className="text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                {[
+                  { v: "numeric", l: "Числовой" },
+                  { v: "emoji", l: "Эмодзи" },
+                  { v: "stars", l: "Звезды" }
+                ].map(t => (
+                  <button
+                    key={t.v}
+                    onClick={() => isEditable && updateConfig("scaleType", t.v)}
+                    disabled={!isEditable}
+                    className={cn(
+                      "px-3 py-1.5 text-xs rounded-md border transition-colors",
+                      localConfig.scaleType === t.v
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border hover:border-primary/50"
+                    )}
+                  >
+                    {t.l}
+                  </button>
+                ))}
+              </div>
+              {localConfig.scaleType === "numeric" && (
+                <div className="flex gap-4 items-center">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">От:</Label>
+                    <select 
+                      value={localConfig.min || 1}
+                      onChange={e => updateConfig("min", parseInt(e.target.value))}
+                      disabled={!isEditable}
+                      className="p-1 text-sm border border-border rounded bg-background"
+                    >
+                      {[0, 1].map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">До:</Label>
+                    <select 
+                      value={localConfig.max || 5}
+                      onChange={e => updateConfig("max", parseInt(e.target.value))}
+                      disabled={!isEditable}
+                      className="p-1 text-sm border border-border rounded bg-background"
+                    >
+                      {[3, 4, 5, 6, 7, 8, 9, 10].map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox 
+                  checked={localConfig.optional || false}
+                  onCheckedChange={(checked) => updateConfig("optional", checked)}
+                  disabled={!isEditable}
+                />
+                <span>Необязательный</span>
+              </label>
+            </>
+          )}
+
+          {/* Предпочтение */}
+          {block.type === "preference" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
+                <Input 
+                  value={localConfig.question || ""} 
+                  onChange={e => updateConfig("question", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите вопрос"
+                  className="text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => isEditable && updateConfig("comparisonType", "all")}
+                  disabled={!isEditable}
+                  className={cn(
+                    "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
+                    localConfig.comparisonType === "all"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  Выбор из всех
+                </button>
+                <button
+                  onClick={() => isEditable && updateConfig("comparisonType", "pairwise")}
+                  disabled={!isEditable}
+                  className={cn(
+                    "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
+                    localConfig.comparisonType === "pairwise"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  Попарное сравнение
+                </button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {(localConfig.images?.length || 0)} изображений загружено
+              </div>
+            </>
+          )}
+
+          {/* 5 секунд */}
+          {block.type === "five_seconds" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Инструкция</Label>
+                <textarea 
+                  value={localConfig.instruction || ""} 
+                  onChange={e => updateConfig("instruction", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите инструкцию"
+                  rows={2}
+                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-4">
+                <Label className="text-xs text-muted-foreground">Время показа:</Label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="range" 
+                    min={5} 
+                    max={60} 
+                    value={localConfig.duration || 5}
+                    onChange={e => updateConfig("duration", parseInt(e.target.value))}
+                    disabled={!isEditable}
+                    className="w-24"
+                  />
+                  <span className="text-sm font-medium">{localConfig.duration || 5} сек</span>
+                </div>
+              </div>
+              {localConfig.imageUrl && (
+                <div className="text-xs text-muted-foreground">✓ Изображение загружено</div>
+              )}
+            </>
+          )}
+
+          {/* Сортировка карточек */}
+          {block.type === "card_sorting" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Задание</Label>
+                <textarea 
+                  value={localConfig.task || ""} 
+                  onChange={e => updateConfig("task", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите задание"
+                  rows={2}
+                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => isEditable && updateConfig("sortingType", "closed")}
+                  disabled={!isEditable}
+                  className={cn(
+                    "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
+                    localConfig.sortingType === "closed"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  Закрытая
+                </button>
+                <button
+                  onClick={() => isEditable && updateConfig("sortingType", "open")}
+                  disabled={!isEditable}
+                  className={cn(
+                    "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
+                    localConfig.sortingType === "open"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  Открытая
+                </button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {localConfig.cards?.length || 0} карточек • {localConfig.categories?.length || 0} категорий
+              </div>
+            </>
+          )}
+
+          {/* Тестирование дерева */}
+          {block.type === "tree_testing" && (
+            <>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Задание</Label>
+                <textarea 
+                  value={localConfig.task || ""} 
+                  onChange={e => updateConfig("task", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите задание"
+                  rows={2}
+                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
+                />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {(() => {
+                  const countNodes = (nodes: any[]): number => {
+                    if (!nodes) return 0;
+                    return nodes.reduce((acc, n) => acc + 1 + countNodes(n.children || []), 0);
+                  };
+                  return `${countNodes(localConfig.tree || [])} категорий • ${localConfig.correctAnswers?.length || 0} верных ответов`;
+                })()}
+              </div>
+            </>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Debounce утилита
+function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
+}
+
+// ============= Компонент TreeTestingEditor =============
+interface TreeTestingEditorProps {
+  task: string;
+  setTask: (task: string) => void;
+  description: string;
+  setDescription: (desc: string) => void;
+  tree: TreeTestingNode[];
+  setTree: (tree: TreeTestingNode[]) => void;
+  correctAnswers: string[];
+  setCorrectAnswers: (answers: string[]) => void;
+  allowSkip: boolean;
+  setAllowSkip: (allow: boolean) => void;
+  expandedNodes: Set<string>;
+  setExpandedNodes: (nodes: Set<string>) => void;
+}
+
+function TreeTestingEditor({
+  task,
+  setTask,
+  description,
+  setDescription,
+  tree,
+  setTree,
+  correctAnswers,
+  setCorrectAnswers,
+  allowSkip,
+  setAllowSkip,
+  expandedNodes,
+  setExpandedNodes
+}: TreeTestingEditorProps) {
+  
+  // Подсчитать количество узлов с названиями
+  const countValidNodes = (nodes: TreeTestingNode[]): number => {
+    return nodes.reduce((acc, node) => {
+      const selfCount = node.name.trim() ? 1 : 0;
+      return acc + selfCount + countValidNodes(node.children);
+    }, 0);
+  };
+
+  // Обновить узел в дереве
+  const updateNode = (nodeId: string, updates: Partial<TreeTestingNode>, nodes: TreeTestingNode[]): TreeTestingNode[] => {
+    return nodes.map(node => {
+      if (node.id === nodeId) {
+        return { ...node, ...updates };
+      }
+      if (node.children.length > 0) {
+        return { ...node, children: updateNode(nodeId, updates, node.children) };
+      }
+      return node;
+    });
+  };
+
+  // Добавить дочерний узел
+  const addChildNode = (parentId: string, nodes: TreeTestingNode[]): TreeTestingNode[] => {
+    return nodes.map(node => {
+      if (node.id === parentId) {
+        const newChild: TreeTestingNode = { id: crypto.randomUUID(), name: "", children: [] };
+        return { ...node, children: [...node.children, newChild] };
+      }
+      if (node.children.length > 0) {
+        return { ...node, children: addChildNode(parentId, node.children) };
+      }
+      return node;
+    });
+  };
+
+  // Удалить узел
+  const removeNode = (nodeId: string, nodes: TreeTestingNode[]): TreeTestingNode[] => {
+    return nodes
+      .filter(node => node.id !== nodeId)
+      .map(node => ({
+        ...node,
+        children: removeNode(nodeId, node.children)
+      }));
+  };
+
+  // Добавить узел на верхнем уровне
+  const addRootNode = () => {
+    setTree([...tree, { id: crypto.randomUUID(), name: "", children: [] }]);
+  };
+
+  // Переключить развёрнутость узла
+  const toggleExpanded = (nodeId: string) => {
+    const newExpanded = new Set(expandedNodes);
+    if (newExpanded.has(nodeId)) {
+      newExpanded.delete(nodeId);
+    } else {
+      newExpanded.add(nodeId);
+    }
+    setExpandedNodes(newExpanded);
+  };
+
+  // Переключить верный ответ
+  const toggleCorrectAnswer = (nodeId: string) => {
+    if (correctAnswers.includes(nodeId)) {
+      setCorrectAnswers(correctAnswers.filter(id => id !== nodeId));
+    } else {
+      setCorrectAnswers([...correctAnswers, nodeId]);
+    }
+  };
+
+  // Развернуть все
+  const expandAll = () => {
+    const allIds = new Set<string>();
+    const collect = (nodes: TreeTestingNode[]) => {
+      nodes.forEach(node => {
+        if (node.children.length > 0) {
+          allIds.add(node.id);
+          collect(node.children);
+        }
+      });
+    };
+    collect(tree);
+    setExpandedNodes(allIds);
+  };
+
+  // Свернуть все
+  const collapseAll = () => {
+    setExpandedNodes(new Set());
+  };
+
+  // Рекурсивный рендер узла дерева
+  const renderTreeNode = (node: TreeTestingNode, depth: number = 0) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedNodes.has(node.id);
+    const isCorrect = correctAnswers.includes(node.id);
+
+    return (
+      <div key={node.id} style={{ marginLeft: depth * 24 }}>
+        <div style={{ 
+          display: "flex", 
+          alignItems: "center", 
+          gap: 8, 
+          marginBottom: 8,
+          padding: "4px 0"
+        }}>
+          {/* Кнопка развернуть/свернуть */}
+          <button
+            onClick={() => hasChildren && toggleExpanded(node.id)}
+            style={{
+              width: 24,
+              height: 24,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "transparent",
+              border: "none",
+              cursor: hasChildren ? "pointer" : "default",
+              opacity: hasChildren ? 1 : 0.3
+            }}
+          >
+            {hasChildren ? (
+              isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />
+            ) : (
+              <span style={{ width: 16 }} />
+            )}
+          </button>
+
+          {/* Drag handle */}
+          <GripVertical size={16} style={{ color: "#999", cursor: "grab" }} />
+
+          {/* Инпут названия */}
+          <input
+            type="text"
+            value={node.name}
+            onChange={e => setTree(updateNode(node.id, { name: e.target.value }, tree))}
+            placeholder="Название категории"
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              fontSize: 14,
+              background: "#f7f7f5"
+            }}
+          />
+
+          {/* Кнопка "Отметить как верный" */}
+          <button
+            onClick={() => toggleCorrectAnswer(node.id)}
+            title={isCorrect ? "Убрать из верных ответов" : "Отметить как верный"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 10px",
+              background: isCorrect ? "#e8f5e9" : "transparent",
+              border: isCorrect ? "1px solid #4caf50" : "1px solid #e0e0e0",
+              borderRadius: 6,
+              cursor: "pointer",
+              color: isCorrect ? "#2e7d32" : "#666",
+              fontSize: 13
+            }}
+          >
+            <CheckCircle2 size={16} style={{ color: isCorrect ? "#4caf50" : "#ccc" }} />
+            {isCorrect && <span>Верный</span>}
+          </button>
+
+          {/* Кнопка добавить подкатегорию */}
+          <button
+            onClick={() => {
+              setTree(addChildNode(node.id, tree));
+              // Развернуть родителя
+              const newExpanded = new Set(expandedNodes);
+              newExpanded.add(node.id);
+              setExpandedNodes(newExpanded);
+            }}
+            title="Добавить подкатегорию"
+            style={{
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "transparent",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              cursor: "pointer"
+            }}
+          >
+            <Plus size={16} color="#666" />
+          </button>
+
+          {/* Кнопка удалить */}
+          <button
+            onClick={() => {
+              setTree(removeNode(node.id, tree));
+              // Удалить из верных ответов если был
+              if (correctAnswers.includes(node.id)) {
+                setCorrectAnswers(correctAnswers.filter(id => id !== node.id));
+              }
+            }}
+            title="Удалить категорию"
+            style={{
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer"
+            }}
+          >
+            <Trash2 size={16} color="#999" />
+          </button>
+        </div>
+
+        {/* Дочерние узлы */}
+        {hasChildren && isExpanded && (
+          <div>
+            {node.children.map(child => renderTreeNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Получить список верных ответов для отображения
+  const getCorrectAnswerPaths = (): string[] => {
+    const paths: string[] = [];
+    
+    const findPath = (nodes: TreeTestingNode[], currentPath: string[] = []): void => {
+      nodes.forEach(node => {
+        const nodePath = [...currentPath, node.name].filter(Boolean);
+        if (correctAnswers.includes(node.id) && node.name.trim()) {
+          paths.push(nodePath.join(" › "));
+        }
+        if (node.children.length > 0) {
+          findPath(node.children, nodePath);
+        }
+      });
+    };
+    
+    findPath(tree);
+    return paths;
+  };
+
+  return (
+    <>
+      {/* Задание */}
+      <div style={{ marginBottom: 16 }}>
+        <Label style={{ display: "block", marginBottom: 8 }}>Задание</Label>
+        <Input
+          value={task}
+          onChange={e => setTask(e.target.value)}
+          placeholder="Где бы вы искали товар?"
+        />
+      </div>
+
+      {/* Описание */}
+      <div style={{ marginBottom: 16 }}>
+        <Label style={{ display: "block", marginBottom: 8 }}>Описание</Label>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Добавить дополнительный контекст для задания"
+          rows={2}
+          style={{
+            width: "100%",
+            padding: "8px 12px",
+            border: "1px solid #e0e0e0",
+            borderRadius: 6,
+            fontSize: 14,
+            fontFamily: "inherit",
+            resize: "vertical",
+            boxSizing: "border-box"
+          }}
+        />
+      </div>
+
+      {/* Дерево */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <Label>Дерево</Label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="outline" size="sm" onClick={collapseAll}>
+              Свернуть все
+            </Button>
+            <Button variant="outline" size="sm" onClick={expandAll}>
+              Развернуть все
+            </Button>
+          </div>
+        </div>
+        
+        <div style={{ 
+          fontSize: 13, 
+          color: "#666", 
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 4
+        }}>
+          <span style={{ fontSize: 16 }}>ℹ️</span>
+          <span>Клавиатурные сокращения</span>
+        </div>
+        
+        <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
+          Перетащите элементы, чтобы переупорядочить их. Переместите вправо, чтобы вложить пункт, влево, чтобы вывести на уровень выше.
+        </p>
+
+        {/* Дерево узлов */}
+        <div style={{ 
+          border: "1px solid #e0e0e0", 
+          borderRadius: 8, 
+          padding: 16,
+          background: "#fafafa",
+          maxHeight: 400,
+          overflowY: "auto"
+        }}>
+          {tree.map(node => renderTreeNode(node))}
+          
+          {/* Кнопка добавить категорию */}
+          <button
+            onClick={addRootNode}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 16px",
+              marginTop: 8,
+              background: "white",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 14
+            }}
+          >
+            <Plus size={16} />
+            Добавить категорию
+          </button>
+        </div>
+      </div>
+
+      {/* Верные ответы */}
+      {correctAnswers.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Label style={{ display: "block", marginBottom: 8 }}>
+            {correctAnswers.length === 1 ? "Верный ответ" : "Верные ответы"}
+          </Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {getCorrectAnswerPaths().map((path, i) => (
+              <div 
+                key={i} 
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: 8,
+                  padding: "8px 12px",
+                  background: "#e8f5e9",
+                  borderRadius: 6,
+                  fontSize: 14
+                }}
+              >
+                <CheckCircle2 size={18} style={{ color: "#4caf50" }} />
+                <span>{path}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Разрешить пропустить */}
+      <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8 }}>
+        <ToggleSwitch 
+          label="Разрешить пропустить задание" 
+          checked={allowSkip} 
+          onChange={setAllowSkip} 
+        />
+        {allowSkip && (
+          <div style={{ marginLeft: 56, fontSize: 13, color: "#666", marginTop: -4 }}>
+            Респонденты могут пропустить этот блок, если у них возникли трудности.
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
