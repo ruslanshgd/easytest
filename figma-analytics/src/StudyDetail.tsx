@@ -209,6 +209,10 @@ export default function StudyDetail() {
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"builder" | "results" | "share">("builder");
   
+  // Глобальный счётчик активных сохранений (для индикатора "Сохранение...")
+  const [savingCount, setSavingCount] = useState(0);
+  const isSaving = savingCount > 0;
+  
   // Инлайн редактирование названия
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
@@ -566,6 +570,30 @@ export default function StudyDetail() {
   useEffect(() => {
     loadStudy();
   }, [studyId]);
+
+  // Оптимистичное обновление блока в локальном state + сохранение в БД в фоне
+  const updateBlockInState = useCallback(async (blockId: string, updates: Partial<StudyBlock>) => {
+    // 1. Оптимистично обновляем локальный state сразу
+    setBlocks(prevBlocks => 
+      prevBlocks.map(b => b.id === blockId ? { ...b, ...updates } : b)
+    );
+    
+    // 2. Сохраняем в БД в фоне
+    setSavingCount(c => c + 1);
+    try {
+      const { error } = await supabase
+        .from("study_blocks")
+        .update(updates)
+        .eq("id", blockId);
+      
+      if (error) {
+        console.error("Ошибка сохранения блока:", error);
+        // При ошибке можно откатить изменения, но пока просто логируем
+      }
+    } finally {
+      setSavingCount(c => c - 1);
+    }
+  }, []);
 
   // Фокус на инпут при начале редактирования названия
   useEffect(() => {
@@ -961,16 +989,29 @@ export default function StudyDetail() {
     if (study?.status !== "draft") return;
     if (!confirm("Удалить этот блок?")) return;
 
-    const { error: deleteError } = await supabase
-      .from("study_blocks")
-      .delete()
-      .eq("id", blockId);
+    // 1. Оптимистично удаляем из локального state
+    setBlocks(prevBlocks => {
+      const filtered = prevBlocks.filter(b => b.id !== blockId);
+      // Пересчитываем order_index
+      return filtered.map((b, i) => ({ ...b, order_index: i }));
+    });
 
-    if (deleteError) {
-      setError(deleteError.message);
-      return;
+    // 2. Удаляем из БД в фоне
+    setSavingCount(c => c + 1);
+    try {
+      const { error: deleteError } = await supabase
+        .from("study_blocks")
+        .delete()
+        .eq("id", blockId);
+
+      if (deleteError) {
+        // При ошибке перезагружаем данные
+        await loadStudy();
+        setError(deleteError.message);
+      }
+    } finally {
+      setSavingCount(c => c - 1);
     }
-    await loadStudy();
   };
 
   // Быстрое добавление блока с дефолтными значениями
@@ -1034,16 +1075,24 @@ export default function StudyDetail() {
       config: defaultConfigs[blockType]
     };
 
-    const { error: insertError } = await supabase
-      .from("study_blocks")
-      .insert([blockData]);
+    setSavingCount(c => c + 1);
+    try {
+      const { data: newBlock, error: insertError } = await supabase
+        .from("study_blocks")
+        .insert([blockData])
+        .select()
+        .single();
 
-    if (insertError) {
-      setError(insertError.message);
-      return;
+      if (insertError || !newBlock) {
+        setError(insertError?.message || "Ошибка добавления блока");
+        return;
+      }
+
+      // Добавляем новый блок в локальный state
+      setBlocks(prevBlocks => [...prevBlocks, newBlock as StudyBlock].sort((a, b) => a.order_index - b.order_index));
+    } finally {
+      setSavingCount(c => c - 1);
     }
-
-    await loadStudy();
   };
 
   const handleDragStart = (blockId: string) => {
@@ -1090,12 +1139,24 @@ export default function StudyDetail() {
       }
     }
 
-    for (const update of updates) {
-      await supabase.from("study_blocks").update({ order_index: update.order_index }).eq("id", update.id);
-    }
-
+    // 1. Оптимистично обновляем локальный state сразу
+    setBlocks(prevBlocks => {
+      const updatesMap = new Map(updates.map(u => [u.id, u.order_index]));
+      return prevBlocks
+        .map(b => updatesMap.has(b.id) ? { ...b, order_index: updatesMap.get(b.id)! } : b)
+        .sort((a, b) => a.order_index - b.order_index);
+    });
     setDraggedBlockId(null);
-    await loadStudy();
+
+    // 2. Сохраняем в БД в фоне
+    setSavingCount(c => c + 1);
+    try {
+      for (const update of updates) {
+        await supabase.from("study_blocks").update({ order_index: update.order_index }).eq("id", update.id);
+      }
+    } finally {
+      setSavingCount(c => c - 1);
+    }
   };
 
   const getBlockTypeInfo = (type: BlockType) => {
@@ -1180,19 +1241,26 @@ export default function StudyDetail() {
 
   // Сохранение нового названия (инлайн редактирование)
   const saveTitle = async () => {
-    if (editedTitle.trim() && editedTitle.trim() !== study.title) {
-      const { error: updateError } = await supabase
-        .from("studies")
-        .update({ title: editedTitle.trim() })
-        .eq("id", studyId);
-
-      if (!updateError) {
-        await loadStudy();
+    const newTitle = editedTitle.trim();
+    if (newTitle && newTitle !== study.title) {
+      // 1. Оптимистично обновляем локальный state
+      setStudy(prev => prev ? { ...prev, title: newTitle } : prev);
+      setIsEditingTitle(false);
+      
+      // 2. Сохраняем в БД в фоне
+      setSavingCount(c => c + 1);
+      try {
+        await supabase
+          .from("studies")
+          .update({ title: newTitle })
+          .eq("id", studyId);
+      } finally {
+        setSavingCount(c => c - 1);
       }
     } else {
       setEditedTitle(study.title);
+      setIsEditingTitle(false);
     }
-    setIsEditingTitle(false);
   };
 
   // Получить краткое название блока для сайдбара
@@ -1263,6 +1331,11 @@ export default function StudyDetail() {
                 </h1>
               )}
               <Badge variant={status.variant}>{status.label}</Badge>
+              {isSaving && (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  Сохранение...
+                </span>
+              )}
             </div>
           </div>
 
@@ -1424,7 +1497,7 @@ export default function StudyDetail() {
                     isEditable={isEditable}
                     prototypes={prototypes}
                     onDelete={() => handleDeleteBlock(block.id)}
-                    onUpdate={loadStudy}
+                    onUpdateBlock={updateBlockInState}
                     onDragStart={() => handleDragStart(block.id)}
                     onDragOver={handleDragOver}
                     onDrop={() => handleDrop(block.id)}
@@ -2125,7 +2198,7 @@ interface InlineBlockEditorProps {
   isEditable: boolean;
   prototypes: Prototype[];
   onDelete: () => void;
-  onUpdate: () => Promise<void>;
+  onUpdateBlock: (blockId: string, updates: Partial<StudyBlock>) => void;
   onDragStart: () => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
@@ -2138,7 +2211,7 @@ function InlineBlockEditor({
   isEditable,
   prototypes,
   onDelete,
-  onUpdate,
+  onUpdateBlock,
   onDragStart,
   onDragOver,
   onDrop,
@@ -2146,60 +2219,64 @@ function InlineBlockEditor({
 }: InlineBlockEditorProps) {
   const typeInfo = BLOCK_TYPES.find(t => t.value === block.type) || BLOCK_TYPES[0];
   const IconComponent = typeInfo.Icon;
-  
-  // Локальный стейт для редактирования
-  const [localConfig, setLocalConfig] = useState<any>(block.config || {});
-  const [localInstructions, setLocalInstructions] = useState(block.instructions || "");
-  const [localPrototypeId, setLocalPrototypeId] = useState(block.prototype_id || "");
-  const [saving, setSaving] = useState(false);
 
-  // Синхронизация при изменении block.config
-  useEffect(() => {
-    setLocalConfig(block.config || {});
-    setLocalInstructions(block.instructions || "");
-    setLocalPrototypeId(block.prototype_id || "");
-  }, [block.config, block.instructions, block.prototype_id]);
+  // Локальный state для текстовых полей (для мгновенного отображения)
+  const [localText, setLocalText] = useState<Record<string, string>>({});
 
-  // Сохранение изменений с debounce
-  const saveChanges = async (updates: Partial<StudyBlock>) => {
-    if (!isEditable) return;
-    setSaving(true);
-    
-    const { error } = await supabase
-      .from("study_blocks")
-      .update(updates)
-      .eq("id", block.id);
-    
-    if (!error) {
-      await onUpdate();
-    }
-    setSaving(false);
+  // Получить значение текстового поля (локальное или из block.config)
+  const getTextValue = (key: string, fallback: string = "") => {
+    return localText[key] !== undefined ? localText[key] : (block.config?.[key] || fallback);
   };
 
-  // Debounced save для текстовых полей
-  const debouncedSave = useCallback(
-    debounce((updates: Partial<StudyBlock>) => saveChanges(updates), 500),
-    [block.id, isEditable]
+  // Получить инструкции (локальное или из block.instructions)
+  const getInstructionsValue = () => {
+    return localText["__instructions__"] !== undefined ? localText["__instructions__"] : (block.instructions || "");
+  };
+
+  // Debounced save для текстовых полей конфига
+  const debouncedSaveConfig = useCallback(
+    debounce((newConfig: any) => {
+      onUpdateBlock(block.id, { config: newConfig });
+    }, 800),
+    [block.id, onUpdateBlock]
   );
 
-  // Обновление конфига
+  // Debounced save для инструкций
+  const debouncedSaveInstructions = useCallback(
+    debounce((value: string) => {
+      onUpdateBlock(block.id, { instructions: value });
+    }, 800),
+    [block.id, onUpdateBlock]
+  );
+
+  // Обновление текстового поля конфига (с debounce)
+  const updateConfigText = (key: string, value: string) => {
+    setLocalText(prev => ({ ...prev, [key]: value }));
+    const newConfig = { ...block.config, [key]: value };
+    debouncedSaveConfig(newConfig);
+  };
+
+  // Обновление НЕтекстового конфига (без debounce — сразу сохраняем)
   const updateConfig = (key: string, value: any) => {
-    const newConfig = { ...localConfig, [key]: value };
-    setLocalConfig(newConfig);
-    debouncedSave({ config: newConfig });
+    const newConfig = { ...block.config, [key]: value };
+    onUpdateBlock(block.id, { config: newConfig });
   };
 
-  // Обновление инструкций (только для прототипа)
+  // Обновление инструкций (с debounce)
   const updateInstructions = (value: string) => {
-    setLocalInstructions(value);
-    debouncedSave({ instructions: value });
+    setLocalText(prev => ({ ...prev, "__instructions__": value }));
+    debouncedSaveInstructions(value);
   };
 
-  // Обновление прототипа
+  // Обновление прототипа (без debounce)
   const updatePrototype = (protoId: string) => {
-    setLocalPrototypeId(protoId);
-    saveChanges({ prototype_id: protoId });
+    onUpdateBlock(block.id, { prototype_id: protoId });
   };
+
+  // Сброс локального state при изменении block извне
+  useEffect(() => {
+    setLocalText({});
+  }, [block.id]);
 
   return (
     <Card 
@@ -2229,7 +2306,6 @@ function InlineBlockEditor({
               <IconComponent size={16} className="text-muted-foreground" />
             </div>
             <span className="font-medium text-sm">{typeInfo.label}</span>
-            {saving && <span className="text-xs text-muted-foreground">Сохранение...</span>}
           </div>
 
           {isEditable && (
@@ -2257,7 +2333,7 @@ function InlineBlockEditor({
                   </div>
                 ) : (
                   <select 
-                    value={localPrototypeId} 
+                    value={block.prototype_id || ""} 
                     onChange={e => updatePrototype(e.target.value)}
                     disabled={!isEditable}
                     className="w-full p-2 text-sm border border-border rounded-md bg-background"
@@ -2274,7 +2350,7 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Инструкции</Label>
                 <textarea 
-                  value={localInstructions} 
+                  value={getInstructionsValue()} 
                   onChange={e => updateInstructions(e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите инструкции для респондента"
@@ -2291,8 +2367,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
                 <textarea 
-                  value={localConfig.question || ""} 
-                  onChange={e => updateConfig("question", e.target.value)}
+                  value={getTextValue("question")} 
+                  onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите текст вопроса"
                   rows={2}
@@ -2301,7 +2377,7 @@ function InlineBlockEditor({
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <Checkbox 
-                  checked={localConfig.optional || false}
+                  checked={block.config.optional || false}
                   onCheckedChange={(checked) => updateConfig("optional", checked)}
                   disabled={!isEditable}
                 />
@@ -2323,8 +2399,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
                 <Input 
-                  value={localConfig.question || ""} 
-                  onChange={e => updateConfig("question", e.target.value)}
+                  value={getTextValue("question")} 
+                  onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите вопрос"
                   className="text-sm"
@@ -2333,13 +2409,13 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Варианты ответа</Label>
                 <div className="space-y-2">
-                  {(localConfig.options || []).map((opt: string, i: number) => (
+                  {(block.config.options || []).map((opt: string, i: number) => (
                     <div key={i} className="flex gap-2 items-center">
                       <span className="text-xs text-muted-foreground w-5">{String.fromCharCode(65 + i)}.</span>
                       <Input 
                         value={opt} 
                         onChange={e => {
-                          const newOpts = [...(localConfig.options || [])];
+                          const newOpts = [...(block.config.options || [])];
                           newOpts[i] = e.target.value;
                           updateConfig("options", newOpts);
                         }}
@@ -2347,13 +2423,13 @@ function InlineBlockEditor({
                         className="text-sm flex-1"
                         placeholder="Вариант ответа"
                       />
-                      {isEditable && (localConfig.options?.length || 0) > 2 && (
+                      {isEditable && (block.config.options?.length || 0) > 2 && (
                         <Button 
                           variant="ghost" 
                           size="sm" 
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                           onClick={() => {
-                            const newOpts = (localConfig.options || []).filter((_: any, j: number) => j !== i);
+                            const newOpts = (block.config.options || []).filter((_: any, j: number) => j !== i);
                             updateConfig("options", newOpts);
                           }}
                         >
@@ -2367,7 +2443,7 @@ function InlineBlockEditor({
                       variant="ghost" 
                       size="sm"
                       className="text-xs"
-                      onClick={() => updateConfig("options", [...(localConfig.options || []), ""])}
+                      onClick={() => updateConfig("options", [...(block.config.options || []), ""])}
                     >
                       <Plus className="h-3 w-3 mr-1" />
                       Добавить вариант
@@ -2378,7 +2454,7 @@ function InlineBlockEditor({
               <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <Checkbox 
-                    checked={localConfig.allowMultiple || false}
+                    checked={block.config.allowMultiple || false}
                     onCheckedChange={(checked) => updateConfig("allowMultiple", checked)}
                     disabled={!isEditable}
                   />
@@ -2386,7 +2462,7 @@ function InlineBlockEditor({
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <Checkbox 
-                    checked={localConfig.shuffle || false}
+                    checked={block.config.shuffle || false}
                     onCheckedChange={(checked) => updateConfig("shuffle", checked)}
                     disabled={!isEditable}
                   />
@@ -2394,7 +2470,7 @@ function InlineBlockEditor({
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <Checkbox 
-                    checked={localConfig.optional || false}
+                    checked={block.config.optional || false}
                     onCheckedChange={(checked) => updateConfig("optional", checked)}
                     disabled={!isEditable}
                   />
@@ -2410,8 +2486,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Заголовок</Label>
                 <Input 
-                  value={localConfig.title || ""} 
-                  onChange={e => updateConfig("title", e.target.value)}
+                  value={getTextValue("title")} 
+                  onChange={e => updateConfigText("title", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите заголовок"
                   className="text-sm"
@@ -2420,8 +2496,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Описание</Label>
                 <textarea 
-                  value={localConfig.description || ""} 
-                  onChange={e => updateConfig("description", e.target.value)}
+                  value={getTextValue("description")} 
+                  onChange={e => updateConfigText("description", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите описание"
                   rows={3}
@@ -2437,8 +2513,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
                 <Input 
-                  value={localConfig.question || ""} 
-                  onChange={e => updateConfig("question", e.target.value)}
+                  value={getTextValue("question")} 
+                  onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите вопрос"
                   className="text-sm"
@@ -2456,7 +2532,7 @@ function InlineBlockEditor({
                     disabled={!isEditable}
                     className={cn(
                       "px-3 py-1.5 text-xs rounded-md border transition-colors",
-                      localConfig.scaleType === t.v
+                      block.config.scaleType === t.v
                         ? "border-primary bg-primary/10 text-primary"
                         : "border-border hover:border-primary/50"
                     )}
@@ -2465,12 +2541,12 @@ function InlineBlockEditor({
                   </button>
                 ))}
               </div>
-              {localConfig.scaleType === "numeric" && (
+              {block.config.scaleType === "numeric" && (
                 <div className="flex gap-4 items-center">
                   <div className="flex items-center gap-2">
                     <Label className="text-xs text-muted-foreground">От:</Label>
                     <select 
-                      value={localConfig.min || 1}
+                      value={block.config.min || 1}
                       onChange={e => updateConfig("min", parseInt(e.target.value))}
                       disabled={!isEditable}
                       className="p-1 text-sm border border-border rounded bg-background"
@@ -2481,7 +2557,7 @@ function InlineBlockEditor({
                   <div className="flex items-center gap-2">
                     <Label className="text-xs text-muted-foreground">До:</Label>
                     <select 
-                      value={localConfig.max || 5}
+                      value={block.config.max || 5}
                       onChange={e => updateConfig("max", parseInt(e.target.value))}
                       disabled={!isEditable}
                       className="p-1 text-sm border border-border rounded bg-background"
@@ -2493,7 +2569,7 @@ function InlineBlockEditor({
               )}
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <Checkbox 
-                  checked={localConfig.optional || false}
+                  checked={block.config.optional || false}
                   onCheckedChange={(checked) => updateConfig("optional", checked)}
                   disabled={!isEditable}
                 />
@@ -2508,8 +2584,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
                 <Input 
-                  value={localConfig.question || ""} 
-                  onChange={e => updateConfig("question", e.target.value)}
+                  value={getTextValue("question")} 
+                  onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите вопрос"
                   className="text-sm"
@@ -2521,7 +2597,7 @@ function InlineBlockEditor({
                   disabled={!isEditable}
                   className={cn(
                     "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
-                    localConfig.comparisonType === "all"
+                    block.config.comparisonType === "all"
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border hover:border-primary/50"
                   )}
@@ -2533,7 +2609,7 @@ function InlineBlockEditor({
                   disabled={!isEditable}
                   className={cn(
                     "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
-                    localConfig.comparisonType === "pairwise"
+                    block.config.comparisonType === "pairwise"
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border hover:border-primary/50"
                   )}
@@ -2542,7 +2618,7 @@ function InlineBlockEditor({
                 </button>
               </div>
               <div className="text-xs text-muted-foreground">
-                {(localConfig.images?.length || 0)} изображений загружено
+                {(block.config.images?.length || 0)} изображений загружено
               </div>
             </>
           )}
@@ -2553,8 +2629,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Инструкция</Label>
                 <textarea 
-                  value={localConfig.instruction || ""} 
-                  onChange={e => updateConfig("instruction", e.target.value)}
+                  value={getTextValue("instruction")} 
+                  onChange={e => updateConfigText("instruction", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите инструкцию"
                   rows={2}
@@ -2568,15 +2644,15 @@ function InlineBlockEditor({
                     type="range" 
                     min={5} 
                     max={60} 
-                    value={localConfig.duration || 5}
+                    value={block.config.duration || 5}
                     onChange={e => updateConfig("duration", parseInt(e.target.value))}
                     disabled={!isEditable}
                     className="w-24"
                   />
-                  <span className="text-sm font-medium">{localConfig.duration || 5} сек</span>
+                  <span className="text-sm font-medium">{block.config.duration || 5} сек</span>
                 </div>
               </div>
-              {localConfig.imageUrl && (
+              {block.config.imageUrl && (
                 <div className="text-xs text-muted-foreground">✓ Изображение загружено</div>
               )}
             </>
@@ -2588,8 +2664,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Задание</Label>
                 <textarea 
-                  value={localConfig.task || ""} 
-                  onChange={e => updateConfig("task", e.target.value)}
+                  value={getTextValue("task")} 
+                  onChange={e => updateConfigText("task", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите задание"
                   rows={2}
@@ -2602,7 +2678,7 @@ function InlineBlockEditor({
                   disabled={!isEditable}
                   className={cn(
                     "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
-                    localConfig.sortingType === "closed"
+                    block.config.sortingType === "closed"
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border hover:border-primary/50"
                   )}
@@ -2614,7 +2690,7 @@ function InlineBlockEditor({
                   disabled={!isEditable}
                   className={cn(
                     "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
-                    localConfig.sortingType === "open"
+                    block.config.sortingType === "open"
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border hover:border-primary/50"
                   )}
@@ -2623,7 +2699,7 @@ function InlineBlockEditor({
                 </button>
               </div>
               <div className="text-xs text-muted-foreground">
-                {localConfig.cards?.length || 0} карточек • {localConfig.categories?.length || 0} категорий
+                {block.config.cards?.length || 0} карточек • {block.config.categories?.length || 0} категорий
               </div>
             </>
           )}
@@ -2634,8 +2710,8 @@ function InlineBlockEditor({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Задание</Label>
                 <textarea 
-                  value={localConfig.task || ""} 
-                  onChange={e => updateConfig("task", e.target.value)}
+                  value={getTextValue("task")} 
+                  onChange={e => updateConfigText("task", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите задание"
                   rows={2}
@@ -2648,7 +2724,7 @@ function InlineBlockEditor({
                     if (!nodes) return 0;
                     return nodes.reduce((acc, n) => acc + 1 + countNodes(n.children || []), 0);
                   };
-                  return `${countNodes(localConfig.tree || [])} категорий • ${localConfig.correctAnswers?.length || 0} верных ответов`;
+                  return `${countNodes(block.config.tree || [])} категорий • ${block.config.correctAnswers?.length || 0} верных ответов`;
                 })()}
               </div>
             </>
