@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { translateAuthError } from "../utils/errorMessages";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Mail, ArrowLeft, Loader2 } from "lucide-react";
 
 export default function Auth() {
   const [email, setEmail] = useState("");
@@ -20,7 +25,7 @@ export default function Auth() {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: {
-          shouldCreateUser: true, // Автоматически создавать пользователя при первом входе
+          shouldCreateUser: true,
         },
       });
 
@@ -62,8 +67,7 @@ export default function Auth() {
 
       if (session) {
         setMessage("Успешный вход! Перенаправление...");
-        // Сессия будет обработана в App.tsx через onAuthStateChange
-        window.location.reload(); // Перезагружаем страницу для применения авторизации
+        window.location.reload();
       }
     } catch (err) {
       setError(translateAuthError(err));
@@ -80,164 +84,99 @@ export default function Auth() {
   };
 
   return (
-    <div style={{
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      minHeight: "100vh",
-      backgroundColor: "#f5f5f5",
-    }}>
-      <div style={{
-        backgroundColor: "white",
-        padding: "2rem",
-        borderRadius: "8px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-        width: "100%",
-        maxWidth: "400px",
-      }}>
-        <h2 style={{ marginTop: 0, marginBottom: "1.5rem", textAlign: "center" }}>
-          {step === "email" ? "Вход" : "Введите код"}
-        </h2>
-
-        {error && (
-          <div style={{
-            padding: "0.75rem",
-            marginBottom: "1rem",
-            backgroundColor: "#fee",
-            color: "#c33",
-            borderRadius: "4px",
-            fontSize: "0.9rem",
-          }}>
-            {error}
-          </div>
-        )}
-
-        {message && (
-          <div style={{
-            padding: "0.75rem",
-            marginBottom: "1rem",
-            backgroundColor: "#efe",
-            color: "#3c3",
-            borderRadius: "4px",
-            fontSize: "0.9rem",
-          }}>
-            {message}
-          </div>
-        )}
-
-        {step === "email" ? (
-          <form onSubmit={handleSendOTP}>
-            <div style={{ marginBottom: "1rem" }}>
-              <label htmlFor="email" style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={loading}
-                style={{
-                  width: "100%",
-                  padding: "0.75rem",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                  fontSize: "1rem",
-                  boxSizing: "border-box",
-                }}
-                placeholder="your@email.com"
-              />
+    <div className="min-h-screen flex items-center justify-center bg-secondary/30 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">
+            {step === "email" ? "Вход" : "Введите код"}
+          </CardTitle>
+          <CardDescription>
+            {step === "email" 
+              ? "Введите email для получения кода входа" 
+              : `Код отправлен на ${email}`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg mb-4 text-sm">
+              {error}
             </div>
-            <button
-              type="submit"
-              disabled={loading || !email.trim()}
-              style={{
-                width: "100%",
-                padding: "0.75rem",
-                backgroundColor: loading ? "#ccc" : "#007bff",
-                color: "white",
-                border: "none",
-                borderRadius: "4px",
-                fontSize: "1rem",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontWeight: "500",
-              }}
-            >
-              {loading ? "Отправка..." : "Отправить код"}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleVerifyOTP}>
-            <div style={{ marginBottom: "1rem" }}>
-              <label htmlFor="otp" style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
-                Код из письма
-              </label>
-              <input
-                id="otp"
-                type="text"
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
-                required
-                disabled={loading}
-                maxLength={8}
-                style={{
-                  width: "100%",
-                  padding: "0.75rem",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                  fontSize: "1.5rem",
-                  textAlign: "center",
-                  letterSpacing: "0.5rem",
-                  boxSizing: "border-box",
-                  fontFamily: "monospace",
-                }}
-                placeholder="12345678"
-                autoFocus
-              />
-              <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#666" }}>
-                Код отправлен на {email}
+          )}
+
+          {message && (
+            <div className="bg-[#0f7b6c]/10 text-[#0f7b6c] px-4 py-3 rounded-lg mb-4 text-sm">
+              {message}
+            </div>
+          )}
+
+          {step === "email" ? (
+            <form onSubmit={handleSendOTP} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    disabled={loading}
+                    className="pl-10"
+                    placeholder="your@email.com"
+                  />
+                </div>
               </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading || otpCode.length < 6}
-              style={{
-                width: "100%",
-                padding: "0.75rem",
-                backgroundColor: loading ? "#ccc" : "#28a745",
-                color: "white",
-                border: "none",
-                borderRadius: "4px",
-                fontSize: "1rem",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontWeight: "500",
-                marginBottom: "0.5rem",
-              }}
-            >
-              {loading ? "Проверка..." : "Войти"}
-            </button>
-            <button
-              type="button"
-              onClick={handleBackToEmail}
-              disabled={loading}
-              style={{
-                width: "100%",
-                padding: "0.5rem",
-                backgroundColor: "transparent",
-                color: "#007bff",
-                border: "1px solid #007bff",
-                borderRadius: "4px",
-                fontSize: "0.9rem",
-                cursor: loading ? "not-allowed" : "pointer",
-              }}
-            >
-              Изменить email
-            </button>
-          </form>
-        )}
-      </div>
+              <Button
+                type="submit"
+                disabled={loading || !email.trim()}
+                className="w-full"
+              >
+                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {loading ? "Отправка..." : "Отправить код"}
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyOTP} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="otp">Код из письма</Label>
+                <Input
+                  id="otp"
+                  type="text"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                  required
+                  disabled={loading}
+                  maxLength={8}
+                  className="text-center text-2xl tracking-[0.5em] font-mono"
+                  placeholder="123456"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-2">
+                <Button
+                  type="submit"
+                  disabled={loading || otpCode.length < 6}
+                  className="w-full"
+                >
+                  {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {loading ? "Проверка..." : "Войти"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleBackToEmail}
+                  disabled={loading}
+                  className="w-full"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Изменить email
+                </Button>
+              </div>
+            </form>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
-

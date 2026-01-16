@@ -44,5 +44,10 @@ export interface EventContract {
   
   // Legacy поля (для обратной совместимости)
   user_id?: string | null;
+  
+  // Новые nullable поля для Study Runs (additive only)
+  run_id?: string | null;
+  block_id?: string | null;
+  study_id?: string | null;
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { isValidUUID } from "./utils/validation";
 
@@ -83,6 +83,7 @@ interface Proto {
 export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) {
   const params = useParams<{ sessionId?: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   
   // Приоритет: URL params > state > props > localStorage
   const selectedSessionId = params.sessionId || location.state?.sessionId || propSessionId || null;
@@ -1264,7 +1265,24 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   if (loading) {
     return (
       <div style={containerStyle}>
-        <h2>Аналитика сессий</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
+          <button
+            onClick={() => navigate("/studies")}
+            style={{
+              padding: "8px 16px",
+              background: "#2196f3",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: "bold"
+            }}
+          >
+            Тесты
+          </button>
+        </div>
         <p>Загрузка...</p>
       </div>
     );
@@ -1273,7 +1291,24 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   if (error) {
     return (
       <div style={containerStyle}>
-        <h2>Аналитика сессий</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
+          <button
+            onClick={() => navigate("/studies")}
+            style={{
+              padding: "8px 16px",
+              background: "#2196f3",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: "bold"
+            }}
+          >
+            Тесты
+          </button>
+        </div>
         <p style={{ color: "red" }}>Ошибка: {error}</p>
       </div>
     );
@@ -1282,7 +1317,24 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   if (sessions.length === 0) {
     return (
       <div style={containerStyle}>
-        <h2>Аналитика сессий</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
+          <button
+            onClick={() => navigate("/studies")}
+            style={{
+              padding: "8px 16px",
+              background: "#2196f3",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: "bold"
+            }}
+          >
+            Тесты
+          </button>
+        </div>
         <p>Сессии не найдены.</p>
       </div>
     );
@@ -2021,7 +2073,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                 cursor: "pointer",
                 marginBottom: isGroupExpanded ? 16 : 0
               }}
-              onClick={() => toggleTaskGroup(taskGroup.prototypeId)}
+              onClick={() => navigate(`/prototypes/${taskGroup.prototypeId}`)}
             >
               <div style={{ flex: 1 }}>
                 <h3 style={{ margin: "0 0 8px 0", fontSize: 18, fontWeight: 600, color: "#333" }}>

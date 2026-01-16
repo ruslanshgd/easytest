@@ -46,15 +46,28 @@ figma.showUI(__html__, { width: 400, height: 500 });
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "SAVE_CONFIG") {
     try {
-      // Сохраняем конфигурацию в clientStorage
-      await figma.clientStorage.setAsync("pluginConfig", msg.config);
-      CONFIG = {
+      // Очищаем токены от невидимых символов перед сохранением
+      var cleanAccessToken = (msg.config.ACCESS_TOKEN || "").trim();
+      var cleanFigmaToken = (msg.config.FIGMA_ACCESS_TOKEN || "").trim().replace(/[^\x20-\x7E]/g, '');
+      
+      var cleanConfig = {
         SUPABASE_URL: msg.config.SUPABASE_URL || "",
         SUPABASE_ANON_KEY: msg.config.SUPABASE_ANON_KEY || "",
         VIEWER_URL: msg.config.VIEWER_URL || "",
         ANALYTICS_URL: msg.config.ANALYTICS_URL || "",
-        ACCESS_TOKEN: msg.config.ACCESS_TOKEN || "",
-        FIGMA_ACCESS_TOKEN: msg.config.FIGMA_ACCESS_TOKEN || ""
+        ACCESS_TOKEN: cleanAccessToken,
+        FIGMA_ACCESS_TOKEN: cleanFigmaToken
+      };
+      
+      // Сохраняем конфигурацию в clientStorage
+      await figma.clientStorage.setAsync("pluginConfig", cleanConfig);
+      CONFIG = {
+        SUPABASE_URL: cleanConfig.SUPABASE_URL || "",
+        SUPABASE_ANON_KEY: cleanConfig.SUPABASE_ANON_KEY || "",
+        VIEWER_URL: cleanConfig.VIEWER_URL || "",
+        ANALYTICS_URL: cleanConfig.ANALYTICS_URL || "",
+        ACCESS_TOKEN: cleanConfig.ACCESS_TOKEN || "",
+        FIGMA_ACCESS_TOKEN: cleanConfig.FIGMA_ACCESS_TOKEN || ""
       };
       console.log("Config saved:", CONFIG);
       
@@ -183,7 +196,11 @@ figma.ui.onmessage = async (msg) => {
     // Получаем данные файла через REST API из code.js (обход CSP)
     try {
       const fileKey = msg.fileKey;
-      const figmaToken = CONFIG.FIGMA_ACCESS_TOKEN || msg.figmaToken;
+      // Агрессивная очистка токена: убираем все невидимые символы, оставляем только ASCII
+      const rawToken = CONFIG.FIGMA_ACCESS_TOKEN || msg.figmaToken || "";
+      const figmaToken = rawToken.trim().replace(/[^\x20-\x7E]/g, '');
+      
+      console.log("Figma token length before/after cleanup:", rawToken.length, figmaToken.length);
       
       if (!figmaToken) {
         figma.ui.postMessage({

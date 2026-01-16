@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2, Copy, Check, Key, Home, LogIn } from "lucide-react";
 
 export default function TokenPage() {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    // Получаем текущую сессию и извлекаем access_token
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.access_token) {
         setToken(session.access_token);
@@ -14,7 +17,6 @@ export default function TokenPage() {
       setLoading(false);
     });
 
-    // Слушаем изменения авторизации
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -28,140 +30,72 @@ export default function TokenPage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const copyToClipboard = () => {
+  const copyToClipboard = async () => {
     if (token) {
-      navigator.clipboard.writeText(token);
-      alert("Токен скопирован в буфер обмена!");
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
   if (loading) {
     return (
-      <div style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        minHeight: "100vh",
-        background: "#f5f5f7",
-      }}>
-        <div>Загрузка...</div>
+      <div className="min-h-screen flex items-center justify-center bg-secondary/30">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (!token) {
     return (
-      <div style={{
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        alignItems: "center",
-        minHeight: "100vh",
-        background: "#f5f5f7",
-        padding: 20,
-      }}>
-        <div style={{
-          background: "#ffffff",
-          borderRadius: 8,
-          padding: 32,
-          maxWidth: 500,
-          width: "100%",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-        }}>
-          <h2 style={{ marginTop: 0, marginBottom: 16 }}>Требуется авторизация</h2>
-          <p style={{ color: "#666", marginBottom: 24 }}>
-            Для получения access token необходимо авторизоваться.
-          </p>
-          <button
-            onClick={() => window.location.href = "/"}
-            style={{
-              width: "100%",
-              padding: "12px 24px",
-              background: "#007AFF",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              fontSize: 16,
-              fontWeight: "bold",
-              cursor: "pointer",
-            }}
-          >
-            Перейти к авторизации
-          </button>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-secondary/30 p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <Key className="h-12 w-12 text-muted-foreground mx-auto mb-2" />
+            <CardTitle>Требуется авторизация</CardTitle>
+            <CardDescription>
+              Для получения access token необходимо авторизоваться.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" onClick={() => window.location.href = "/"}>
+              <LogIn className="h-4 w-4 mr-2" />
+              Перейти к авторизации
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "center",
-      alignItems: "center",
-      minHeight: "100vh",
-      background: "#f5f5f7",
-      padding: 20,
-    }}>
-      <div style={{
-        background: "#ffffff",
-        borderRadius: 8,
-        padding: 32,
-        maxWidth: 600,
-        width: "100%",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-      }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16 }}>Access Token</h2>
-        <p style={{ color: "#666", marginBottom: 16, fontSize: 14 }}>
-          Скопируйте этот токен и вставьте его в настройки плагина Figma для привязки прототипов к вашему аккаунту.
-        </p>
-        <div style={{
-          background: "#f5f5f5",
-          padding: 12,
-          borderRadius: 4,
-          marginBottom: 16,
-          wordBreak: "break-all",
-          fontFamily: "monospace",
-          fontSize: 12,
-          border: "1px solid #ddd",
-        }}>
-          {token}
-        </div>
-        <button
-          onClick={copyToClipboard}
-          style={{
-            width: "100%",
-            padding: "12px 24px",
-            background: "#007AFF",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            fontSize: 16,
-            fontWeight: "bold",
-            cursor: "pointer",
-            marginBottom: 12,
-          }}
-        >
-          Копировать токен
-        </button>
-        <button
-          onClick={() => window.location.href = "/"}
-          style={{
-            width: "100%",
-            padding: "12px 24px",
-            background: "transparent",
-            color: "#007AFF",
-            border: "1px solid #007AFF",
-            borderRadius: 4,
-            fontSize: 16,
-            fontWeight: "bold",
-            cursor: "pointer",
-          }}
-        >
-          Перейти к аналитике
-        </button>
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-secondary/30 p-4">
+      <Card className="w-full max-w-xl">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <Key className="h-6 w-6 text-primary" />
+            <CardTitle>Access Token</CardTitle>
+          </div>
+          <CardDescription>
+            Скопируйте этот токен и вставьте его в настройки плагина Figma для привязки прототипов к вашему аккаунту.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-muted rounded-lg border font-mono text-xs break-all max-h-32 overflow-y-auto">
+            {token}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button className="flex-1" onClick={copyToClipboard}>
+              {copied ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
+              {copied ? "Скопировано!" : "Копировать токен"}
+            </Button>
+            <Button variant="outline" className="flex-1" onClick={() => window.location.href = "/"}>
+              <Home className="h-4 w-4 mr-2" />
+              Перейти к аналитике
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
-

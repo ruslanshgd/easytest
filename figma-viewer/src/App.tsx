@@ -6,6 +6,7 @@ import { isValidUUID } from "./utils/validation";
 
 import TestView from "./TestView.tsx";
 import Finished from "./Finished.tsx";
+import StudyRunView from "./StudyRunView.tsx";
 
 function App() {
   const location = useLocation();
@@ -356,6 +357,8 @@ function App() {
       <Routes>
         <Route path="/" element={<TestView sessionId={sessionId} />} />
         <Route path="/prototype/:prototypeId" element={<TestView sessionId={sessionId} />} />
+        <Route path="/run/:token" element={<StudyRunView />} />
+        <Route path="/share/:token" element={<StudyRunView />} />
         <Route path="/:sessionId" element={<TestView sessionId={sessionId} />} />
         <Route path="/finished/:sessionId?" element={<Finished />} />
       </Routes>

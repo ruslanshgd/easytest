@@ -11,10 +11,15 @@ Three tools for testing Figma prototypes:
 
 ## Part 1: Installing on Your Computer
 
+### Requirements
+
+- **Node.js 20.19+** or **22.12+** (Vite 7 requires these versions)
+- npm 10+
+
 ### Windows
 
 1. Download Node.js: https://nodejs.org/
-2. Install, choose LTS version
+2. Install version **22.x LTS** (recommended)
 3. Open Command Prompt (Win + R, type `cmd`)
 4. Verify installation:
    ```bash
@@ -25,13 +30,15 @@ Three tools for testing Figma prototypes:
 ### macOS
 
 1. Download Node.js: https://nodejs.org/
-2. Install, choose LTS version
+2. Install version **22.x LTS** (recommended)
 3. Open Terminal (via Spotlight: Cmd + Space, type "Terminal")
 4. Verify installation:
    ```bash
    node --version
    npm --version
    ```
+
+> **Important:** If your Node.js version is below 20.19, please upgrade. Vite 7 requires modern Node.js versions.
 
 ---
 

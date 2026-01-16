@@ -24,9 +24,23 @@ const FIGMA_EMBED_HOST = "figma-analytics"; // Идентификатор при
 
 interface TestViewProps {
   sessionId: string | null;
+  prototypeIdOverride?: string | null; // НОВОЕ: Опциональный override для prototypeId (для StudyView)
+  instructionsOverride?: string | null; // НОВОЕ: Опциональный override для instructions (для StudyView)
+  onComplete?: () => void; // НОВОЕ: Callback при завершении прототипа (для StudyView)
+  runIdOverride?: string | null; // НОВОЕ: Для StudyRunView - run_id
+  blockIdOverride?: string | null; // НОВОЕ: Для StudyRunView - block_id
+  studyIdOverride?: string | null; // НОВОЕ: Для StudyRunView - study_id
 }
 
-export default function TestView({ sessionId: propSessionId }: TestViewProps) {
+export default function TestView({ 
+  sessionId: propSessionId, 
+  prototypeIdOverride = null,
+  instructionsOverride = null,
+  onComplete = undefined,
+  runIdOverride = null,
+  blockIdOverride = null,
+  studyIdOverride = null
+}: TestViewProps) {
   // sessionId используется через propSessionId
   const navigate = useNavigate();
   const params = useParams<{ prototypeId?: string; sessionId?: string }>();
@@ -43,6 +57,7 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
   const screenHistoryRef = useRef<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isEmptyState, setIsEmptyState] = useState<boolean>(false); // НОВОЕ: Empty state когда нет prototypeId
   const [taskDescription, setTaskDescription] = useState<string | null>(null);
   const [actualSessionId, setActualSessionId] = useState<string | null>(propSessionId);
   const [debugOverlayEnabled, setDebugOverlayEnabled] = useState<boolean>(false);
@@ -52,6 +67,18 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
   useEffect(() => {
     console.log("TestView: showSuccessPopup changed", { showSuccessPopup, currentScreen, protoEnd: proto?.end });
   }, [showSuccessPopup, currentScreen, proto]);
+
+  // НОВОЕ: Вызываем onComplete когда прототип завершен (для StudyView)
+  useEffect(() => {
+    if (showSuccessPopup && onComplete && testCompleted.current) {
+      console.log("TestView: Prototype completed, calling onComplete callback");
+      // Небольшая задержка чтобы пользователь увидел success popup
+      const timer = setTimeout(() => {
+        onComplete();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [showSuccessPopup, onComplete]);
   
   // Helper функции для работы с v1/v2 прототипами
   const getScreenOrScene = (proto: Proto | null, id: string): Screen | Scene | null => {
@@ -104,8 +131,9 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
   const testCompleted = useRef<boolean>(false);
   const scrollTimeoutRef = useRef<number | null>(null);
 
-  // Определяем prototypeId из URL
-  const urlPrototypeId = params.prototypeId || null;
+  // Определяем prototypeId из URL или override
+  // ВАЖНО: prototypeIdOverride имеет приоритет над URL (для StudyView)
+  const urlPrototypeId = prototypeIdOverride || params.prototypeId || null;
   
   // Используем актуальный sessionId (из props или из state)
   // const sessionId = actualSessionId || propSessionId; // Не используется напрямую, используем actualSessionId или propSessionId
@@ -119,8 +147,8 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
         loadPrototypeByPrototypeId(urlPrototypeId);
       }
     } else {
-      // Если нет prototypeId в URL, показываем ошибку
-      setError("Прототип не указан в URL. Используйте ссылку вида /prototype/{prototypeId}");
+      // Если нет prototypeId в URL, показываем дружелюбный empty state
+      setIsEmptyState(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlPrototypeId]);
@@ -348,6 +376,10 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
       screen_id: screen,
       hotspot_id: hotspot,
       user_id: null, // Явно устанавливаем NULL для anonymous пользователей
+      // НОВОЕ: Добавляем run_id, block_id, study_id для Study Runs (если переданы)
+      run_id: runIdOverride || null,
+      block_id: blockIdOverride || null,
+      study_id: studyIdOverride || null,
       metadata: {
         renderer: renderer,
         proto_version: proto?.protoVersion || "v1"
@@ -756,6 +788,11 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
               if (testCompleted.current) {
                 console.log("TestView: Setting showSuccessPopup to true (after closing overlay)");
                 setShowSuccessPopup(true);
+                // НОВОЕ: Вызываем onComplete callback если передан (для StudyView)
+                if (onComplete) {
+                  console.log("TestView: Calling onComplete callback");
+                  onComplete();
+                }
               }
             }, 1000);
           } else {
@@ -1069,6 +1106,11 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
                           if (testCompleted.current) {
                             console.log("TestView: Setting showSuccessPopup to true (via BACK action overlayAction fallback)");
                             setShowSuccessPopup(true);
+                            // НОВОЕ: Вызываем onComplete callback если передан (для StudyView)
+                            if (onComplete) {
+                              console.log("TestView: Calling onComplete callback");
+                              onComplete();
+                            }
                           }
                         }, 1000);
                       } else {
@@ -1876,6 +1918,32 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
   }, []);
 
   if (!proto) {
+    // Empty state - когда нет prototypeId в URL
+    if (isEmptyState) {
+      return (
+        <div style={{ 
+          display: "flex", 
+          flexDirection: "column",
+          justifyContent: "center", 
+          alignItems: "center", 
+          minHeight: "100vh",
+          padding: "40px 20px",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        }}>
+          <p style={{
+            fontSize: "16px",
+            color: "#666",
+            margin: 0,
+            lineHeight: "1.6",
+            textAlign: "center"
+          }}>
+            Здесь скоро появится прототип для тестирования.<br />
+            Ожидайте ссылку от организатора исследования.
+          </p>
+        </div>
+      );
+    }
+    
     return (
       <div style={{ 
         display: "flex", 
@@ -2914,16 +2982,38 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
               cursor: "pointer",
               textAlign: "center"
             }}
-            onClick={() => {
+            onClick={async () => {
               // Используем актуальный sessionId из state
               const currentSessionId = actualSessionId || propSessionId;
               // Записываем событие о прерывании теста
               if (currentSessionId) {
                 recordEvent("aborted", currentScreen);
-                // Переходим на страницу завершения
-                navigate(`/finished/${currentSessionId}`, { state: { aborted: true, sessionId: currentSessionId } });
+                
+                // Если есть runIdOverride (используется в StudyRunView), обновляем статус сессии
+                if (runIdOverride && blockIdOverride) {
+                  try {
+                    const { error: updateError } = await supabase
+                      .from("sessions")
+                      .update({ completed: false, aborted: true })
+                      .eq("id", currentSessionId);
+                    if (updateError) {
+                      console.error("Error updating session status:", updateError);
+                    }
+                  } catch (err) {
+                    console.error("Error updating session:", err);
+                  }
+                }
+                
+                // Если есть onComplete callback (используется в StudyRunView), вызываем его вместо навигации
+                if (onComplete) {
+                  console.log("TestView: User gave up, calling onComplete callback to continue test");
+                  onComplete();
+                } else {
+                  // Если нет onComplete, переходим на страницу завершения (старое поведение)
+                  navigate(`/finished/${currentSessionId}`, { state: { aborted: true, sessionId: currentSessionId } });
+                }
               } else {
-                console.error("TestView: Cannot navigate to finished - sessionId is null");
+                console.error("TestView: Cannot handle give up - sessionId is null");
               }
             }}
           >
@@ -2948,8 +3038,15 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
               padding: 20
             }}
             onClick={() => {
-              // При клике на overlay закрываем попап и переходим на опрос
+              // При клике на overlay закрываем попап
               setShowSuccessPopup(false);
+              // НОВОЕ: Если есть onComplete callback (для StudyView), вызываем его вместо навигации
+              if (onComplete) {
+                console.log("TestView: Calling onComplete callback (from success popup click)");
+                onComplete();
+                return;
+              }
+              // Иначе переходим на опрос (legacy режим)
               const currentSessionId = actualSessionId || propSessionId;
               if (currentSessionId) {
                 navigate(`/finished/${currentSessionId}`, { state: { aborted: false, sessionId: currentSessionId } });
@@ -2979,6 +3076,13 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
               <button
                 onClick={() => {
                   setShowSuccessPopup(false);
+                  // НОВОЕ: Если есть onComplete callback (для StudyView), вызываем его вместо навигации
+                  if (onComplete) {
+                    console.log("TestView: Calling onComplete callback (from success popup button)");
+                    onComplete();
+                    return;
+                  }
+                  // Иначе переходим на опрос (legacy режим)
                   const currentSessionId = actualSessionId || propSessionId;
                   if (currentSessionId) {
                     navigate(`/finished/${currentSessionId}`, { state: { aborted: false, sessionId: currentSessionId } });
@@ -4194,16 +4298,38 @@ export default function TestView({ sessionId: propSessionId }: TestViewProps) {
             cursor: "pointer",
             textAlign: "center"
           }}
-          onClick={() => {
+          onClick={async () => {
             // Используем актуальный sessionId из state
             const currentSessionId = actualSessionId || propSessionId;
             // Записываем событие о прерывании теста
             if (currentSessionId) {
               recordEvent("aborted", currentScreen);
-              // Переходим на страницу завершения
-              navigate(`/finished/${currentSessionId}`, { state: { aborted: true, sessionId: currentSessionId } });
+              
+              // Если есть runIdOverride (используется в StudyRunView), обновляем статус сессии
+              if (runIdOverride && blockIdOverride) {
+                try {
+                  const { error: updateError } = await supabase
+                    .from("sessions")
+                    .update({ completed: false, aborted: true })
+                    .eq("id", currentSessionId);
+                  if (updateError) {
+                    console.error("Error updating session status:", updateError);
+                  }
+                } catch (err) {
+                  console.error("Error updating session:", err);
+                }
+              }
+              
+              // Если есть onComplete callback (используется в StudyRunView), вызываем его вместо навигации
+              if (onComplete) {
+                console.log("TestView: User gave up, calling onComplete callback to continue test");
+                onComplete();
+              } else {
+                // Если нет onComplete, переходим на страницу завершения (старое поведение)
+                navigate(`/finished/${currentSessionId}`, { state: { aborted: true, sessionId: currentSessionId } });
+              }
             } else {
-              console.error("TestView: Cannot navigate to finished - sessionId is null");
+              console.error("TestView: Cannot handle give up - sessionId is null");
             }
           }}
         >

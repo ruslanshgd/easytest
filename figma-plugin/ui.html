@@ -4,32 +4,69 @@
   <meta charset="UTF-8" />
   <title>Export Prototype JSON</title>
   <style>
+    /* Design Tokens */
+    :root {
+      --text-primary: rgba(25, 28, 48, 0.90);
+      --text-secondary: rgba(27, 31, 59, 0.65);
+      --icon: rgba(27, 31, 59, 0.40);
+      --brand: #526ED3;
+      --btn-secondary-bg: #F4F4F4;
+      --input-border: #E0E0E0;
+      --shadow-input: 0px 2px 3px rgba(0, 0, 0, 0.10);
+    }
+
     body {
       font-family: Arial, sans-serif;
       padding: 16px;
+      color: var(--text-primary);
     }
+    /* Primary Button (default for all buttons) */
     button {
       padding: 8px 12px;
-      background: #007AFF;
-      color: white;
+      background: var(--brand);
+      color: #FFFFFF;
       border: none;
       border-radius: 4px;
       font-size: 14px;
       cursor: pointer;
       width: 100%;
       margin-bottom: 8px;
+      transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
     }
-    button:hover {
-      background: #0051D5;
+    button:hover:not(:disabled) {
+      background: var(--brand);
+      opacity: 0.95;
     }
     button:disabled {
-      background: #ccc;
+      background: var(--brand);
+      opacity: 0.55;
       cursor: not-allowed;
+      pointer-events: none;
     }
+    /* Primary button class for explicit primary actions */
+    .btn-primary {
+      background: var(--brand);
+      color: #FFFFFF;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--brand);
+      opacity: 0.95;
+    }
+    /* Secondary Button */
+    .btn-secondary {
+      background: var(--btn-secondary-bg);
+      color: var(--brand);
+      border: none;
+    }
+    .btn-secondary:hover {
+      background: var(--btn-secondary-bg);
+      opacity: 0.97;
+    }
+
     .info {
       margin-bottom: 12px;
       font-size: 13px;
-      color: #333;
+      color: var(--text-primary);
     }
     .url-container {
       margin-top: 12px;
@@ -44,20 +81,31 @@
     .url-input {
       width: 100%;
       padding: 8px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--input-border);
       border-radius: 4px;
       font-family: monospace;
       font-size: 12px;
       margin-bottom: 8px;
+      background: #FFFFFF;
+      color: var(--text-primary);
+      box-shadow: var(--shadow-input);
+      transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
+    }
+    .url-input:focus {
+      outline: 2px solid rgba(82, 110, 211, 0.25);
+      outline-offset: 1px;
+      border-color: var(--input-border);
     }
     .url-copy-btn {
-      background: #34C759;
+      background: var(--brand);
+      color: #FFFFFF;
       font-size: 12px;
       padding: 6px 10px;
       margin-bottom: 0;
     }
     .url-copy-btn:hover {
-      background: #28A745;
+      background: var(--brand);
+      opacity: 0.95;
     }
     .status {
       margin-top: 8px;
@@ -83,43 +131,48 @@
     }
     hr {
       border: none;
-      border-top: 1px solid #ddd;
+      border-top: 1px solid var(--input-border);
       margin: 16px 0;
     }
     .settings-form {
-      display: none;
-      padding: 12px;
-      background: #f9f9f9;
-      border-radius: 4px;
-      margin-bottom: 12px;
-    }
-    .settings-form.show {
       display: block;
+      padding: 0;
+      background: transparent;
+      border-radius: 0;
+      margin-bottom: 0;
     }
     .settings-form label {
       display: block;
       margin-bottom: 4px;
       font-size: 12px;
       font-weight: 500;
-      color: #333;
+      color: var(--text-primary);
     }
     .settings-form input {
       width: 100%;
       padding: 6px 8px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--input-border);
       border-radius: 4px;
       font-size: 12px;
       font-family: monospace;
       box-sizing: border-box;
       margin-bottom: 12px;
+      background: #FFFFFF;
+      color: var(--text-primary);
+      box-shadow: var(--shadow-input);
+      transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
     }
     .settings-form input:focus {
-      outline: none;
-      border-color: #007AFF;
+      outline: 2px solid rgba(82, 110, 211, 0.25);
+      outline-offset: 1px;
+      border-color: var(--input-border);
+    }
+    .settings-form input::placeholder {
+      color: var(--text-secondary);
     }
     .settings-form .help-text {
       font-size: 11px;
-      color: #666;
+      color: var(--text-secondary);
       margin-top: -8px;
       margin-bottom: 12px;
     }
@@ -132,12 +185,14 @@
       margin-bottom: 0;
     }
     .settings-btn {
-      background: #6c757d;
+      background: var(--btn-secondary-bg);
+      color: var(--brand);
       font-size: 12px;
       padding: 6px 10px;
     }
     .settings-btn:hover {
-      background: #5a6268;
+      background: var(--btn-secondary-bg);
+      opacity: 0.97;
     }
     .main-content {
       display: none;
@@ -156,12 +211,12 @@
       margin-bottom: 6px;
       font-size: 12px;
       font-weight: 500;
-      color: #333;
+      color: var(--text-primary);
     }
     .task-input-container textarea {
       width: 100%;
       padding: 8px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--input-border);
       border-radius: 4px;
       font-size: 12px;
       font-family: Arial, sans-serif;
@@ -169,18 +224,26 @@
       resize: vertical;
       min-height: 60px;
       margin-bottom: 4px;
+      background: #FFFFFF;
+      color: var(--text-primary);
+      box-shadow: var(--shadow-input);
+      transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
     }
     .task-input-container textarea:focus {
-      outline: none;
-      border-color: #007AFF;
+      outline: 2px solid rgba(82, 110, 211, 0.25);
+      outline-offset: 1px;
+      border-color: var(--input-border);
+    }
+    .task-input-container textarea::placeholder {
+      color: var(--text-secondary);
     }
     .task-input-container .help-text {
       font-size: 11px;
-      color: #666;
+      color: var(--text-secondary);
     }
     .task-input-container .char-count {
       font-size: 11px;
-      color: #999;
+      color: var(--text-secondary);
       text-align: right;
       margin-top: 4px;
     }
@@ -191,134 +254,476 @@
       color: #f44336;
     }
     .mode-btn.active {
-      background: #007AFF !important;
-      color: white !important;
+      background: var(--brand) !important;
+      color: #FFFFFF !important;
     }
     .mode-btn:not(.active) {
-      background: #e0e0e0 !important;
-      color: #333 !important;
+      background: var(--btn-secondary-bg) !important;
+      color: var(--text-primary) !important;
+    }
+
+    /* Icon styles */
+    .icon, [class*="icon"], button[class*="icon"] {
+      color: var(--icon);
+      transition: opacity 150ms;
+    }
+    .icon:hover, [class*="icon"]:hover, button[class*="icon"]:hover {
+      opacity: 0.55;
+    }
+    .icon:active, [class*="icon"]:active, button[class*="icon"]:active {
+      opacity: 0.65;
+    }
+    
+    /* SVG Icon wrapper */
+    .icon-svg {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+    .icon-svg svg {
+      width: 100%;
+      height: 100%;
+    }
+    
+    /* Icon button styles */
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 150ms, opacity 150ms;
+    }
+    .icon-btn:hover {
+      background: rgba(27, 31, 59, 0.05);
+    }
+    .icon-btn:active {
+      background: rgba(27, 31, 59, 0.1);
+    }
+    
+    /* Help icon (hint) */
+    .help-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      margin-left: 4px;
+      cursor: help;
+      vertical-align: middle;
+    }
+    
+    /* Search button icon */
+    .search-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* Global input styles */
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    select {
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      background: #FFFFFF;
+      color: var(--text-primary);
+      box-shadow: var(--shadow-input);
+      transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
+    }
+    input[type="text"]:focus,
+    input[type="url"]:focus,
+    textarea:focus,
+    select:focus {
+      outline: 2px solid rgba(82, 110, 211, 0.25);
+      outline-offset: 1px;
+      border-color: var(--input-border);
+    }
+    input[type="text"]::placeholder,
+    input[type="url"]::placeholder,
+    textarea::placeholder {
+      color: var(--text-secondary);
+    }
+    
+    /* Select dropdown arrow */
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M3.29289 5.29289C3.68342 4.90237 4.31658 4.90237 4.70711 5.29289L8 8.58579L11.2929 5.29289C11.6834 4.90237 12.3166 4.90237 12.7071 5.29289C13.0976 5.68342 13.0976 6.31658 12.7071 6.70711L8.70711 10.7071C8.31658 11.0976 7.68342 11.0976 7.29289 10.7071L3.29289 6.70711C2.90237 6.31658 2.90237 5.68342 3.29289 5.29289Z' fill='%231B1F3B' fill-opacity='0.4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      padding-right: 32px;
+    }
+
+    /* Tabs styles */
+    .tabs {
+      display: flex;
+      gap: 16px;
+      border-bottom: 1px solid var(--input-border);
+      margin-bottom: 16px;
+      padding-bottom: 0;
+    }
+    .tab {
+      padding: 8px 0;
+      color: var(--text-secondary);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 150ms, border-color 150ms;
+    }
+    .tab.active {
+      color: var(--text-primary);
+      border-bottom-color: var(--brand);
+    }
+    .tab:hover:not(.active) {
+      color: var(--text-primary);
+      opacity: 0.8;
+    }
+    
+    /* Tab content */
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    
+    /* Tooltip styles */
+    .tooltip-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .tooltip-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      margin-left: 4px;
+      cursor: help;
+      vertical-align: middle;
+    }
+    .tooltip {
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-bottom: 8px;
+      padding: 8px 12px;
+      background: #FFFFFF;
+      border-radius: 4px;
+      box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.15);
+      color: var(--text-primary);
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: normal;
+      max-width: 200px;
+      z-index: 1000;
+      display: none;
+      pointer-events: none;
+    }
+    .tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: #FFFFFF;
+    }
+    .tooltip-wrapper:hover .tooltip {
+      display: block;
+    }
+    
+    
+    /* Instructions list */
+    .instructions {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 16px 0;
+    }
+    .instructions li {
+      font-size: 12px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+      padding-left: 0;
     }
   </style>
 </head>
 <body>
-  <!-- Форма настройки (онбординг) -->
-  <div id="settingsForm" class="settings-form">
-    <h3 style="margin-top: 0; margin-bottom: 12px;">⚙️ Настройка плагина</h3>
-    <p style="font-size: 12px; color: #666; margin-bottom: 12px;">
-      Укажите данные вашего Supabase проекта. Их можно найти в <strong>Supabase Dashboard → Settings → API</strong>
-    </p>
+  <!-- Табы -->
+  <div class="tabs">
+    <button class="tab active" id="prototypeTab">Прототип</button>
+    <button class="tab" id="settingsTab">Настройки</button>
+  </div>
+  
+  <!-- Контент таба "Прототип" -->
+  <div id="prototypeTabContent" class="tab-content active">
+    <!-- Инструкции -->
+    <ol class="instructions">
+      <li>1. Нажмите "Share" в правом верхнем углу</li>
+      <li>2. Скопируйте ссылку и вставьте ее в поле ниже</li>
+    </ol>
     
-    <label for="supabaseUrl">Supabase URL:</label>
-    <input type="text" id="supabaseUrl" placeholder="Введите URL вашего Supabase проекта" />
-    <div class="help-text">Например: https://xxxxx.supabase.co (найдите в Supabase Dashboard → Settings → API)</div>
-    
-    <label for="supabaseKey">Supabase Anon Key:</label>
-    <input type="text" id="supabaseKey" placeholder="Введите Anon Key из Supabase" />
-    <div class="help-text">Anon/public ключ из Settings → API (длинная строка, начинается с eyJ...)</div>
-    
-    <label for="viewerUrl">Viewer URL (URL приложения для прохождения тестов):</label>
-    <input type="text" id="viewerUrl" placeholder="Введите URL вашего viewer приложения" />
-    <div class="help-text">URL приложения figma-viewer (для прохождения тестов респондентами). Для локальной разработки: http://localhost:5173, для production: https://your-viewer-domain.com</div>
-    
-    <label for="analyticsUrl" style="margin-top: 12px;">Analytics URL (URL приложения для аналитики):</label>
-    <input type="text" id="analyticsUrl" placeholder="Введите URL вашего analytics приложения" />
-    <div class="help-text">URL приложения figma-analytics (для просмотра аналитики и получения токена). Для локальной разработки: http://localhost:5174, для production: https://your-analytics-domain.com</div>
-    
-    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #ddd;">
-      <label for="accessToken" style="font-weight: 500;">Access Token (обязательно для создания прототипов):</label>
-      <input type="text" id="accessToken" placeholder="Вставьте токен после авторизации" style="width: 100%; margin-top: 4px; margin-bottom: 8px;" />
-      <button id="openAuth" style="width: 100%; padding: 6px 12px; background: #007AFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 4px;">
-        🔑 Получить токен (открыть Analytics)
-      </button>
-      <div class="help-text" style="margin-top: 4px;">
-        Нажмите "Получить токен" чтобы открыть приложение аналитики для авторизации. После входа скопируйте токен со страницы /token и вставьте его сюда.
-        <br/><strong>Важно:</strong> Используйте access_token из страницы /token в приложении figma-analytics, НЕ anon_key! 
-        <br/><strong>КРИТИЧНО:</strong> Access token обязателен - без него прототип не может быть создан. Прототипы должны быть привязаны к вашему аккаунту, чтобы вы видели их в аналитике.
+    <!-- Поле для Share ссылки -->
+    <div style="margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; margin-bottom: 8px;">
+        <label for="shareLink" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Вставьте ссылку и выберите сценарий</label>
+        <div class="tooltip-wrapper">
+          <span class="tooltip-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+          </span>
+          <div class="tooltip">Найдем все ваши сценарии, чтобы выбрать один из них</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <input 
+          type="text" 
+          id="shareLink" 
+          placeholder="Ссылка файла Figma" 
+          style="flex: 1; padding: 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; font-family: monospace; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
+        />
+        <button id="importFromLink" class="search-icon-btn" style="width: 32px; height: 32px; padding: 0; border: none; border-radius: 4px; cursor: pointer; background: transparent; flex-shrink: 0;">
+          <span class="icon-svg"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 1C10.3137 1 13 3.68629 13 7C13 8.2957 12.587 9.49385 11.8887 10.4746L14.707 13.293C15.0976 13.6835 15.0976 14.3165 14.707 14.707C14.3165 15.0976 13.6835 15.0976 13.293 14.707L10.4746 11.8887C9.49385 12.587 8.2957 13 7 13C3.68629 13 1 10.3137 1 7C1 3.68629 3.68629 1 7 1ZM7 3C4.79086 3 3 4.79086 3 7C3 9.20914 4.79086 11 7 11C9.20914 11 11 9.20914 11 7C11 4.79086 9.20914 3 7 3Z" fill="#526ED3"/></svg></span>
+        </button>
       </div>
       
-      <label for="figmaToken" style="font-weight: 500; margin-top: 16px; display: block;">Figma Personal Access Token (для REST API):</label>
-      <input type="text" id="figmaToken" placeholder="figd_..." style="width: 100%; margin-top: 4px; margin-bottom: 8px;" />
-      <div class="help-text" style="margin-top: 4px;">
-        Требуется для импорта прототипов по Share ссылке через REST API.
-        <br/>Получить можно в <a href="https://www.figma.com/settings" target="_blank" style="color: #007AFF;">Figma Settings → Personal Access Tokens</a>
-        <br/><strong>Опционально:</strong> Нужен только если используете режим "По Share ссылке"
+      <!-- Flows container -->
+      <div id="flowsContainer" style="display: none; margin-bottom: 16px;">
+        <label style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--text-primary);">Выберите один сценарий (flow)</label>
+        <select id="flowsSelect" style="width: 100%; padding: 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; box-sizing: border-box; margin-bottom: 8px; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);">
+          <option value="">Загрузка flows...</option>
+        </select>
+        <button id="useSelectedFlow" class="btn-secondary" style="width: 100%; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          Выбрать сценарий
+        </button>
+      </div>
+      
+      <div class="status" id="importStatus" style="margin-top: 0; margin-bottom: 8px;"></div>
+    </div>
+    
+    <div class="info" id="info" style="display: none;"></div>
+    
+    <!-- Task Description -->
+    <div id="taskDescriptionContainer" style="margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; margin-bottom: 6px;">
+        <label for="taskDescription" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Введите суть задания</label>
+        <span style="margin-left: 8px; font-size: 11px; color: var(--text-secondary);">0/250</span>
+        <div class="tooltip-wrapper" style="margin-left: 4px;">
+          <span class="tooltip-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+          </span>
+          <div class="tooltip">Пример: Найдите способ добавить товар в корзину и перейти к оформлению заказа</div>
+        </div>
+      </div>
+      <textarea 
+        id="taskDescription" 
+        placeholder="Текст задания"
+        maxlength="250"
+        style="width: 100%; padding: 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; font-family: Arial, sans-serif; box-sizing: border-box; resize: vertical; min-height: 60px; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
+      ></textarea>
+      <div class="char-count" id="charCount" style="font-size: 11px; color: var(--text-secondary); text-align: right; margin-top: 4px;">0 / 250</div>
+    </div>
+    
+    <!-- Attach to Study -->
+    <div id="attachToStudyContainer" style="margin-bottom: 16px;">
+      <label style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; font-weight: 500; cursor: pointer; color: var(--text-primary);">
+        <input 
+          type="checkbox" 
+          id="attachToStudyToggle" 
+          style="margin-right: 8px; cursor: pointer; width: 16px; height: 16px;"
+        />
+        <span>Тест уже создан (опционально)</span>
+        <div class="tooltip-wrapper" style="margin-left: 4px;">
+          <span class="tooltip-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+          </span>
+          <div class="tooltip">Когда надо добавить в уже созданный тест, иначе будет создан новый тест</div>
+        </div>
+      </label>
+      
+      <div id="studySelectContainer" style="display: none; margin-top: 8px;">
+        <select 
+          id="studySelect" 
+          style="width: 100%; padding: 6px 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
+        >
+          <option value="">Загрузка studies...</option>
+        </select>
+        <div id="attachError" style="display: none; margin-top: 8px; padding: 8px; background: #ffebee; color: #c62828; border-radius: 4px; font-size: 11px;"></div>
+        <div id="attachRetryContainer" style="display: none; margin-top: 8px;">
+          <button 
+            id="retryAttachBtn" 
+            class="btn-primary"
+            style="padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;"
+          >
+            Retry attach
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Кнопка отправки -->
+    <button id="sendToTest" class="btn-primary" style="width: 100%; margin-top: 16px;">Отправить на тест</button>
+    <div class="status" id="status"></div>
+    <div class="url-container" id="urlContainer">
+      <label style="font-size: 12px; display: block; margin-bottom: 4px; color: var(--text-primary);">Ссылка для респондента:</label>
+      <input type="text" class="url-input" id="testUrl" readonly />
+      <button class="url-copy-btn" id="copyUrl">Копировать ссылку</button>
+    </div>
+  </div>
+  
+  <!-- Контент таба "Настройки" -->
+  <div id="settingsTabContent" class="tab-content">
+    <!-- Форма настройки (онбординг) -->
+    <div id="settingsForm" class="settings-form">
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 14px; font-weight: 500;">Supabase и токен доступа</h3>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; margin-bottom: 6px;">
+          <label for="supabaseUrl" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Supabase ссылка</label>
+          <div class="tooltip-wrapper" style="margin-left: 4px;">
+            <span class="tooltip-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+            </span>
+            <div class="tooltip">Найдите в Supabase Dashboard → Settings → API</div>
+          </div>
+        </div>
+        <input type="text" id="supabaseUrl" placeholder="https://xxxxx.supabase.co" />
+      </div>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; margin-bottom: 6px;">
+          <label for="supabaseKey" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Supabase Anon Key</label>
+          <div class="tooltip-wrapper" style="margin-left: 4px;">
+            <span class="tooltip-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+            </span>
+            <div class="tooltip">Anon/public ключ из Settings → API (длинная строка, начинается с eyJ...)</div>
+          </div>
+        </div>
+        <input type="text" id="supabaseKey" placeholder="Вставьте сюда ключ" />
+      </div>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center;">
+              <label for="accessToken" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Токен доступа (для создания прототипа)</label>
+              <div class="tooltip-wrapper" style="margin-left: 4px;">
+                <span class="tooltip-icon">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+                </span>
+                <div class="tooltip">Нажмите "Получить" чтобы открыть приложение аналитики для авторизации. После входа скопируйте токен со страницы /token и вставьте его сюда. Используйте access_token из страницы /token, НЕ anon_key!</div>
+              </div>
+            </div>
+          </div>
+          <button id="openAuth" class="btn-secondary" style="padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+            Получить
+          </button>
+        </div>
+        <input type="text" id="accessToken" placeholder="Вставьте сюда токен" />
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 14px; font-weight: 500;">Аналитика и прохождение тестов</h3>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; margin-bottom: 6px;">
+          <label for="viewerUrl" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Ссылка для прохождения тестов (Viewer)</label>
+          <div class="tooltip-wrapper" style="margin-left: 4px;">
+            <span class="tooltip-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+            </span>
+            <div class="tooltip">URL приложения figma-viewer (для прохождения тестов респондентами). Для локальной разработки: http://localhost:5173, для production: https://your-viewer-domain.com</div>
+          </div>
+        </div>
+        <input type="text" id="viewerUrl" placeholder="Укажите URL" />
+      </div>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; margin-bottom: 6px;">
+          <label for="analyticsUrl" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Ссылка для аналитики тестов (Analytics)</label>
+          <div class="tooltip-wrapper" style="margin-left: 4px;">
+            <span class="tooltip-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+            </span>
+            <div class="tooltip">URL приложения figma-analytics (для просмотра аналитики и получения токена). Для локальной разработки: http://localhost:5174, для production: https://your-analytics-domain.com</div>
+          </div>
+        </div>
+        <input type="text" id="analyticsUrl" placeholder="Укажите URL" />
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 14px; font-weight: 500;">Figma токен</h3>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center;">
+              <label for="figmaToken" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Figma токен</label>
+              <div class="tooltip-wrapper" style="margin-left: 4px;">
+                <span class="tooltip-icon">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+                </span>
+                <div class="tooltip">Требуется для импорта прототипов по Share ссылке через REST API. Получить можно в Figma Settings → Personal Access Tokens. Опционально: нужен только если используете режим "По Share ссылке"</div>
+              </div>
+            </div>
+          </div>
+          <button id="openFigmaSettings" class="btn-secondary" style="padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+            Получить
+          </button>
+        </div>
+        <input type="text" id="figmaToken" placeholder="Укажите токен" />
       </div>
     </div>
     
     <div class="settings-buttons">
       <button id="saveSettings">Сохранить настройки</button>
-      <button id="cancelSettings" style="background: #6c757d;">Отмена</button>
+      <button id="cancelSettings" class="btn-secondary">Отмена</button>
     </div>
     <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">
-      <button id="resetSettings" style="background: #dc3545; width: 100%; margin-bottom: 0; font-size: 12px; padding: 6px 10px;">
-        🔄 Сбросить настройки (для тестирования)
+      <button id="resetSettings" class="btn-secondary" style="width: 100%; margin-bottom: 0; font-size: 12px; padding: 6px 10px; display: flex; align-items: center; justify-content: center; gap: 6px;">
+        <span class="icon-svg"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg></span>
+        Сбросить настройки (для тестирования)
       </button>
-      <div style="font-size: 11px; color: #666; margin-top: 4px; text-align: center;">
+      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; text-align: center;">
         Удалит сохраненную конфигурацию и покажет форму онбординга
       </div>
     </div>
   </div>
 
-  <!-- Основной контент -->
-  <div id="mainContent" class="main-content">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <h3 style="margin: 0;">Экспорт прототипа</h3>
-      <button id="openSettings" class="settings-btn" style="width: auto; padding: 6px 12px; margin: 0;">⚙️</button>
-    </div>
-    
-    <!-- Поле для Share ссылки -->
-    <div id="shareLinkContainer" style="display: block; margin-bottom: 16px; padding: 12px; background: #f9f9f9; border-radius: 4px;">
-      <label for="shareLink" style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500;">Figma Share ссылка:</label>
-      <input 
-        type="text" 
-        id="shareLink" 
-        placeholder="https://www.figma.com/design/..." 
-        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace; box-sizing: border-box; margin-bottom: 8px;"
-      />
-      <div class="help-text" style="font-size: 11px; color: #666; margin-bottom: 8px;">
-        1. Откройте файл в Figma<br/>
-        2. Нажмите Share в правом верхнем углу<br/>
-        3. Скопируйте ссылку (design/proto/file)<br/>
-        4. Вставьте ссылку сюда<br/>
-        <strong>Важно:</strong> Файл должен быть открыт в Figma для экспорта изображений
-      </div>
-      <button id="importFromLink" style="width: 100%; padding: 8px; background: #34C759; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 8px;">
-        🔍 Импортировать прототип
-      </button>
-      <div class="status" id="importStatus" style="margin-top: 0; margin-bottom: 8px;"></div>
-      <div id="flowsContainer" style="display: none; margin-top: 12px;">
-        <label style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500;">Выберите flow (starting point):</label>
-        <div id="flowsRadioContainer" style="display: none; margin-bottom: 8px;"></div>
-        <select id="flowsSelect" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; box-sizing: border-box; margin-bottom: 8px; display: none;">
-          <option value="">Загрузка flows...</option>
-        </select>
-        <button id="useSelectedFlow" style="width: 100%; padding: 8px; background: #007AFF; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
-          ✅ Использовать выбранный flow
-        </button>
-      </div>
-    </div>
-    
-    <div class="info" id="info"></div>
-    
-    <div class="task-input-container">
-      <label for="taskDescription">Введите суть задания:</label>
-      <textarea 
-        id="taskDescription" 
-        placeholder="Например: Найдите способ добавить товар в корзину и перейти к оформлению заказа"
-        maxlength="250"
-      ></textarea>
-      <div class="help-text">Задание будет показано респонденту перед началом теста (рекомендуется до 250 символов)</div>
-      <div class="char-count" id="charCount">0 / 250</div>
-    </div>
-    
-    <button id="sendToTest">Отправить на тест</button>
-    <div class="status" id="status"></div>
-    <div class="url-container" id="urlContainer">
-      <label style="font-size: 12px; display: block; margin-bottom: 4px;">Ссылка для респондента:</label>
-      <input type="text" class="url-input" id="testUrl" readonly />
-      <button class="url-copy-btn" id="copyUrl">Копировать ссылку</button>
-    </div>
-  </div>
 
   <script>
     // Конфигурация Supabase (получаем от code.js через postMessage)
@@ -338,6 +743,8 @@
 
     let latestData = null;
     let currentSelectedFlowId = null; // Хранит ID выбранного flow
+    let studies = []; // Список studies пользователя
+    let lastCreatedPrototypeId = null; // ID последнего созданного прототипа (для retry attach)
 
     // Проверка валидности конфигурации
     function isValidConfig() {
@@ -348,10 +755,9 @@
              VIEWER_URL.startsWith("http");
     }
 
-    // Показать/скрыть форму настройки
+    // Показать/скрыть форму настройки (обновлено для работы с табами)
     function showSettingsForm() {
-      document.getElementById("settingsForm").classList.add("show");
-      document.getElementById("mainContent").classList.remove("show");
+      switchTab('settings');
       
       // Заполнить поля текущими значениями
       document.getElementById("supabaseUrl").value = SUPABASE_URL || "";
@@ -363,9 +769,8 @@
     }
 
     function hideSettingsForm() {
-      document.getElementById("settingsForm").classList.remove("show");
       if (isValidConfig()) {
-        document.getElementById("mainContent").classList.add("show");
+        switchTab('prototype');
       }
     }
 
@@ -417,18 +822,309 @@
 
       showStatus("✓ Настройки сохранены!", "success");
       setTimeout(() => {
-        hideSettingsForm();
+        switchTab('prototype');
       }, 1000);
     }
 
     // Инициализация: проверяем конфигурацию при загрузке
     function initUI() {
       if (!isValidConfig()) {
-        // Показываем форму настройки, если конфигурация не валидна
-        showSettingsForm();
+        // Показываем таб настроек, если конфигурация не валидна
+        switchTab('settings');
       } else {
-        // Показываем основной контент
-        document.getElementById("mainContent").classList.add("show");
+        // Показываем таб прототипа
+        switchTab('prototype');
+        // Загружаем studies если toggle включен
+        if (document.getElementById("attachToStudyToggle") && document.getElementById("attachToStudyToggle").checked) {
+          loadStudies();
+        }
+      }
+    }
+    
+    // Загрузка списка studies
+    async function loadStudies() {
+      console.log("loadStudies called");
+      const studySelect = document.getElementById("studySelect");
+      studySelect.innerHTML = '<option value="">Загрузка studies...</option>';
+      studySelect.disabled = true;
+      
+      try {
+        console.log("ACCESS_TOKEN exists:", !!ACCESS_TOKEN, "length:", ACCESS_TOKEN ? ACCESS_TOKEN.length : 0);
+        console.log("SUPABASE_URL:", SUPABASE_URL);
+        
+        if (!ACCESS_TOKEN || !ACCESS_TOKEN.trim()) {
+          console.log("No ACCESS_TOKEN, showing error");
+          studySelect.innerHTML = '<option value="">Требуется access token</option>';
+          return;
+        }
+        
+        // Получаем user_id из access token
+        console.log("Fetching user data...");
+        const userResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+          headers: {
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "apikey": SUPABASE_ANON_KEY
+          }
+        });
+        
+        console.log("User response status:", userResponse.status);
+        
+        if (!userResponse.ok) {
+          const errorText = await userResponse.text();
+          console.error("Auth error:", errorText);
+          studySelect.innerHTML = '<option value="">Ошибка авторизации</option>';
+          return;
+        }
+        
+        const userData = await userResponse.json();
+        const userId = userData.id;
+        console.log("User ID:", userId);
+        
+        // Сначала получаем team_id пользователя через team_members
+        const teamMembersUrl = `${SUPABASE_URL}/rest/v1/team_members?user_id=eq.${userId}&select=team_id`;
+        console.log("Fetching team_members from:", teamMembersUrl);
+        
+        const teamMembersResponse = await fetch(teamMembersUrl, {
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Content-Type": "application/json"
+          }
+        });
+        
+        if (!teamMembersResponse.ok) {
+          console.error("Team members fetch error:", await teamMembersResponse.text());
+          studySelect.innerHTML = '<option value="">Ошибка загрузки команд</option>';
+          return;
+        }
+        
+        const teamMembers = await teamMembersResponse.json() || [];
+        console.log("Team members:", teamMembers);
+        
+        if (teamMembers.length === 0) {
+          console.log("User is not in any team");
+          studySelect.innerHTML = '<option value="">Нет доступных teams</option>';
+          return;
+        }
+        
+        // Получаем все team_id пользователя
+        const teamIds = teamMembers.map(tm => tm.team_id);
+        console.log("Team IDs:", teamIds);
+        
+        // Загружаем studies по team_id (используем in для нескольких команд)
+        const teamIdsFilter = teamIds.map(id => `"${id}"`).join(',');
+        const studiesUrl = `${SUPABASE_URL}/rest/v1/studies?team_id=in.(${teamIdsFilter})&select=id,title,status&order=created_at.desc`;
+        console.log("Fetching studies from:", studiesUrl);
+        
+        const studiesResponse = await fetch(studiesUrl, {
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Content-Type": "application/json"
+          }
+        });
+        
+        console.log("Studies response status:", studiesResponse.status);
+        
+        if (!studiesResponse.ok) {
+          const errorText = await studiesResponse.text();
+          console.error("Studies fetch error:", errorText);
+          studySelect.innerHTML = '<option value="">Ошибка загрузки studies</option>';
+          return;
+        }
+        
+        studies = await studiesResponse.json() || [];
+        console.log("Studies loaded:", studies.length, studies);
+        
+        // Обновляем select
+        studySelect.innerHTML = '<option value="">Выберите Study (опционально)</option>';
+        studies.forEach(study => {
+          const option = document.createElement("option");
+          option.value = study.id;
+          option.textContent = `${study.title} (${study.status === "published" ? "Published" : "Draft"})`;
+          studySelect.appendChild(option);
+        });
+        
+        studySelect.disabled = false;
+        console.log("Studies select updated, options count:", studySelect.options.length);
+      } catch (error) {
+        console.error("Error loading studies:", error);
+        studySelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+      }
+    }
+    
+    // Прикрепление прототипа к Study
+    async function attachToStudy(prototypeId, studyId, instructions) {
+      try {
+        if (!ACCESS_TOKEN || !ACCESS_TOKEN.trim()) {
+          throw new Error("Access token required");
+        }
+        
+        // Получаем максимальный order_index для этого study
+        const blocksResponse = await fetch(`${SUPABASE_URL}/rest/v1/study_blocks?study_id=eq.${studyId}&select=order_index&order=order_index.desc&limit=1`, {
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Content-Type": "application/json"
+          }
+        });
+        
+        let maxOrderIndex = -1;
+        if (blocksResponse.ok) {
+          const blocks = await blocksResponse.json() || [];
+          if (blocks.length > 0) {
+            maxOrderIndex = blocks[0].order_index;
+          }
+        }
+        
+        const orderIndex = maxOrderIndex + 1;
+        
+        // Создаем study_block
+        const blockBody = {
+          study_id: studyId,
+          type: "prototype",
+          prototype_id: prototypeId,
+          instructions: instructions || null,
+          order_index: orderIndex,
+          config: {}
+        };
+        
+        const blockResponse = await fetch(`${SUPABASE_URL}/rest/v1/study_blocks`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Prefer": "return=representation"
+          },
+          body: JSON.stringify(blockBody)
+        });
+        
+        if (!blockResponse.ok) {
+          const errorText = await blockResponse.text();
+          throw new Error(`Ошибка прикрепления к Study: ${blockResponse.status} - ${errorText}`);
+        }
+        
+        return true;
+      } catch (error) {
+        console.error("Error attaching to study:", error);
+        throw error;
+      }
+    }
+    
+    // Создание нового study
+    async function createStudy(title, teamId) {
+      try {
+        if (!ACCESS_TOKEN || !ACCESS_TOKEN.trim()) {
+          throw new Error("Access token required");
+        }
+        
+        const studyBody = {
+          title: title || "Новый тест",
+          team_id: teamId,
+          status: "draft"
+        };
+        
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/studies`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Prefer": "return=representation"
+          },
+          body: JSON.stringify(studyBody)
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Ошибка создания Study: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log("Created study:", data);
+        return data[0]; // Возвращаем созданный study
+      } catch (error) {
+        console.error("Error creating study:", error);
+        throw error;
+      }
+    }
+    
+    // Получение team_id пользователя
+    async function getUserTeamId(userId) {
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/team_members?user_id=eq.${userId}&select=team_id&limit=1`, {
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Content-Type": "application/json"
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error("Ошибка получения team_id");
+        }
+        
+        const data = await response.json();
+        if (data && data.length > 0) {
+          return data[0].team_id;
+        }
+        return null;
+      } catch (error) {
+        console.error("Error getting team_id:", error);
+        return null;
+      }
+    }
+    
+    // Получение share_token для study
+    async function getStudyShareToken(studyId) {
+      try {
+        // Сначала проверяем, есть ли уже share
+        const existingResponse = await fetch(`${SUPABASE_URL}/rest/v1/study_shares?study_id=eq.${studyId}&mode=eq.respond&revoked_at=is.null&select=token&limit=1`, {
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Content-Type": "application/json"
+          }
+        });
+        
+        if (existingResponse.ok) {
+          const existing = await existingResponse.json();
+          if (existing && existing.length > 0) {
+            console.log("Found existing share token:", existing[0].token);
+            return existing[0].token;
+          }
+        }
+        
+        // Если нет, создаем новый share
+        const shareBody = {
+          study_id: studyId,
+          mode: "respond",
+          access: "any"
+        };
+        
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/study_shares`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
+            "Prefer": "return=representation"
+          },
+          body: JSON.stringify(shareBody)
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Ошибка создания share: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log("Created share token:", data[0].token);
+        return data[0].token;
+      } catch (error) {
+        console.error("Error getting share token:", error);
+        throw error;
       }
     }
 
@@ -617,16 +1313,73 @@
           }
         }
 
-        // 2. Генерируем URL для теста с prototypeId
-        // Сессия будет создана автоматически при открытии ссылки
-        // Убираем лишний слэш, если VIEWER_URL заканчивается на /
-        const viewerUrl = VIEWER_URL.endsWith('/') ? VIEWER_URL.slice(0, -1) : VIEWER_URL;
-        const testUrl = `${viewerUrl}/prototype/${prototypeId}`;
-        document.getElementById("testUrl").value = testUrl;
-        urlContainer.classList.add("show");
+        // Сохраняем prototypeId для возможного retry attach
+        lastCreatedPrototypeId = prototypeId;
         
-        // Прототип всегда создается с user_id (иначе не создается)
-        showStatus("✓ Прототип успешно отправлен с привязкой к аккаунту! Скопируйте ссылку.", "success");
+        // 2. Определяем study_id - либо выбранный, либо создаем новый
+        const attachToStudyToggle = document.getElementById("attachToStudyToggle");
+        const studySelect = document.getElementById("studySelect");
+        const attachError = document.getElementById("attachError");
+        const attachRetryContainer = document.getElementById("attachRetryContainer");
+        
+        let studyId = null;
+        let studyTitle = taskDescription || "Новый тест";
+        
+        try {
+          if (attachToStudyToggle && attachToStudyToggle.checked && studySelect && studySelect.value) {
+            // Используем выбранный study
+            studyId = studySelect.value;
+            console.log("Using selected study:", studyId);
+          } else {
+            // Создаем новый study
+            console.log("Creating new study with title:", studyTitle);
+            
+            // Получаем team_id пользователя
+            const teamId = await getUserTeamId(userId);
+            if (!teamId) {
+              throw new Error("Не удалось получить team_id. Убедитесь, что вы состоите в команде.");
+            }
+            
+            const newStudy = await createStudy(studyTitle, teamId);
+            studyId = newStudy.id;
+            console.log("Created new study:", studyId);
+          }
+          
+          // 3. Прикрепляем прототип к study
+          await attachToStudy(prototypeId, studyId, taskDescription);
+          console.log("Prototype attached to study:", studyId);
+          
+          // 4. Получаем share_token для study
+          const shareToken = await getStudyShareToken(studyId);
+          console.log("Got share token:", shareToken);
+          
+          // 5. Генерируем URL для study через share token
+          const viewerUrl = VIEWER_URL.endsWith('/') ? VIEWER_URL.slice(0, -1) : VIEWER_URL;
+          const testUrl = `${viewerUrl}/share/${shareToken}`;
+          document.getElementById("testUrl").value = testUrl;
+          urlContainer.classList.add("show");
+          
+          // Очищаем ошибки при успехе
+          if (attachError) attachError.style.display = "none";
+          if (attachRetryContainer) attachRetryContainer.style.display = "none";
+          
+          showStatus("✓ Прототип успешно добавлен в тест! Скопируйте ссылку.", "success");
+          
+        } catch (studyErr) {
+          console.error("Error with study:", studyErr);
+          
+          // Fallback: показываем ошибку, но даем прямую ссылку на прототип
+          const viewerUrl = VIEWER_URL.endsWith('/') ? VIEWER_URL.slice(0, -1) : VIEWER_URL;
+          const fallbackUrl = `${viewerUrl}/prototype/${prototypeId}`;
+          document.getElementById("testUrl").value = fallbackUrl;
+          urlContainer.classList.add("show");
+          
+          if (attachError) {
+            attachError.textContent = `⚠️ Прототип создан, но не удалось привязать к тесту: ${studyErr.message}. Используйте прямую ссылку.`;
+            attachError.style.display = "block";
+          }
+          showStatus("⚠️ Прототип создан, но не привязан к тесту. См. ошибку ниже.", "error");
+        }
 
       } catch (error) {
         console.error("Error:", error);
@@ -709,6 +1462,33 @@
       }
     }
 
+    // Табы
+    function switchTab(tabName) {
+      // Убираем активный класс у всех табов и контента
+      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+      
+      // Активируем выбранный таб
+      if (tabName === 'prototype') {
+        document.getElementById('prototypeTab').classList.add('active');
+        document.getElementById('prototypeTabContent').classList.add('active');
+      } else if (tabName === 'settings') {
+        document.getElementById('settingsTab').classList.add('active');
+        document.getElementById('settingsTabContent').classList.add('active');
+        // Загружаем данные в поля при переключении на таб настроек
+        document.getElementById("supabaseUrl").value = SUPABASE_URL || "";
+        document.getElementById("supabaseKey").value = SUPABASE_ANON_KEY || "";
+        document.getElementById("viewerUrl").value = VIEWER_URL || "";
+        document.getElementById("analyticsUrl").value = ANALYTICS_URL || "";
+        document.getElementById("accessToken").value = ACCESS_TOKEN || "";
+        document.getElementById("figmaToken").value = FIGMA_ACCESS_TOKEN || "";
+      }
+    }
+    
+    document.getElementById('prototypeTab').onclick = () => switchTab('prototype');
+    document.getElementById('settingsTab').onclick = () => switchTab('settings');
+    
+    
     // Обработчики для формы настройки
     document.getElementById("saveSettings").onclick = saveSettings;
     document.getElementById("openAuth").onclick = () => {
@@ -747,13 +1527,20 @@
     };
     document.getElementById("cancelSettings").onclick = () => {
       if (isValidConfig()) {
-        hideSettingsForm();
+        switchTab('prototype');
       } else {
         showStatus("⚠️ Настройки обязательны для работы плагина", "error");
       }
     };
-    document.getElementById("openSettings").onclick = showSettingsForm;
     document.getElementById("resetSettings").onclick = resetSettings;
+    
+    // Обработчик для кнопки получения Figma токена
+    const openFigmaSettingsBtn = document.getElementById("openFigmaSettings");
+    if (openFigmaSettingsBtn) {
+      openFigmaSettingsBtn.onclick = () => {
+        window.open("https://www.figma.com/settings", "_blank");
+      };
+    }
 
     // Парсинг Figma Share ссылки
     function parseFigmaShareLink(url) {
@@ -1110,7 +1897,9 @@
     
     // Импорт прототипа по Share ссылке
     async function importFromShareLink() {
+      console.log("importFromShareLink called");
       const shareLink = document.getElementById("shareLink").value.trim();
+      console.log("shareLink:", shareLink);
       
       if (!shareLink) {
         showImportStatus("⚠️ Введите Share ссылку", "error");
@@ -1305,13 +2094,23 @@
         const flowsRadioContainer = document.getElementById("flowsRadioContainer");
         const useSelectedFlowBtn = document.getElementById("useSelectedFlow");
         
+        if (!flowsSelect) {
+          console.error("flowsSelect element not found!");
+          showImportStatus("❌ Ошибка: элемент flowsSelect не найден", "error");
+          return;
+        }
+        
         // Очищаем контейнеры
         flowsSelect.innerHTML = '<option value="">Выберите flow...</option>';
-        flowsRadioContainer.innerHTML = "";
+        if (flowsRadioContainer) {
+          flowsRadioContainer.innerHTML = "";
+        }
         
         // ВАЖНО: Всегда показываем выбор flows через выпадающий список (select)
         flowsSelect.style.display = "block";
-        flowsRadioContainer.style.display = "none";
+        if (flowsRadioContainer) {
+          flowsRadioContainer.style.display = "none";
+        }
         
         // Находим flow из URL для предвыбора
         const urlFlowIndex = flows.findIndex(f => f.fromUrl);
@@ -1338,7 +2137,16 @@
           flowsSelect.value = flows[0].id;
         }
         
-        document.getElementById("flowsContainer").style.display = "block";
+        const flowsContainer = document.getElementById("flowsContainer");
+        if (!flowsContainer) {
+          console.error("flowsContainer element not found!");
+          showImportStatus("❌ Ошибка: элемент flowsContainer не найден", "error");
+          return;
+        }
+        
+        console.log("Showing flowsContainer, flows count:", flows.length);
+        // Просто показываем через display
+        flowsContainer.style.display = 'block';
         const explicitCount = flows.filter(f => f.isExplicit || f.fromUrl).length;
         const fromUrlCount = flows.filter(f => f.fromUrl).length;
         let statusMsg = `✓ Найдено ${flows.length} flow(s)`;
@@ -1406,6 +2214,75 @@
           fileKey: currentFileKey // НОВОЕ: Передаем fileKey для figmaFileId
         }
       }, "*");
+    }
+    
+    // Обработчики для attach to study
+    const attachToStudyToggleEl = document.getElementById("attachToStudyToggle");
+    if (attachToStudyToggleEl) {
+      attachToStudyToggleEl.addEventListener("change", function(e) {
+        const studySelectContainer = document.getElementById("studySelectContainer");
+        if (e.target.checked) {
+          studySelectContainer.style.display = "block";
+          loadStudies();
+        } else {
+          studySelectContainer.style.display = "none";
+          // Очищаем ошибки прикрепления
+          const attachErrorEl = document.getElementById("attachError");
+          const attachRetryContainer = document.getElementById("attachRetryContainer");
+          if (attachErrorEl) attachErrorEl.style.display = "none";
+          if (attachRetryContainer) attachRetryContainer.style.display = "none";
+        }
+      });
+    }
+    
+    const refreshStudiesBtn = document.getElementById("refreshStudiesBtn");
+    if (refreshStudiesBtn) {
+      refreshStudiesBtn.addEventListener("click", function(e) {
+        e.preventDefault();
+        loadStudies();
+      });
+    }
+    
+    const retryAttachBtn = document.getElementById("retryAttachBtn");
+    if (retryAttachBtn) {
+      retryAttachBtn.addEventListener("click", async function(e) {
+        e.preventDefault();
+        if (!lastCreatedPrototypeId) {
+          showStatus("❌ Нет созданного прототипа для прикрепления", "error");
+          return;
+        }
+        
+        const attachToStudyToggle = document.getElementById("attachToStudyToggle");
+        const studySelect = document.getElementById("studySelect");
+        const attachErrorEl = document.getElementById("attachError");
+        const attachRetryContainer = document.getElementById("attachRetryContainer");
+        
+        if (!attachToStudyToggle || !attachToStudyToggle.checked || !studySelect || !studySelect.value) {
+          showStatus("⚠️ Выберите Study для прикрепления", "error");
+          return;
+        }
+        
+        const taskDescription = document.getElementById("taskDescription").value.trim();
+        
+        if (attachErrorEl) attachErrorEl.style.display = "none";
+        if (attachRetryContainer) attachRetryContainer.style.display = "none";
+        showStatus("Повторная попытка прикрепления к Study...", "loading");
+        
+        try {
+          await attachToStudy(lastCreatedPrototypeId, studySelect.value, taskDescription);
+          if (attachErrorEl) attachErrorEl.style.display = "none";
+          if (attachRetryContainer) attachRetryContainer.style.display = "none";
+          showStatus("✓ Прототип успешно прикреплен к Study!", "success");
+        } catch (error) {
+          console.error("Error retrying attach:", error);
+          if (attachErrorEl) {
+            attachErrorEl.textContent = `⚠️ Ошибка прикрепления: ${error.message}`;
+            attachErrorEl.style.display = "block";
+          }
+          if (attachRetryContainer) attachRetryContainer.style.display = "block";
+          showStatus("❌ Не удалось прикрепить к Study", "error");
+        }
+      });
     }
     
     // Обработчики
