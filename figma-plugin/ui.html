@@ -19,6 +19,7 @@
       font-family: Arial, sans-serif;
       padding: 16px;
       color: var(--text-primary);
+      overflow-x: hidden;
     }
     /* Primary Button (default for all buttons) */
     button {
@@ -26,7 +27,7 @@
       background: var(--brand);
       color: #FFFFFF;
       border: none;
-      border-radius: 4px;
+      border-radius: 12px;
       font-size: 14px;
       cursor: pointer;
       width: 100%;
@@ -34,8 +35,7 @@
       transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
     }
     button:hover:not(:disabled) {
-      background: var(--brand);
-      opacity: 0.95;
+      background: #6C86E2;
     }
     button:disabled {
       background: var(--brand);
@@ -49,8 +49,7 @@
       color: #FFFFFF;
     }
     .btn-primary:hover:not(:disabled) {
-      background: var(--brand);
-      opacity: 0.95;
+      background: #6C86E2;
     }
     /* Secondary Button */
     .btn-secondary {
@@ -58,9 +57,11 @@
       color: var(--brand);
       border: none;
     }
-    .btn-secondary:hover {
-      background: var(--btn-secondary-bg);
-      opacity: 0.97;
+    .btn-secondary:hover:not(:disabled) {
+      background: #ECECEC;
+    }
+    #cancelSettings:hover {
+      background: #F4F4F4 !important;
     }
 
     .info {
@@ -82,7 +83,7 @@
       width: 100%;
       padding: 8px;
       border: 1px solid var(--input-border);
-      border-radius: 4px;
+      border-radius: 12px;
       font-family: monospace;
       font-size: 12px;
       margin-bottom: 8px;
@@ -90,6 +91,10 @@
       color: var(--text-primary);
       box-shadow: var(--shadow-input);
       transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
+      max-height: 32px;
+    }
+    .url-input:hover {
+      box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.16);
     }
     .url-input:focus {
       outline: 2px solid rgba(82, 110, 211, 0.25);
@@ -115,18 +120,28 @@
       display: none;
     }
     .status.success {
-      background: #d4edda;
-      color: #155724;
+      background: rgba(74, 201, 155, 0.12);
+      color: rgba(25, 28, 48, 0.90);
       display: block;
     }
     .status.error {
-      background: #f8d7da;
-      color: #721c24;
+      background: rgba(244, 87, 37, 0.12);
+      color: rgba(25, 28, 48, 0.90);
+      display: block;
+    }
+    .status.warning {
+      background: rgba(255, 199, 0, 0.12);
+      color: rgba(25, 28, 48, 0.90);
+      display: block;
+    }
+    .status.info {
+      background: rgba(112, 182, 246, 0.12);
+      color: rgba(25, 28, 48, 0.90);
       display: block;
     }
     .status.loading {
-      background: #d1ecf1;
-      color: #0c5460;
+      background: rgba(112, 182, 246, 0.12);
+      color: rgba(25, 28, 48, 0.90);
       display: block;
     }
     hr {
@@ -152,7 +167,7 @@
       width: 100%;
       padding: 6px 8px;
       border: 1px solid var(--input-border);
-      border-radius: 4px;
+      border-radius: 12px;
       font-size: 12px;
       font-family: monospace;
       box-sizing: border-box;
@@ -161,6 +176,10 @@
       color: var(--text-primary);
       box-shadow: var(--shadow-input);
       transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
+      max-height: 32px;
+    }
+    .settings-form input:hover {
+      box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.16);
     }
     .settings-form input:focus {
       outline: 2px solid rgba(82, 110, 211, 0.25);
@@ -183,6 +202,7 @@
     .settings-buttons button {
       flex: 1;
       margin-bottom: 0;
+      height: 44px;
     }
     .settings-btn {
       background: var(--btn-secondary-bg);
@@ -217,7 +237,7 @@
       width: 100%;
       padding: 8px;
       border: 1px solid var(--input-border);
-      border-radius: 4px;
+      border-radius: 12px;
       font-size: 12px;
       font-family: Arial, sans-serif;
       box-sizing: border-box;
@@ -339,14 +359,27 @@
     /* Global input styles */
     input[type="text"],
     input[type="url"],
-    textarea,
     select {
       border: 1px solid var(--input-border);
-      border-radius: 4px;
+      border-radius: 12px;
       background: #FFFFFF;
       color: var(--text-primary);
       box-shadow: var(--shadow-input);
       transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
+      max-height: 32px;
+    }
+    textarea {
+      border: 1px solid var(--input-border);
+      border-radius: 12px;
+      background: #FFFFFF;
+      color: var(--text-primary);
+      box-shadow: var(--shadow-input);
+      transition: background-color 150ms, opacity 150ms, box-shadow 150ms;
+    }
+    input[type="text"]:hover,
+    input[type="url"]:hover,
+    select:hover {
+      box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.16);
     }
     input[type="text"]:focus,
     input[type="url"]:focus,
@@ -372,11 +405,13 @@
     }
 
     /* Tabs styles */
-    .tabs {
-      display: flex;
-      gap: 16px;
+    .tabs-container {
       border-bottom: 1px solid var(--input-border);
-      margin-bottom: 16px;
+      margin-bottom: 32px;
+    }
+    .tabs {
+      display: inline-flex;
+      gap: 16px;
       padding-bottom: 0;
     }
     .tab {
@@ -389,14 +424,24 @@
       font-size: 14px;
       font-weight: 500;
       transition: color 150ms, border-color 150ms;
+      margin-bottom: 0;
+      border-radius: 0;
+      display: inline-flex;
     }
     .tab.active {
       color: var(--text-primary);
       border-bottom-color: var(--brand);
+      margin-bottom: 0;
+      border-radius: 0;
+      background: none;
+    }
+    .tab.active:hover {
+      background: none;
     }
     .tab:hover:not(.active) {
-      color: var(--text-primary);
-      opacity: 0.8;
+      color: rgba(25, 28, 48, 0.90);
+      border-bottom-color: #E0E0E0;
+      background: none;
     }
     
     /* Tab content */
@@ -431,13 +476,19 @@
       margin-bottom: 8px;
       padding: 8px 12px;
       background: #FFFFFF;
-      border-radius: 4px;
+      border-radius: 12px;
       box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.15);
       color: var(--text-primary);
       font-size: 11px;
       line-height: 1.4;
       white-space: normal;
-      max-width: 200px;
+      max-width: min(288px, calc(100vw - 32px));
+      min-width: 0;
+      width: max-content;
+      box-sizing: border-box;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      hyphens: auto;
       z-index: 1000;
       display: none;
       pointer-events: none;
@@ -463,7 +514,8 @@
       margin: 0 0 16px 0;
     }
     .instructions li {
-      font-size: 12px;
+      font-size: 13px;
+      line-height: 20px;
       color: var(--text-primary);
       margin-bottom: 4px;
       padding-left: 0;
@@ -472,9 +524,12 @@
 </head>
 <body>
   <!-- Табы -->
-  <div class="tabs">
-    <button class="tab active" id="prototypeTab">Прототип</button>
-    <button class="tab" id="settingsTab">Настройки</button>
+  <div class="tabs-container">
+    <div class="tabs">
+      <button class="tab active" id="prototypeTab">Прототип</button>
+      <button class="tab" id="settingsTab">Настройки</button>
+      <button class="tab" id="helpTab">Помощь</button>
+    </div>
   </div>
   
   <!-- Контент таба "Прототип" -->
@@ -488,13 +543,13 @@
     <!-- Поле для Share ссылки -->
     <div style="margin-bottom: 16px;">
       <div style="display: flex; align-items: center; margin-bottom: 8px;">
-        <label for="shareLink" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Вставьте ссылку и выберите сценарий</label>
+        <label for="shareLink" style="font-size: 13px; line-height: 20px; font-weight: 800; color: var(--text-primary); margin: 0;">Вставьте ссылку и выберите сценарий</label>
         <div class="tooltip-wrapper">
           <span class="tooltip-icon">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
           </span>
-          <div class="tooltip">Найдем все ваши сценарии, чтобы выбрать один из них</div>
+          <div class="tooltip">Найдем все ваши сценарии,<br>чтобы выбрать один из них</div>
         </div>
       </div>
       <div style="display: flex; gap: 8px; margin-bottom: 12px;">
@@ -502,20 +557,22 @@
           type="text" 
           id="shareLink" 
           placeholder="Ссылка файла Figma" 
-          style="flex: 1; padding: 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; font-family: monospace; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
+          style="flex: 1; padding: 8px; border: 1px solid var(--input-border); border-radius: 12px; font-size: 12px; font-family: monospace; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
         />
-        <button id="importFromLink" class="search-icon-btn" style="width: 32px; height: 32px; padding: 0; border: none; border-radius: 4px; cursor: pointer; background: transparent; flex-shrink: 0;">
+        <button id="importFromLink" class="search-icon-btn" style="width: 32px; height: 32px; padding: 0; border: none; border-radius: 12px; cursor: pointer; background: #F4F4F4; flex-shrink: 0;">
           <span class="icon-svg"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 1C10.3137 1 13 3.68629 13 7C13 8.2957 12.587 9.49385 11.8887 10.4746L14.707 13.293C15.0976 13.6835 15.0976 14.3165 14.707 14.707C14.3165 15.0976 13.6835 15.0976 13.293 14.707L10.4746 11.8887C9.49385 12.587 8.2957 13 7 13C3.68629 13 1 10.3137 1 7C1 3.68629 3.68629 1 7 1ZM7 3C4.79086 3 3 4.79086 3 7C3 9.20914 4.79086 11 7 11C9.20914 11 11 9.20914 11 7C11 4.79086 9.20914 3 7 3Z" fill="#526ED3"/></svg></span>
         </button>
       </div>
       
       <!-- Flows container -->
       <div id="flowsContainer" style="display: none; margin-bottom: 16px;">
-        <label style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--text-primary);">Выберите один сценарий (flow)</label>
-        <select id="flowsSelect" style="width: 100%; padding: 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; box-sizing: border-box; margin-bottom: 8px; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);">
+        <div style="margin-bottom: 4px;">
+          <label style="display: block; font-size: 11px; line-height: 13px; letter-spacing: 0.4px; color: rgba(27, 31, 59, 0.65); margin: 0;">Выберите один сценарий (flow)</label>
+        </div>
+        <select id="flowsSelect" style="width: 100%; padding: 8px; border: 1px solid var(--input-border); border-radius: 12px; font-size: 12px; box-sizing: border-box; margin-bottom: 8px; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);">
           <option value="">Загрузка flows...</option>
         </select>
-        <button id="useSelectedFlow" class="btn-secondary" style="width: 100%; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+        <button id="useSelectedFlow" class="btn-secondary" style="width: auto; padding: 8px; border: none; border-radius: 12px; cursor: pointer; font-size: 12px;">
           Выбрать сценарий
         </button>
       </div>
@@ -528,21 +585,20 @@
     <!-- Task Description -->
     <div id="taskDescriptionContainer" style="margin-bottom: 16px;">
       <div style="display: flex; align-items: center; margin-bottom: 6px;">
-        <label for="taskDescription" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Введите суть задания</label>
-        <span style="margin-left: 8px; font-size: 11px; color: var(--text-secondary);">0/250</span>
+        <label for="taskDescription" style="font-size: 13px; line-height: 20px; font-weight: 800; color: var(--text-primary); margin: 0;">Введите суть задания</label>
         <div class="tooltip-wrapper" style="margin-left: 4px;">
           <span class="tooltip-icon">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
           </span>
-          <div class="tooltip">Пример: Найдите способ добавить товар в корзину и перейти к оформлению заказа</div>
+          <div class="tooltip">Пример: Найдите способ добавить<br>товар в корзину<br>и перейти к оформлению заказа</div>
         </div>
       </div>
       <textarea 
         id="taskDescription" 
         placeholder="Текст задания"
         maxlength="250"
-        style="width: 100%; padding: 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; font-family: Arial, sans-serif; box-sizing: border-box; resize: vertical; min-height: 60px; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
+        style="width: 100%; padding: 8px; border: 1px solid var(--input-border); border-radius: 12px; font-size: 12px; font-family: Arial, sans-serif; box-sizing: border-box; resize: vertical; min-height: 60px; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
       ></textarea>
       <div class="char-count" id="charCount" style="font-size: 11px; color: var(--text-secondary); text-align: right; margin-top: 4px;">0 / 250</div>
     </div>
@@ -555,7 +611,7 @@
           id="attachToStudyToggle" 
           style="margin-right: 8px; cursor: pointer; width: 16px; height: 16px;"
         />
-        <span>Тест уже создан (опционально)</span>
+        <span style="font-size: 13px; line-height: 20px; font-weight: 800;">Тест уже создан (опционально)</span>
         <div class="tooltip-wrapper" style="margin-left: 4px;">
           <span class="tooltip-icon">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -568,7 +624,7 @@
       <div id="studySelectContainer" style="display: none; margin-top: 8px;">
         <select 
           id="studySelect" 
-          style="width: 100%; padding: 6px 8px; border: 1px solid var(--input-border); border-radius: 4px; font-size: 12px; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
+          style="width: 100%; padding: 6px 8px; border: 1px solid var(--input-border); border-radius: 12px; font-size: 12px; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
         >
           <option value="">Загрузка studies...</option>
         </select>
@@ -577,7 +633,7 @@
           <button 
             id="retryAttachBtn" 
             class="btn-primary"
-            style="padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;"
+            style="padding: 6px 12px; border: none; border-radius: 12px; cursor: pointer; font-size: 12px;"
           >
             Retry attach
           </button>
@@ -586,7 +642,7 @@
     </div>
     
     <!-- Кнопка отправки -->
-    <button id="sendToTest" class="btn-primary" style="width: 100%; margin-top: 16px;">Отправить на тест</button>
+    <button id="sendToTest" class="btn-primary" style="width: 100%; margin-top: 16px; height: 44px; padding-top: 14px; padding-bottom: 14px; border-radius: 12px;">Отправить на тест</button>
     <div class="status" id="status"></div>
     <div class="url-container" id="urlContainer">
       <label style="font-size: 12px; display: block; margin-bottom: 4px; color: var(--text-primary);">Ссылка для респондента:</label>
@@ -599,12 +655,12 @@
   <div id="settingsTabContent" class="tab-content">
     <!-- Форма настройки (онбординг) -->
     <div id="settingsForm" class="settings-form">
-    <div style="margin-bottom: 20px;">
-      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 14px; font-weight: 500;">Supabase и токен доступа</h3>
+    <div style="margin-bottom: 32px;">
+      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 17px; line-height: 28px; font-weight: 800;">Supabase и токен доступа</h3>
       
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; margin-bottom: 6px;">
-          <label for="supabaseUrl" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Supabase ссылка</label>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+          <label for="supabaseUrl" style="font-size: 11px; line-height: 13px; letter-spacing: 0.4px; color: rgba(27, 31, 59, 0.65); margin: 0;">Supabase ссылка</label>
           <div class="tooltip-wrapper" style="margin-left: 4px;">
             <span class="tooltip-icon">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -617,8 +673,8 @@
       </div>
       
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; margin-bottom: 6px;">
-          <label for="supabaseKey" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Supabase Anon Key</label>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+          <label for="supabaseKey" style="font-size: 11px; line-height: 13px; letter-spacing: 0.4px; color: rgba(27, 31, 59, 0.65); margin: 0;">Supabase Anon Key</label>
           <div class="tooltip-wrapper" style="margin-left: 4px;">
             <span class="tooltip-icon">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -631,33 +687,31 @@
       </div>
       
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-          <div style="flex: 1;">
-            <div style="display: flex; align-items: center;">
-              <label for="accessToken" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Токен доступа (для создания прототипа)</label>
-              <div class="tooltip-wrapper" style="margin-left: 4px;">
-                <span class="tooltip-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
-                </span>
-                <div class="tooltip">Нажмите "Получить" чтобы открыть приложение аналитики для авторизации. После входа скопируйте токен со страницы /token и вставьте его сюда. Используйте access_token из страницы /token, НЕ anon_key!</div>
-              </div>
-            </div>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+          <label for="accessToken" style="font-size: 11px; line-height: 13px; letter-spacing: 0.4px; color: rgba(27, 31, 59, 0.65); margin: 0;">Токен доступа (для создания прототипа)</label>
+          <div class="tooltip-wrapper" style="margin-left: 4px;">
+            <span class="tooltip-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+            </span>
+            <div class="tooltip">Нажмите "Получить" чтобы открыть приложение аналитики для авторизации. После входа скопируйте токен со страницы /token и вставьте его сюда. Используйте access_token из страницы /token, НЕ anon_key!</div>
           </div>
-          <button id="openAuth" class="btn-secondary" style="padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="accessToken" placeholder="Вставьте сюда токен" style="flex: 1;" />
+          <button id="openAuth" class="btn-secondary" style="display: inline-flex; padding: 6px 12px; border: none; border-radius: 12px; cursor: pointer; font-size: 12px; white-space: nowrap; justify-content: center; width: auto;">
             Получить
           </button>
         </div>
-        <input type="text" id="accessToken" placeholder="Вставьте сюда токен" />
       </div>
     </div>
     
-    <div style="margin-bottom: 20px;">
-      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 14px; font-weight: 500;">Аналитика и прохождение тестов</h3>
+    <div style="margin-bottom: 32px;">
+      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 17px; line-height: 28px; font-weight: 800;">Аналитика и прохождение тестов</h3>
       
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; margin-bottom: 6px;">
-          <label for="viewerUrl" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Ссылка для прохождения тестов (Viewer)</label>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+          <label for="viewerUrl" style="font-size: 11px; line-height: 13px; letter-spacing: 0.4px; color: rgba(27, 31, 59, 0.65); margin: 0;">Ссылка для прохождения тестов (Viewer)</label>
           <div class="tooltip-wrapper" style="margin-left: 4px;">
             <span class="tooltip-icon">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -670,8 +724,8 @@
       </div>
       
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; margin-bottom: 6px;">
-          <label for="analyticsUrl" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Ссылка для аналитики тестов (Analytics)</label>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+          <label for="analyticsUrl" style="font-size: 11px; line-height: 13px; letter-spacing: 0.4px; color: rgba(27, 31, 59, 0.65); margin: 0;">Ссылка для аналитики тестов (Analytics)</label>
           <div class="tooltip-wrapper" style="margin-left: 4px;">
             <span class="tooltip-icon">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -684,42 +738,58 @@
       </div>
     </div>
     
-    <div style="margin-bottom: 20px;">
-      <h3 style="margin: 0 0 16px 0; color: var(--text-primary); font-size: 14px; font-weight: 500;">Figma токен</h3>
-      
+    <div style="margin-bottom: 32px;">
       <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-          <div style="flex: 1;">
-            <div style="display: flex; align-items: center;">
-              <label for="figmaToken" style="font-size: 12px; font-weight: 500; color: var(--text-primary); margin: 0;">Figma токен</label>
-              <div class="tooltip-wrapper" style="margin-left: 4px;">
-                <span class="tooltip-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
-                </span>
-                <div class="tooltip">Требуется для импорта прототипов по Share ссылке через REST API. Получить можно в Figma Settings → Personal Access Tokens. Опционально: нужен только если используете режим "По Share ссылке"</div>
-              </div>
-            </div>
+        <div style="display: flex; align-items: center; margin-bottom: 16px;">
+          <label for="figmaToken" style="font-size: 17px; line-height: 28px; font-weight: 800; color: var(--text-primary); margin: 0;">Figma токен</label>
+          <div class="tooltip-wrapper" style="margin-left: 4px;">
+            <span class="tooltip-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg>
+            </span>
+            <div class="tooltip">Требуется для импорта прототипов по Share ссылке через REST API. Получить можно в Figma Settings → Personal Access Tokens. Опционально: нужен только если используете режим "По Share ссылке"</div>
           </div>
-          <button id="openFigmaSettings" class="btn-secondary" style="padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="figmaToken" placeholder="Укажите токен" style="flex: 1;" />
+          <button id="openFigmaSettings" class="btn-secondary" style="display: inline-flex;padding: 6px 12px;border: none;border-radius: 12px;cursor: pointer;font-size: 12px;white-space: nowrap;justify-content: center;width: auto;">
             Получить
           </button>
         </div>
-        <input type="text" id="figmaToken" placeholder="Укажите токен" />
       </div>
     </div>
     
     <div class="settings-buttons">
-      <button id="saveSettings">Сохранить настройки</button>
-      <button id="cancelSettings" class="btn-secondary">Отмена</button>
+      <button id="saveSettings">Сохранить</button>
+      <button id="cancelSettings" class="btn-secondary" style="background: none;">Отмена</button>
     </div>
-    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">
-      <button id="resetSettings" class="btn-secondary" style="width: 100%; margin-bottom: 0; font-size: 12px; padding: 6px 10px; display: flex; align-items: center; justify-content: center; gap: 6px;">
-        <span class="icon-svg"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C5.87827 0 3.84344 0.842854 2.34315 2.34315C0.842855 3.84344 0 5.87827 0 8C0 10.1217 0.842855 12.1566 2.34315 13.6569C3.84344 15.1571 5.87827 16 8 16C10.1217 16 12.1566 15.1571 13.6569 13.6569C15.1571 12.1566 16 10.1217 16 8C16 5.87827 15.1571 3.84344 13.6569 2.34315C12.1566 0.842854 10.1217 0 8 0ZM12.2426 12.2426C11.1174 13.3679 9.5913 14 8 14C6.4087 14 4.88258 13.3679 3.75736 12.2426C2.63214 11.1174 2 9.5913 2 8C2 6.4087 2.63214 4.88258 3.75736 3.75736C4.88258 2.63214 6.4087 2 8 2C9.5913 2 11.1174 2.63214 12.2426 3.75736C13.3679 4.88258 14 6.4087 14 8C14 9.5913 13.3679 11.1174 12.2426 12.2426ZM7.43998 5.80083C7.64364 5.68107 7.88312 5.6373 8.11597 5.67725C8.34883 5.71721 8.56002 5.83832 8.7121 6.01912C8.86419 6.19992 8.94735 6.42872 8.94684 6.66498V6.66712C8.94684 6.80271 8.83181 7.04179 8.39209 7.33497C8.2027 7.46125 8.0062 7.56024 7.8531 7.6283C7.77797 7.66171 7.71675 7.68613 7.67666 7.70141C7.65669 7.70902 7.64222 7.71427 7.63416 7.71713L7.6272 7.71958C7.10538 7.89557 6.82384 8.46066 6.99821 8.98349C7.17293 9.5074 7.7393 9.79048 8.26321 9.61575L7.95113 8.67996C8.26322 9.61575 8.26442 9.61535 8.26442 9.61535L8.26581 9.61488L8.26917 9.61375L8.27808 9.6107L8.30445 9.60147C8.32568 9.59391 8.35418 9.58352 8.3889 9.57029C8.45818 9.54389 8.55322 9.50579 8.66559 9.45583C8.88749 9.35718 9.19098 9.20611 9.50159 8.99901C10.0615 8.62566 10.9458 7.86542 10.9468 6.66925L10.9468 6.66712H9.94684L10.9468 6.66925C10.9484 5.96048 10.6989 5.27406 10.2426 4.73166C9.78635 4.18927 9.15279 3.82594 8.45423 3.70606C7.75566 3.58619 7.03721 3.71752 6.42623 4.07678C5.81525 4.43604 5.3512 5.00002 5.11634 5.66875C4.93333 6.18983 5.2074 6.76061 5.72848 6.94362C6.24956 7.12663 6.82034 6.85256 7.00335 6.33148C7.08163 6.10857 7.23632 5.92058 7.43998 5.80083ZM7.99984 10.3341C7.44756 10.3341 6.99984 10.7818 6.99984 11.3341C6.99984 11.8864 7.44756 12.3341 7.99984 12.3341H8.00684C8.55913 12.3341 9.00684 11.8864 9.00684 11.3341C9.00684 10.7818 8.55913 10.3341 8.00684 10.3341H7.99984Z" fill="#1B1F3B" fill-opacity="0.4"/></svg></span>
-        Сбросить настройки (для тестирования)
-      </button>
-      <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; text-align: center;">
-        Удалит сохраненную конфигурацию и покажет форму онбординга
+  </div>
+  </div>
+  
+  <!-- Контент таба "Помощь" -->
+  <div id="helpTabContent" class="tab-content">
+    <div style="margin-bottom: 32px; text-align: center;">
+      <h3 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 17px; line-height: 28px; font-weight: 800;">ИзиТест</h3>
+      <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 20px; color: var(--text-secondary);">Это плагин для Figma, который экспортирует ваши интерактивные прототипы в формат, готовый для тестирования.</p>
+      <p style="margin: 0; font-size: 12px; color: var(--text-tertiary);">Разработка: <a href="https://ruslansharipov.com/" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Руслан Шарипов</a></p>
+    </div>
+    
+    <div style="margin-bottom: 24px;">
+      <h4 style="margin: 0 0 12px 0; font-size: 13px; line-height: 20px; font-weight: 800; color: var(--text-primary);">Документация</h4>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <a href="https://github.com/ruslanshgd/easytest" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">GitHub проект</a>
+        <a href="https://github.com/ruslanshgd/easytest/blob/main/INSTALLATION_RU.md" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Инструкция (RU)</a>
+        <a href="https://github.com/ruslanshgd/easytest/blob/main/INSTALLATION_EN.md" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Инструкция (ENG)</a>
+        <a href="https://github.com/ruslanshgd/easytest/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Лицензия</a>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 24px;">
+      <h4 style="margin: 0 0 12px 0; font-size: 13px; line-height: 20px; font-weight: 800; color: var(--text-primary);">Авторские ресурсы</h4>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <a href="https://t.me/easyaboutdesign" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Telegram канал</a>
+        <a href="https://youtube.com/@ruslansharipovuxui" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">YouTube канал</a>
+        <a href="https://www.donationalerts.com/r/ruslan_uxui" target="_blank" rel="noopener noreferrer" style="color: var(--brand); text-decoration: none; font-size: 12px; line-height: 16px; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Поблагодарить автора (донат)</a>
       </div>
     </div>
   </div>
@@ -1430,38 +1500,6 @@
       }
     });
 
-    // Сброс настроек
-    function resetSettings() {
-      if (confirm("Вы уверены, что хотите сбросить настройки? Это удалит сохраненную конфигурацию.")) {
-        // Отправляем запрос на удаление конфигурации
-        parent.postMessage({
-          pluginMessage: {
-            type: "RESET_CONFIG"
-          }
-        }, "*");
-
-        // Очищаем локальные переменные
-        SUPABASE_URL = "";
-        SUPABASE_ANON_KEY = "";
-        VIEWER_URL = "";
-        ANALYTICS_URL = "";
-        ACCESS_TOKEN = "";
-        FIGMA_ACCESS_TOKEN = "";
-
-        // Очищаем поля формы
-        document.getElementById("supabaseUrl").value = "";
-        document.getElementById("supabaseKey").value = "";
-        document.getElementById("viewerUrl").value = "";
-        document.getElementById("analyticsUrl").value = "";
-        document.getElementById("accessToken").value = "";
-        document.getElementById("figmaToken").value = "";
-
-        showSettingsForm();
-
-        showStatus("✓ Настройки сброшены! Заполните форму заново.", "success");
-      }
-    }
-
     // Табы
     function switchTab(tabName) {
       // Убираем активный класс у всех табов и контента
@@ -1482,11 +1520,31 @@
         document.getElementById("analyticsUrl").value = ANALYTICS_URL || "";
         document.getElementById("accessToken").value = ACCESS_TOKEN || "";
         document.getElementById("figmaToken").value = FIGMA_ACCESS_TOKEN || "";
+      } else if (tabName === 'help') {
+        document.getElementById('helpTab').classList.add('active');
+        document.getElementById('helpTabContent').classList.add('active');
       }
     }
     
-    document.getElementById('prototypeTab').onclick = () => switchTab('prototype');
-    document.getElementById('settingsTab').onclick = () => switchTab('settings');
+    // Установка обработчиков для табов
+    function setupTabHandlers() {
+      const prototypeTabEl = document.getElementById('prototypeTab');
+      const settingsTabEl = document.getElementById('settingsTab');
+      const helpTabEl = document.getElementById('helpTab');
+      
+      if (prototypeTabEl) {
+        prototypeTabEl.onclick = () => switchTab('prototype');
+      }
+      if (settingsTabEl) {
+        settingsTabEl.onclick = () => switchTab('settings');
+      }
+      if (helpTabEl) {
+        helpTabEl.onclick = () => switchTab('help');
+      }
+    }
+    
+    // Вызываем установку обработчиков сразу и после загрузки DOM
+    setupTabHandlers();
     
     
     // Обработчики для формы настройки
@@ -1532,8 +1590,6 @@
         showStatus("⚠️ Настройки обязательны для работы плагина", "error");
       }
     };
-    document.getElementById("resetSettings").onclick = resetSettings;
-    
     // Обработчик для кнопки получения Figma токена
     const openFigmaSettingsBtn = document.getElementById("openFigmaSettings");
     if (openFigmaSettingsBtn) {
@@ -2301,6 +2357,8 @@
       if (!configLoaded) {
         initUI();
       }
+      // Убедимся, что обработчики установлены
+      setupTabHandlers();
     }, 100);
   </script>
 </body>
