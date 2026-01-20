@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
+import { useAppStore } from "./store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,23 +50,40 @@ interface CreatedInvite {
 
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<any>(null);
-  const [team, setTeam] = useState<Team | null>(null);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [teamInvitations, setTeamInvitations] = useState<TeamInvitation[]>([]);
-  const [isOwner, setIsOwner] = useState(false);
-  
-  const [showCreateTeam, setShowCreateTeam] = useState(false);
-  const [teamName, setTeamName] = useState("");
-  const [creatingTeam, setCreatingTeam] = useState(false);
-  
-  const [showInviteForm, setShowInviteForm] = useState(false);
-  const [inviteEmails, setInviteEmails] = useState("");
-  const [inviting, setInviting] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [createdInvites, setCreatedInvites] = useState<CreatedInvite[]>([]);
-  const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const {
+    loading,
+    user,
+    team,
+    teamMembers,
+    teamInvitations,
+    isOwner,
+    showCreateTeam,
+    showInviteForm,
+    teamName,
+    inviteEmails,
+    creatingTeam,
+    inviting,
+    inviteError,
+    createdInvites,
+    copiedLink,
+    setLoading,
+    setUser,
+    setTeam,
+    setTeamMembers,
+    setTeamInvitations,
+    setIsOwner,
+    openCreateTeam,
+    closeCreateTeam,
+    openInviteForm,
+    closeInviteForm,
+    setTeamName,
+    setInviteEmails,
+    setCreatingTeam,
+    setInviting,
+    setInviteError,
+    setCreatedInvites,
+    setCopiedLink,
+  } = useAppStore();
 
   useEffect(() => {
     loadUserData();
@@ -168,8 +186,7 @@ export default function ProfilePage() {
       }
 
       await loadUserData();
-      setShowCreateTeam(false);
-      setTeamName("");
+      closeCreateTeam();
     } catch (error: any) {
       alert(`Ошибка: ${error.message}`);
     } finally {
@@ -357,7 +374,7 @@ export default function ProfilePage() {
                   <p className="text-muted-foreground">
                     У вас еще нет команды. Создайте команду, чтобы начать совместную работу.
                   </p>
-                  <Button onClick={() => setShowCreateTeam(true)}>
+                  <Button onClick={openCreateTeam}>
                     <UserPlus className="h-4 w-4 mr-2" />
                     Создать команду
                   </Button>
@@ -383,7 +400,7 @@ export default function ProfilePage() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => { setShowCreateTeam(false); setTeamName(""); }}
+                      onClick={closeCreateTeam}
                       disabled={creatingTeam}
                     >
                       Отмена
@@ -460,14 +477,14 @@ export default function ProfilePage() {
                         ))}
                         <Button
                           variant="outline"
-                          onClick={() => { setCreatedInvites([]); setShowInviteForm(false); }}
+                          onClick={() => { setCreatedInvites([]); closeInviteForm(); }}
                         >
                           Готово
                         </Button>
                       </CardContent>
                     </Card>
                   ) : !showInviteForm ? (
-                    <Button onClick={() => setShowInviteForm(true)}>
+                    <Button onClick={openInviteForm}>
                       <UserPlus className="h-4 w-4 mr-2" />
                       Пригласить участников
                     </Button>
@@ -502,7 +519,7 @@ export default function ProfilePage() {
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={() => { setShowInviteForm(false); setInviteEmails(""); setInviteError(null); }}
+                          onClick={closeInviteForm}
                           disabled={inviting}
                         >
                           Отмена

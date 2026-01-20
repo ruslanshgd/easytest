@@ -1,6 +1,5 @@
 import { Routes, Route, useLocation, Link } from "react-router-dom";
-import { useState, useEffect } from "react";
-import { supabase } from "./supabaseClient";
+import { useEffect } from "react";
 import Analytics from "./Analytics";
 import Auth from "./components/Auth";
 import TokenPage from "./TokenPage";
@@ -10,32 +9,26 @@ import StudyDetail from "./StudyDetail";
 import ProfilePage from "./ProfilePage";
 import InvitePage from "./InvitePage";
 import { User } from "lucide-react";
+import { useAppStore } from "./store";
 
 function App() {
   const location = useLocation();
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { session, authLoading, checkSession, subscribeToAuth } = useAppStore();
 
   // Проверка авторизации
   useEffect(() => {
     // Проверяем текущую сессию
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+    checkSession();
 
     // Слушаем изменения авторизации
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+    const unsubscribe = subscribeToAuth();
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Functions from store are stable, don't need to be in deps
 
-  // Показываем загрузку
-  if (loading) {
+  // Показываем загрузку только для auth
+  if (authLoading) {
     return (
       <div style={{
         display: "flex",

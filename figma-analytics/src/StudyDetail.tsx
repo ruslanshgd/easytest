@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
+import { useAppStore } from "./store";
 import { isValidUUID } from "./utils/validation";
 import StudyResultsTab from "./components/StudyResultsTab";
 import StudyShareTab from "./components/StudyShareTab";
@@ -199,36 +200,52 @@ export default function StudyDetail() {
   const navigate = useNavigate();
   const studyId = params.id || null;
 
+  // Store selectors
+  const {
+    activeTab,
+    showAddBlockModal,
+    editingBlockId,
+    draggedBlockId,
+    savingCount,
+    isEditingTitle,
+    editedTitle,
+    newBlockType,
+    selectedPrototypeId,
+    newBlockInstructions,
+    setActiveTab,
+    setShowAddBlockModal,
+    setEditingBlockId,
+    setDraggedBlockId,
+    incrementSaving,
+    decrementSaving,
+    setIsEditingTitle,
+    setEditedTitle,
+    setNewBlockType,
+    setSelectedPrototypeId,
+    setNewBlockInstructions,
+    resetBlockForm,
+  } = useAppStore();
+
+  // Local state for study data (specific to this component instance)
   const [study, setStudy] = useState<Study | null>(null);
   const [blocks, setBlocks] = useState<StudyBlock[]>([]);
   const [prototypes, setPrototypes] = useState<Prototype[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAddBlockModal, setShowAddBlockModal] = useState(false);
-  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
-  const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"builder" | "results" | "share">("builder");
   
-  // Глобальный счётчик активных сохранений (для индикатора "Сохранение...")
-  const [savingCount, setSavingCount] = useState(0);
   const isSaving = savingCount > 0;
-  
-  // Инлайн редактирование названия
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState("");
   const titleInputRef = useRef<HTMLInputElement>(null);
-
-  // Форма добавления блока
-  const [newBlockType, setNewBlockType] = useState<BlockType>("prototype");
-  const [selectedPrototypeId, setSelectedPrototypeId] = useState("");
-  const [newBlockInstructions, setNewBlockInstructions] = useState("");
   
-  // Открытый вопрос
+  // Error handling from UI store
+  const { setError: setUIError } = useAppStore();
+
+  // Form states - keeping these local as they're component-specific
+  // These can be moved to store if needed for sharing across components
   const [openQuestionText, setOpenQuestionText] = useState("");
   const [openQuestionOptional, setOpenQuestionOptional] = useState(false);
   const [openQuestionImage, setOpenQuestionImage] = useState<{ file: File | null; url: string }>({ file: null, url: "" });
   
-  // Выбор
+  // Choice form
   const [choiceImage, setChoiceImage] = useState<{ file: File | null; url: string }>({ file: null, url: "" });
   const [choiceQuestion, setChoiceQuestion] = useState("");
   const [choiceDescription, setChoiceDescription] = useState("");
@@ -242,11 +259,11 @@ export default function StudyDetail() {
   const [choiceNoneText, setChoiceNoneText] = useState("Ничего из вышеперечисленного");
   const [choiceOptional, setChoiceOptional] = useState(false);
   
-  // Контекст
+  // Context form
   const [contextTitle, setContextTitle] = useState("");
   const [contextDescription, setContextDescription] = useState("");
   
-  // Шкала
+  // Scale form
   const [scaleImage, setScaleImage] = useState<{ file: File | null; url: string }>({ file: null, url: "" });
   const [scaleQuestion, setScaleQuestion] = useState("");
   const [scaleDescription, setScaleDescription] = useState("");
@@ -258,7 +275,7 @@ export default function StudyDetail() {
   const [scaleEmojiCount, setScaleEmojiCount] = useState<3 | 5>(5);
   const [scaleOptional, setScaleOptional] = useState(false);
   
-  // Предпочтение
+  // Preference form
   const [preferenceQuestion, setPreferenceQuestion] = useState("");
   const [preferenceComparisonType, setPreferenceComparisonType] = useState<"all" | "pairwise">("all");
   const [preferenceImages, setPreferenceImages] = useState<Array<{ file: File | null; url: string; uploading: boolean }>>([
@@ -267,12 +284,12 @@ export default function StudyDetail() {
   ]);
   const [preferenceShuffle, setPreferenceShuffle] = useState(false);
   
-  // 5 секунд
+  // Five seconds form
   const [fiveSecondsInstruction, setFiveSecondsInstruction] = useState("");
   const [fiveSecondsDuration, setFiveSecondsDuration] = useState(5);
   const [fiveSecondsImage, setFiveSecondsImage] = useState<{ file: File | null; url: string; uploading: boolean }>({ file: null, url: "", uploading: false });
   
-  // Карточная сортировка
+  // Card sorting form
   const [cardSortingTask, setCardSortingTask] = useState("");
   const [cardSortingType, setCardSortingType] = useState<"open" | "closed">("open");
   const [cardSortingCards, setCardSortingCards] = useState<Array<{ id: string; title: string; description: string; imageUrl: string; imageFile: File | null }>>([
@@ -289,7 +306,7 @@ export default function StudyDetail() {
   const [showCardSortingCardsModal, setShowCardSortingCardsModal] = useState(false);
   const [showCardSortingCategoriesModal, setShowCardSortingCategoriesModal] = useState(false);
   
-  // Tree Testing
+  // Tree Testing form
   const [treeTestingTask, setTreeTestingTask] = useState("");
   const [treeTestingDescription, setTreeTestingDescription] = useState("");
   const [treeTestingTree, setTreeTestingTree] = useState<TreeTestingNode[]>([
@@ -300,9 +317,9 @@ export default function StudyDetail() {
   const [expandedTreeNodes, setExpandedTreeNodes] = useState<Set<string>>(new Set());
 
 
-  const resetBlockForm = () => {
-    setSelectedPrototypeId("");
-    setNewBlockInstructions("");
+  const resetAllBlockForms = () => {
+    resetBlockForm();
+    // Reset all form states
     setOpenQuestionText("");
     setOpenQuestionOptional(false);
     setOpenQuestionImage({ file: null, url: "" });
@@ -579,7 +596,7 @@ export default function StudyDetail() {
     );
     
     // 2. Сохраняем в БД в фоне
-    setSavingCount(c => c + 1);
+    incrementSaving();
     try {
       const { error } = await supabase
         .from("study_blocks")
@@ -591,7 +608,7 @@ export default function StudyDetail() {
         // При ошибке можно откатить изменения, но пока просто логируем
       }
     } finally {
-      setSavingCount(c => c - 1);
+      decrementSaving();
     }
   }, []);
 
@@ -982,6 +999,7 @@ export default function StudyDetail() {
 
     setShowAddBlockModal(false);
     resetBlockForm();
+    resetBlockForm();
     await loadStudy();
   };
 
@@ -997,7 +1015,7 @@ export default function StudyDetail() {
     });
 
     // 2. Удаляем из БД в фоне
-    setSavingCount(c => c + 1);
+    incrementSaving();
     try {
       const { error: deleteError } = await supabase
         .from("study_blocks")
@@ -1010,7 +1028,7 @@ export default function StudyDetail() {
         setError(deleteError.message);
       }
     } finally {
-      setSavingCount(c => c - 1);
+      decrementSaving();
     }
   };
 
@@ -1075,7 +1093,7 @@ export default function StudyDetail() {
       config: defaultConfigs[blockType]
     };
 
-    setSavingCount(c => c + 1);
+    incrementSaving();
     try {
       const { data: newBlock, error: insertError } = await supabase
         .from("study_blocks")
@@ -1091,7 +1109,7 @@ export default function StudyDetail() {
       // Добавляем новый блок в локальный state
       setBlocks(prevBlocks => [...prevBlocks, newBlock as StudyBlock].sort((a, b) => a.order_index - b.order_index));
     } finally {
-      setSavingCount(c => c - 1);
+      decrementSaving();
     }
   };
 
@@ -1149,13 +1167,13 @@ export default function StudyDetail() {
     setDraggedBlockId(null);
 
     // 2. Сохраняем в БД в фоне
-    setSavingCount(c => c + 1);
+    incrementSaving();
     try {
       for (const update of updates) {
         await supabase.from("study_blocks").update({ order_index: update.order_index }).eq("id", update.id);
       }
     } finally {
-      setSavingCount(c => c - 1);
+      decrementSaving();
     }
   };
 
@@ -1248,14 +1266,14 @@ export default function StudyDetail() {
       setIsEditingTitle(false);
       
       // 2. Сохраняем в БД в фоне
-      setSavingCount(c => c + 1);
+      incrementSaving();
       try {
         await supabase
           .from("studies")
           .update({ title: newTitle })
           .eq("id", studyId);
       } finally {
-        setSavingCount(c => c - 1);
+        decrementSaving();
       }
     } else {
       setEditedTitle(study.title);
@@ -2015,7 +2033,7 @@ export default function StudyDetail() {
           </div>
           
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowAddBlockModal(false); resetBlockForm(); }}>
+            <Button variant="outline" onClick={() => { setShowAddBlockModal(false); resetAllBlockForms(); }}>
               Отмена
             </Button>
             <Button onClick={handleAddBlock}>

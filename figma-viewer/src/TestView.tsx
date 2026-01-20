@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabaseClient";
+import { useViewerStore } from "./store";
 import { validateUUID } from "./utils/validation";
 import type { EventContract } from "./types/events";
 import type { Proto, Screen, Scene, Hotspot, OverlayAction, NestedFrame, Edge } from "./types/proto";
@@ -45,23 +46,34 @@ export default function TestView({
   const navigate = useNavigate();
   const params = useParams<{ prototypeId?: string; sessionId?: string }>();
   
-  const [proto, setProto] = useState<Proto | null>(null);
-  // currentRenderer будет установлен при загрузке прототипа
-  const [, setCurrentRenderer] = useState<"screen" | "scene">("screen");
-  const [currentScreen, setCurrentScreen] = useState<string | null>(null);
-  // КРИТИЧНО: Ref для актуального значения currentScreen (для использования в функциях без замыкания)
-  // Это необходимо, чтобы получать актуальное значение currentScreen в openOverlay и других функциях
+  // Store selectors
+  const {
+    proto,
+    currentScreen,
+    testViewLoading,
+    testViewError,
+    isEmptyState,
+    taskDescription,
+    actualSessionId,
+    debugOverlayEnabled,
+    showSuccessPopup,
+    setProto,
+    setCurrentScreen,
+    setTestViewLoading,
+    setTestViewError,
+    setIsEmptyState,
+    setTaskDescription,
+    setActualSessionId,
+    setDebugOverlayEnabled,
+    setShowSuccessPopup,
+  } = useViewerStore();
+
+  // Refs for functions without closure
   const currentScreenRef = useRef<string | null>(null);
-  // КРИТИЧНО: История переходов для обработки Action "BACK"
-  // Хранит последовательность экранов для возврата на предыдущий экран
   const screenHistoryRef = useRef<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isEmptyState, setIsEmptyState] = useState<boolean>(false); // НОВОЕ: Empty state когда нет prototypeId
-  const [taskDescription, setTaskDescription] = useState<string | null>(null);
-  const [actualSessionId, setActualSessionId] = useState<string | null>(propSessionId);
-  const [debugOverlayEnabled, setDebugOverlayEnabled] = useState<boolean>(false);
-  const [showSuccessPopup, setShowSuccessPopup] = useState<boolean>(false); // НОВОЕ: Попап "Вы успешно прошли задачу"
+  
+  // Local state for renderer (not shared)
+  const [, setCurrentRenderer] = useState<"screen" | "scene">("screen");
   
   // ДИАГНОСТИКА: Логируем изменения showSuccessPopup
   useEffect(() => {
@@ -142,7 +154,7 @@ export default function TestView({
   useEffect(() => {
     if (urlPrototypeId) {
       // Если прототип еще не загружен, загружаем его по urlPrototypeId
-      if (!proto && !loading) {
+      if (!proto && !testViewLoading) {
         console.log("TestView: Loading prototype from URL prototypeId:", urlPrototypeId);
         loadPrototypeByPrototypeId(urlPrototypeId);
       }
@@ -167,8 +179,8 @@ export default function TestView({
   // Загружаем прототип напрямую по prototypeId (когда sessionId еще не создан или пользователь вышел)
   // КРИТИЧНО: Эта функция должна работать БЕЗ авторизации - прототип доступен всем
   async function loadPrototypeByPrototypeId(prototypeId: string) {
-    setLoading(true);
-    setError(null);
+    setTestViewLoading(true);
+    setTestViewError(null);
 
     try {
       // Валидация prototypeId перед запросом к БД
@@ -287,9 +299,9 @@ export default function TestView({
 
     } catch (err) {
       console.error("Error loading prototype by prototypeId:", err);
-      setError(err instanceof Error ? err.message : "Ошибка загрузки прототипа");
+      setTestViewError(err instanceof Error ? err.message : "Ошибка загрузки прототипа");
     } finally {
-      setLoading(false);
+      setTestViewLoading(false);
     }
   }
 
@@ -1954,12 +1966,12 @@ export default function TestView({
         background: "#f5f5f7",
         padding: "20px"
       }}>
-        {loading && (
+        {testViewLoading && (
           <div style={{ marginBottom: "20px", color: "#666" }}>
             Загрузка прототипа...
           </div>
         )}
-        {error && (
+        {testViewError && (
           <div style={{ 
             marginBottom: "20px", 
             color: "#d32f2f", 
@@ -1968,7 +1980,7 @@ export default function TestView({
             borderRadius: "4px",
             maxWidth: "400px"
           }}>
-            {error}
+            {testViewError}
           </div>
         )}
       </div>

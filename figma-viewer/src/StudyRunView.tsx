@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { v4 as uuidv4 } from "uuid";
 import TestView from "./TestView.tsx";
+import { useViewerStore } from "./store";
 
 // ============= Компонент модального окна для изображений =============
 interface ImageModalProps {
@@ -1687,104 +1688,35 @@ export default function StudyRunView() {
   const params = useParams<{ token: string }>();
   const token = params.token || null;
 
-  const [studyData, setStudyData] = useState<StudyData | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
-  const [currentBlockIndex, setCurrentBlockIndex] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [currentBlockSessionId, setCurrentBlockSessionId] = useState<string | null>(null);
-  const [finished, setFinished] = useState(false);
+  // Store selectors
+  const {
+    studyData,
+    runId,
+    currentBlockIndex,
+    studyRunLoading,
+    studyRunError,
+    currentBlockSessionId,
+    finished,
+    setStudyData,
+    setRunId,
+    setCurrentBlockIndex,
+    setStudyRunLoading,
+    setStudyRunError,
+    setCurrentBlockSessionId,
+    setFinished,
+    loadStudyAndStartRun,
+    createSessionForBlock,
+  } = useViewerStore();
 
   useEffect(() => {
     if (!token) {
-      setError("Токен не указан в URL");
-      setLoading(false);
+      setStudyRunError("Токен не указан в URL");
+      setStudyRunLoading(false);
       return;
     }
-    loadStudyAndStartRun();
-  }, [token]);
-
-  const loadStudyAndStartRun = async () => {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const { data: studyDataResult, error: studyError } = await supabase.rpc("rpc_get_public_study", { p_token: token });
-
-      if (studyError) {
-        if (studyError.message?.includes("stopped")) {
-          setError("Тестирование завершено. Этот тест больше не принимает ответы.");
-        } else {
-          setError(`Ошибка загрузки теста: ${studyError.message}`);
-        }
-        setLoading(false);
-        return;
-      }
-
-      if (!studyDataResult) {
-        setError("Тест не найден или токен недействителен");
-        setLoading(false);
-        return;
-      }
-
-      setStudyData(studyDataResult as StudyData);
-
-      const clientMeta = {
-        user_agent: navigator.userAgent,
-        screen_width: window.screen.width,
-        screen_height: window.screen.height,
-        timestamp: new Date().toISOString()
-      };
-
-      const { data: runIdResult, error: runError } = await supabase.rpc("rpc_start_public_run", {
-        p_token: token,
-        p_client_meta: JSON.stringify(clientMeta)
-      });
-
-      if (runError) {
-        setError(`Ошибка создания прохождения: ${runError.message}`);
-        setLoading(false);
-        return;
-      }
-
-      if (!runIdResult) {
-        setError("Не удалось создать прохождение");
-        setLoading(false);
-        return;
-      }
-
-      setRunId(runIdResult as string);
-
-      const blocks = (studyDataResult as StudyData).blocks;
-      if (blocks.length > 0 && blocks[0].type === "prototype" && blocks[0].prototype_id) {
-        await createSessionForBlock(blocks[0].prototype_id, blocks[0].id, studyDataResult.study.id, runIdResult as string);
-      }
-    } catch (err) {
-      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createSessionForBlock = async (prototypeId: string, blockId: string, studyId: string, runIdParam: string) => {
-    try {
-      const newSessionId = uuidv4();
-      const { error: insertError } = await supabase.from("sessions").insert([{
-        id: newSessionId,
-        prototype_id: prototypeId,
-        user_id: null,
-        run_id: runIdParam,
-        block_id: blockId,
-        study_id: studyId
-      }]);
-
-      if (insertError) console.error("Error creating session:", insertError);
-      setCurrentBlockSessionId(newSessionId);
-    } catch (err) {
-      console.error("Unexpected error creating session:", err);
-    }
-  };
+    loadStudyAndStartRun(token);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]); // Functions from store are stable
 
   const handleNextBlock = useCallback(async () => {
     if (!studyData || !runId) return;
@@ -1807,7 +1739,8 @@ export default function StudyRunView() {
     if (nextBlock.type === "prototype" && nextBlock.prototype_id) {
       await createSessionForBlock(nextBlock.prototype_id, nextBlock.id, studyData.study.id, runId);
     }
-  }, [studyData, runId, currentBlockIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyData, runId, currentBlockIndex, createSessionForBlock]); // createSessionForBlock from store
 
   const handlePrototypeComplete = async () => {
     await handleNextBlock();
@@ -1895,16 +1828,16 @@ export default function StudyRunView() {
 
   // Рендеринг
 
-  if (loading) {
+  if (studyRunLoading) {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontSize: "18px", color: "#666" }}>Загрузка теста...</div>;
   }
 
-  if (error) {
+  if (studyRunError) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px" }}>
         <div style={{ maxWidth: "500px", padding: "24px", background: "#ffebee", color: "#c62828", borderRadius: "8px", textAlign: "center" }}>
           <h2 style={{ margin: "0 0 16px 0" }}>Ошибка</h2>
-          <p style={{ margin: 0 }}>{error}</p>
+          <p style={{ margin: 0 }}>{studyRunError}</p>
         </div>
       </div>
     );

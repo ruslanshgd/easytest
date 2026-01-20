@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
+import { useAppStore } from "./store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -118,196 +119,105 @@ export default function StudiesList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentFolderId = searchParams.get("folder");
   
-  const [studies, setStudies] = useState<Study[]>([]);
-  const [folders, setFolders] = useState<FolderType[]>([]);
-  const [currentFolderFolders, setCurrentFolderFolders] = useState<FolderWithCount[]>([]);
-  const [breadcrumbs, setBreadcrumbs] = useState<FolderType[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Store selectors
+  const {
+    // Studies state
+    studies,
+    folders,
+    currentFolderFolders,
+    breadcrumbs,
+    studiesLoading,
+    studyStats,
+    // UI state
+    error,
+    showCreateStudyModal,
+    showCreateFolderModal,
+    showRenameModal,
+    showRenameFolderModal,
+    showMoveModal,
+    showMoveFolderModal,
+    showDeleteDialog,
+    showDeleteFolderDialog,
+    showBulkMoveModal,
+    showBulkDeleteDialog,
+    newStudyTitle,
+    newFolderName,
+    renameTitle,
+    renameFolderName,
+    selectedStudies,
+    draggedItem,
+    dropTargetId,
+    isDropTargetRoot,
+    // Actions
+    setError,
+    clearError,
+    loadAllData,
+    getUserTeamId,
+    buildBreadcrumbs,
+    // Modal actions
+    openCreateStudyModal,
+    closeCreateStudyModal,
+    openCreateFolderModal,
+    closeCreateFolderModal,
+    openRenameModal,
+    closeRenameModal,
+    openRenameFolderModal,
+    closeRenameFolderModal,
+    openMoveModal,
+    closeMoveModal,
+    openMoveFolderModal,
+    closeMoveFolderModal,
+    openDeleteDialog,
+    closeDeleteDialog,
+    openDeleteFolderDialog,
+    closeDeleteFolderDialog,
+    openBulkMoveModal,
+    closeBulkMoveModal,
+    openBulkDeleteDialog,
+    closeBulkDeleteDialog,
+    // Form actions
+    setNewStudyTitle,
+    setNewFolderName,
+    setRenameTitle,
+    setRenameFolderName,
+    // Selection actions
+    toggleSelection,
+    toggleSelectAll,
+    clearSelection,
+    // Drag and drop actions
+    setDraggedItem,
+    setDropTargetId,
+    setIsDropTargetRoot,
+    resetDragState,
+  } = useAppStore();
+
+  // Ref для предотвращения повторных вызовов
+  const loadingRef = useRef(false);
+  const lastFolderIdRef = useRef<string | null | undefined>(undefined);
   
-  // Modals
-  const [showCreateStudyModal, setShowCreateStudyModal] = useState(false);
-  const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
-  const [showRenameModal, setShowRenameModal] = useState<string | null>(null);
-  const [showRenameFolderModal, setShowRenameFolderModal] = useState<string | null>(null);
-  const [showMoveModal, setShowMoveModal] = useState<string | null>(null);
-  const [showMoveFolderModal, setShowMoveFolderModal] = useState<string | null>(null);
-  const [showDeleteDialog, setShowDeleteDialog] = useState<Study | null>(null);
-  const [showDeleteFolderDialog, setShowDeleteFolderDialog] = useState<FolderWithCount | null>(null);
-  
-  // Form state
-  const [newStudyTitle, setNewStudyTitle] = useState("");
-  const [newFolderName, setNewFolderName] = useState("");
-  const [renameTitle, setRenameTitle] = useState("");
-  const [renameFolderName, setRenameFolderName] = useState("");
-  
-  // Selection state
-  const [selectedStudies, setSelectedStudies] = useState<Set<string>>(new Set());
-  const [showBulkMoveModal, setShowBulkMoveModal] = useState(false);
-  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
-
-  // Drag and drop state
-  const [draggedItem, setDraggedItem] = useState<{ type: "study" | "folder"; id: string } | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
-  const [isDropTargetRoot, setIsDropTargetRoot] = useState(false);
-  
-  // Stats for studies (blocks and sessions count)
-  const [studyStats, setStudyStats] = useState<Record<string, StudyStats>>({});
-
-  // Helper function to get team_id
-  const getUserTeamId = async (userId: string): Promise<string | null> => {
-    const { data } = await supabase
-      .from("team_members")
-      .select("team_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-    return data?.team_id || null;
-  };
-
-  // Build breadcrumbs chain from current folder to root
-  const buildBreadcrumbs = (folderId: string | null, allFolders: FolderType[]): FolderType[] => {
-    if (!folderId) return [];
-    
-    const chain: FolderType[] = [];
-    let currentId: string | null = folderId;
-    
-    while (currentId) {
-      const folder = allFolders.find(f => f.id === currentId);
-      if (folder) {
-        chain.unshift(folder);
-        currentId = folder.parent_id;
-      } else {
-        break;
-      }
-    }
-    
-    return chain;
-  };
-
-  // Count studies in a folder
-  const countStudiesInFolder = async (folderId: string): Promise<number> => {
-    const { count, error } = await supabase
-      .from("studies")
-      .select("*", { count: "exact", head: true })
-      .eq("folder_id", folderId);
-    
-    if (error) {
-      console.error("Error counting studies:", error);
-      return 0;
-    }
-    
-    return count || 0;
-  };
-
-  // Count subfolders in a folder
-  const countSubFolders = (folderId: string, allFolders: FolderType[]): number => {
-    return allFolders.filter(f => f.parent_id === folderId).length;
-  };
-
-  const loadData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError("Требуется авторизация");
-        setLoading(false);
-        return;
-      }
-
-      // Load all folders
-      const { data: foldersData, error: foldersError } = await supabase
-        .from("folders")
-        .select("*")
-        .order("name", { ascending: true });
-
-      if (foldersError) {
-        console.error("Error loading folders:", foldersError);
-      } else {
-        const allFolders = (foldersData || []) as FolderType[];
-        setFolders(allFolders);
-        setBreadcrumbs(buildBreadcrumbs(currentFolderId, allFolders));
-        
-        const currentLevelFolders = allFolders.filter(f => 
-          currentFolderId ? f.parent_id === currentFolderId : f.parent_id === null
-        );
-        
-        const foldersWithCounts: FolderWithCount[] = await Promise.all(
-          currentLevelFolders.map(async folder => ({
-            ...folder,
-            studiesCount: await countStudiesInFolder(folder.id),
-            subFoldersCount: countSubFolders(folder.id, allFolders)
-          }))
-        );
-        
-        setCurrentFolderFolders(foldersWithCounts);
-      }
-
-      // Load studies for current folder
-      let studiesQuery = supabase
-        .from("studies")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (currentFolderId) {
-        studiesQuery = studiesQuery.eq("folder_id", currentFolderId);
-      } else {
-        studiesQuery = studiesQuery.is("folder_id", null);
-      }
-
-      const { data: studiesData, error: studiesError } = await studiesQuery;
-
-      if (studiesError) {
-        console.error("Error loading studies:", studiesError);
-        setError(studiesError.message);
-        setLoading(false);
-        return;
-      }
-
-      const loadedStudies = (studiesData || []) as Study[];
-      setStudies(loadedStudies);
-      
-      // Load blocks and sessions count for each study
-      if (loadedStudies.length > 0) {
-        const studyIds = loadedStudies.map(s => s.id);
-        
-        // Load blocks for all studies at once
-        const { data: blocksData } = await supabase
-          .from("study_blocks")
-          .select("id, study_id, type, order_index")
-          .in("study_id", studyIds)
-          .order("order_index", { ascending: true });
-        
-        // Load sessions count for all studies at once
-        const { data: sessionsData } = await supabase
-          .from("sessions")
-          .select("study_id")
-          .in("study_id", studyIds);
-        
-        // Group by study_id
-        const stats: Record<string, StudyStats> = {};
-        for (const study of loadedStudies) {
-          const studyBlocks = (blocksData || []).filter(b => b.study_id === study.id) as StudyBlock[];
-          const studySessions = (sessionsData || []).filter(s => s.study_id === study.id);
-          stats[study.id] = {
-            blocks: studyBlocks,
-            sessionsCount: studySessions.length
-          };
-        }
-        setStudyStats(stats);
-      }
-    } catch (err) {
-      console.error("Unexpected error loading data:", err);
-      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
-    setSelectedStudies(new Set());
-  }, [currentFolderId]);
+    // Пропускаем, если folderId не изменился (кроме первого рендера)
+    if (lastFolderIdRef.current !== undefined && lastFolderIdRef.current === currentFolderId) {
+      console.log('StudiesList: useEffect skipped - folderId unchanged', { currentFolderId });
+      return;
+    }
+    
+    // Пропускаем, если уже загружаем
+    if (loadingRef.current) {
+      console.log('StudiesList: useEffect skipped - already loading');
+      return;
+    }
+    
+    console.log('StudiesList: useEffect running loadAllData', { currentFolderId });
+    lastFolderIdRef.current = currentFolderId;
+    loadingRef.current = true;
+    
+    loadAllData(currentFolderId).finally(() => {
+      loadingRef.current = false;
+    });
+    clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFolderId]); // Functions from store are stable, don't need to be in deps
 
   // Navigation
   const navigateToFolder = (folderId: string | null) => {
@@ -352,9 +262,8 @@ export default function StudiesList() {
         return;
       }
 
-      setShowCreateFolderModal(false);
-      setNewFolderName("");
-      await loadData();
+      closeCreateFolderModal();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error creating folder:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -395,8 +304,7 @@ export default function StudiesList() {
         return;
       }
 
-      setShowCreateStudyModal(false);
-      setNewStudyTitle("");
+      closeCreateStudyModal();
       
       if (data) {
         navigate(`/studies/${data.id}`);
@@ -423,9 +331,8 @@ export default function StudiesList() {
         return;
       }
 
-      setShowRenameFolderModal(null);
-      setRenameFolderName("");
-      await loadData();
+      closeRenameFolderModal();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error renaming folder:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -465,8 +372,8 @@ export default function StudiesList() {
         return;
       }
 
-      setShowMoveFolderModal(null);
-      await loadData();
+      closeMoveFolderModal();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error moving folder:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -501,8 +408,8 @@ export default function StudiesList() {
         navigateToFolder(folder.parent_id);
       }
 
-      setShowDeleteFolderDialog(null);
-      await loadData();
+      closeDeleteFolderDialog();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error deleting folder:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -525,9 +432,8 @@ export default function StudiesList() {
         return;
       }
 
-      setShowRenameModal(null);
-      setRenameTitle("");
-      await loadData();
+      closeRenameModal();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error renaming study:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -548,8 +454,8 @@ export default function StudiesList() {
         return;
       }
 
-      setShowMoveModal(null);
-      await loadData();
+      closeMoveModal();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error moving study:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -572,9 +478,9 @@ export default function StudiesList() {
         return;
       }
 
-      setShowBulkMoveModal(false);
-      setSelectedStudies(new Set());
-      await loadData();
+      closeBulkMoveModal();
+      clearSelection();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error moving studies:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -597,9 +503,9 @@ export default function StudiesList() {
         return;
       }
 
-      setShowBulkDeleteDialog(false);
-      setSelectedStudies(new Set());
-      await loadData();
+      closeBulkDeleteDialog();
+      clearSelection();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error deleting studies:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -654,7 +560,7 @@ export default function StudiesList() {
         await supabase.from("study_blocks").insert(newBlocks);
       }
 
-      await loadData();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error duplicating study:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -675,32 +581,17 @@ export default function StudiesList() {
         return;
       }
 
-      setShowDeleteDialog(null);
-      await loadData();
+      closeDeleteDialog();
+      await loadAllData(currentFolderId);
     } catch (err) {
       console.error("Unexpected error deleting study:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  // Toggle selection
-  const toggleSelection = (studyId: string) => {
-    const newSelection = new Set(selectedStudies);
-    if (newSelection.has(studyId)) {
-      newSelection.delete(studyId);
-    } else {
-      newSelection.add(studyId);
-    }
-    setSelectedStudies(newSelection);
-  };
-
-  // Select all
-  const toggleSelectAll = () => {
-    if (selectedStudies.size === studies.length) {
-      setSelectedStudies(new Set());
-    } else {
-      setSelectedStudies(new Set(studies.map(s => s.id)));
-    }
+  // Select all handler
+  const handleToggleSelectAll = () => {
+    toggleSelectAll(studies.map(s => s.id));
   };
 
   // Drag and drop handlers
@@ -711,9 +602,7 @@ export default function StudiesList() {
   };
 
   const handleDragEnd = () => {
-    setDraggedItem(null);
-    setDropTargetId(null);
-    setIsDropTargetRoot(false);
+    resetDragState();
   };
 
   const handleDragOverFolder = (e: React.DragEvent, folderId: string) => {
@@ -773,7 +662,7 @@ export default function StudiesList() {
       await handleMoveFolder(draggedItem.id, targetFolderId);
     }
     
-    setDraggedItem(null);
+    resetDragState();
   };
 
   const handleDropOnRoot = async (e: React.DragEvent) => {
@@ -791,12 +680,12 @@ export default function StudiesList() {
       await handleMoveFolder(draggedItem.id, null);
     }
     
-    setDraggedItem(null);
+    resetDragState();
   };
 
   const getStatusConfig = (status: string) => {
     const configs = {
-      draft: { label: "Черновик", variant: "secondary" as const },
+      draft: { label: "Не опубликован", variant: "secondary" as const },
       published: { label: "Опубликован", variant: "success" as const },
       stopped: { label: "Остановлен", variant: "secondary" as const }
     };
@@ -834,12 +723,30 @@ export default function StudiesList() {
   const hasFolders = folders.length > 0;
   const currentFolderName = breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1].name : null;
 
-  if (loading) {
+  if (studiesLoading) {
     return (
       <div className="container mx-auto p-6 max-w-6xl">
         <h1 className="text-2xl font-bold mb-6">Тесты</h1>
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </div>
+    );
+  }
+
+  // Показываем ошибку если она есть
+  if (error) {
+    return (
+      <div className="container mx-auto p-6 max-w-6xl">
+        <h1 className="text-2xl font-bold mb-6">Тесты</h1>
+        <div className="flex flex-col items-center justify-center py-12 gap-4">
+          <div className="text-destructive text-center">
+            <p className="font-medium">Ошибка загрузки данных</p>
+            <p className="text-sm text-muted-foreground mt-1">{error}</p>
+          </div>
+          <Button onClick={() => loadAllData(currentFolderId)} variant="outline">
+            Попробовать снова
+          </Button>
         </div>
       </div>
     );
@@ -851,19 +758,27 @@ export default function StudiesList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         {/* Breadcrumbs */}
         <nav className="flex items-center gap-1 flex-wrap">
-          <h1
-            onDragOver={breadcrumbs.length > 0 ? handleDragOverRoot : undefined}
-            onDragLeave={handleDragLeave}
-            onDrop={breadcrumbs.length > 0 ? handleDropOnRoot : undefined}
-            onClick={() => breadcrumbs.length > 0 && !draggedItem && navigateToFolder(null)}
-            className={cn(
-              "text-2xl font-bold transition-all rounded-lg px-2 py-1 -mx-2",
-              breadcrumbs.length > 0 && "cursor-pointer hover:text-primary",
-              isDropTargetRoot && "bg-primary/10 ring-2 ring-primary ring-dashed"
+          <div className="flex items-center gap-3">
+            <h1
+              onDragOver={breadcrumbs.length > 0 ? handleDragOverRoot : undefined}
+              onDragLeave={handleDragLeave}
+              onDrop={breadcrumbs.length > 0 ? handleDropOnRoot : undefined}
+              onClick={() => breadcrumbs.length > 0 && !draggedItem && navigateToFolder(null)}
+              className={cn(
+                "text-2xl font-bold transition-all rounded-lg px-2 py-1 -mx-2",
+                breadcrumbs.length > 0 && "cursor-pointer hover:text-primary",
+                isDropTargetRoot && "bg-primary/10 ring-2 ring-primary ring-dashed"
+              )}
+            >
+              Тесты
+            </h1>
+            {breadcrumbs.length === 0 && (
+              <Button onClick={openCreateStudyModal}>
+                <Plus className="h-4 w-4 mr-2" />
+                Тест
+              </Button>
             )}
-          >
-            Тесты
-          </h1>
+          </div>
           {breadcrumbs.map((folder, index) => {
             const isDropTarget = dropTargetId === folder.id;
             const isLast = index === breadcrumbs.length - 1;
@@ -888,25 +803,13 @@ export default function StudiesList() {
     );
           })}
         </nav>
-
-        {/* Action buttons */}
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowCreateFolderModal(true)}>
-            <FolderPlus className="h-4 w-4 mr-2" />
-            Папка
-          </Button>
-          <Button onClick={() => setShowCreateStudyModal(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Тест
-          </Button>
-        </div>
       </div>
 
       {/* Error message */}
       {error && (
         <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg mb-6 flex justify-between items-center">
           <span>{error}</span>
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>✕</Button>
+          <Button variant="ghost" size="sm" onClick={clearError}>✕</Button>
         </div>
       )}
 
@@ -916,16 +819,16 @@ export default function StudiesList() {
           <span className="text-sm font-medium">Выбрано: {selectedStudies.size}</span>
           <div className="flex gap-2">
             {hasFolders && (
-              <Button variant="outline" size="sm" onClick={() => setShowBulkMoveModal(true)}>
+              <Button variant="outline" size="sm" onClick={openBulkMoveModal}>
                 <FolderInput className="h-4 w-4 mr-2" />
                 Переместить
               </Button>
             )}
-            <Button variant="destructive" size="sm" onClick={() => setShowBulkDeleteDialog(true)}>
+            <Button variant="destructive" size="sm" onClick={openBulkDeleteDialog}>
               <Trash2 className="h-4 w-4 mr-2" />
               Удалить
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedStudies(new Set())}>
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
               Отменить
             </Button>
           </div>
@@ -983,7 +886,7 @@ export default function StudiesList() {
                           <DropdownMenuItem onClick={(e) => {
                             e.stopPropagation();
                             setRenameFolderName(folder.name);
-                            setShowRenameFolderModal(folder.id);
+                            openRenameFolderModal(folder.id);
                           }}>
                             <Pencil className="h-4 w-4 mr-2" />
                             Переименовать
@@ -991,7 +894,7 @@ export default function StudiesList() {
                           {folders.length > 1 && (
                             <DropdownMenuItem onClick={(e) => {
                               e.stopPropagation();
-                              setShowMoveFolderModal(folder.id);
+                              openMoveFolderModal(folder.id);
                             }}>
                               <FolderInput className="h-4 w-4 mr-2" />
                               Переместить
@@ -1002,7 +905,7 @@ export default function StudiesList() {
                             className="text-destructive"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setShowDeleteFolderDialog(folder);
+                              openDeleteFolderDialog(folder);
                             }}
                           >
                             <Trash2 className="h-4 w-4 mr-2" />
@@ -1015,23 +918,47 @@ export default function StudiesList() {
                 </Card>
               );
             })}
+            
+            {/* Add folder button in list */}
+            <Card
+              onClick={openCreateFolderModal}
+              className="cursor-pointer transition-all !border-2 !border-dashed !border-border rounded-xl shadow-none"
+            >
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-center">
+                  <div className="p-2 rounded-lg">
+                    <FolderPlus className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
       </div>
         </div>
       )}
 
       {/* Studies header with select all */}
-      {studies.length > 0 && (
+      {(studies.length > 0 || currentFolderName) && (
         <div className="flex justify-between items-center mb-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            Тесты {currentFolderName && `в папке "${currentFolderName}"`}
-          </h2>
-          <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
-            <Checkbox
-              checked={selectedStudies.size === studies.length && studies.length > 0}
-              onCheckedChange={toggleSelectAll}
-            />
-            Выбрать все
-          </label>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              Тесты {currentFolderName && `в папке "${currentFolderName}"`}
+            </h2>
+            {currentFolderName && (
+              <Button onClick={openCreateStudyModal} size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Тест
+              </Button>
+            )}
+          </div>
+          {studies.length > 0 && (
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
+              <Checkbox
+                checked={selectedStudies.size === studies.length && studies.length > 0}
+                onCheckedChange={handleToggleSelectAll}
+              />
+              Выбрать все
+            </label>
+          )}
         </div>
       )}
 
@@ -1053,11 +980,11 @@ export default function StudiesList() {
               </p>
         </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setShowCreateFolderModal(true)}>
+              <Button variant="outline" onClick={openCreateFolderModal}>
                 <FolderPlus className="h-4 w-4 mr-2" />
                 Папка
               </Button>
-              <Button onClick={() => setShowCreateStudyModal(true)}>
+              <Button onClick={openCreateStudyModal}>
                 <Plus className="h-4 w-4 mr-2" />
                 Тест
               </Button>
@@ -1067,7 +994,7 @@ export default function StudiesList() {
       ) : studies.length === 0 ? (
         <Card className="p-8 text-center">
           <p className="text-muted-foreground mb-4">В этой папке пока нет тестов</p>
-          <Button onClick={() => setShowCreateStudyModal(true)}>
+          <Button onClick={openCreateStudyModal}>
             <Plus className="h-4 w-4 mr-2" />
             Создать тест
           </Button>
@@ -1089,23 +1016,28 @@ export default function StudiesList() {
                 onDragStart={(e) => handleDragStart(e, "study", study.id)}
                 onDragEnd={handleDragEnd}
                 className={cn(
-                  "transition-all group",
+                  "transition-colors duration-200 group !shadow-none border-2 border-border hover:border-[#526ED3]",
                   isSelected && "ring-2 ring-primary",
                   isBeingDragged && "opacity-50"
                 )}
               >
                 <div className="flex items-center p-4 gap-4">
-                  {/* Checkbox & Drag handle */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Checkbox & Title */}
+                  <div 
+                    className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                    onClick={() => !draggedItem && navigate(`/studies/${study.id}`)}
+                  >
                     <Checkbox
                       checked={isSelected}
                       onCheckedChange={() => toggleSelection(study.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
-                    <GripVertical className="h-4 w-4 text-muted-foreground/40 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <span className="truncate">
+                      {study.title}
+                    </span>
                   </div>
                   
-                  {/* Block icons */}
+                  {/* Block icons - centered */}
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {blocks.length > 0 ? (
                       blocks.slice(0, 8).map((block, idx) => {
@@ -1134,21 +1066,6 @@ export default function StudiesList() {
                     )}
                   </div>
                   
-                  {/* Title & Status */}
-                  <div 
-                    className="flex-1 min-w-0 cursor-pointer"
-                    onClick={() => !draggedItem && navigate(`/studies/${study.id}`)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium truncate hover:text-primary transition-colors">
-                        {study.title}
-                      </span>
-                      <Badge variant={statusConfig.variant} className="flex-shrink-0">
-                        {statusConfig.label}
-                      </Badge>
-                    </div>
-                  </div>
-                  
                   {/* Sessions count */}
                   {sessionsCount > 0 && (
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-shrink-0">
@@ -1157,25 +1074,11 @@ export default function StudiesList() {
                     </div>
                   )}
                   
-                  {/* Date */}
-                  <div className="text-xs text-muted-foreground flex-shrink-0 w-24 text-right">
-                    {new Date(study.created_at).toLocaleDateString("ru-RU")}
-                  </div>
-                  
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenameTitle(study.title);
-                        setShowRenameModal(study.id);
-                      }}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
+                  {/* Status & Actions */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Badge variant={statusConfig.variant} className="flex-shrink-0 bg-transparent text-foreground font-normal">
+                      {statusConfig.label}
+                    </Badge>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -1188,7 +1091,7 @@ export default function StudiesList() {
                           Копировать
                         </DropdownMenuItem>
                         {hasFolders && (
-                          <DropdownMenuItem onClick={() => setShowMoveModal(study.id)}>
+                          <DropdownMenuItem onClick={() => openMoveModal(study.id)}>
                             <FolderInput className="h-4 w-4 mr-2" />
                             Переместить
                           </DropdownMenuItem>
@@ -1196,7 +1099,7 @@ export default function StudiesList() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem 
                           className="text-destructive"
-                          onClick={() => setShowDeleteDialog(study)}
+                          onClick={() => openDeleteDialog(study)}
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Удалить
@@ -1212,7 +1115,7 @@ export default function StudiesList() {
       )}
 
       {/* Create Study Modal */}
-      <Dialog open={showCreateStudyModal} onOpenChange={setShowCreateStudyModal}>
+      <Dialog open={showCreateStudyModal} onOpenChange={(open) => open ? openCreateStudyModal() : closeCreateStudyModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Создать тест</DialogTitle>
@@ -1238,7 +1141,7 @@ export default function StudiesList() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateStudyModal(false)}>
+            <Button variant="outline" onClick={closeCreateStudyModal}>
                 Отмена
             </Button>
             <Button onClick={handleCreateStudy} disabled={!newStudyTitle.trim()}>
@@ -1249,7 +1152,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Create Folder Modal */}
-      <Dialog open={showCreateFolderModal} onOpenChange={setShowCreateFolderModal}>
+      <Dialog open={showCreateFolderModal} onOpenChange={(open) => open ? openCreateFolderModal() : closeCreateFolderModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Создать папку</DialogTitle>
@@ -1275,7 +1178,7 @@ export default function StudiesList() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateFolderModal(false)}>
+            <Button variant="outline" onClick={closeCreateFolderModal}>
               Отмена
             </Button>
             <Button onClick={handleCreateFolder} disabled={!newFolderName.trim()}>
@@ -1286,7 +1189,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Rename Study Modal */}
-      <Dialog open={!!showRenameModal} onOpenChange={() => setShowRenameModal(null)}>
+      <Dialog open={!!showRenameModal} onOpenChange={(open) => open ? null : closeRenameModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Переименовать тест</DialogTitle>
@@ -1306,7 +1209,7 @@ export default function StudiesList() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRenameModal(null)}>
+            <Button variant="outline" onClick={closeRenameModal}>
                 Отмена
             </Button>
             <Button onClick={() => showRenameModal && handleRename(showRenameModal)} disabled={!renameTitle.trim()}>
@@ -1317,7 +1220,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Rename Folder Modal */}
-      <Dialog open={!!showRenameFolderModal} onOpenChange={() => setShowRenameFolderModal(null)}>
+      <Dialog open={!!showRenameFolderModal} onOpenChange={(open) => open ? null : closeRenameFolderModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Переименовать папку</DialogTitle>
@@ -1337,7 +1240,7 @@ export default function StudiesList() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRenameFolderModal(null)}>
+            <Button variant="outline" onClick={closeRenameFolderModal}>
               Отмена
             </Button>
             <Button onClick={() => showRenameFolderModal && handleRenameFolder(showRenameFolderModal)} disabled={!renameFolderName.trim()}>
@@ -1348,7 +1251,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Move Study Modal */}
-      <Dialog open={!!showMoveModal} onOpenChange={() => setShowMoveModal(null)}>
+      <Dialog open={!!showMoveModal} onOpenChange={(open) => open ? null : closeMoveModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Переместить тест</DialogTitle>
@@ -1372,7 +1275,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Move Folder Modal */}
-      <Dialog open={!!showMoveFolderModal} onOpenChange={() => setShowMoveFolderModal(null)}>
+      <Dialog open={!!showMoveFolderModal} onOpenChange={(open) => open ? null : closeMoveFolderModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Переместить папку</DialogTitle>
@@ -1404,7 +1307,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Bulk Move Modal */}
-      <Dialog open={showBulkMoveModal} onOpenChange={setShowBulkMoveModal}>
+      <Dialog open={showBulkMoveModal} onOpenChange={(open) => open ? openBulkMoveModal() : closeBulkMoveModal()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Переместить {selectedStudies.size} тест(ов)</DialogTitle>
@@ -1428,7 +1331,7 @@ export default function StudiesList() {
       </Dialog>
 
       {/* Delete Study Dialog */}
-      <AlertDialog open={!!showDeleteDialog} onOpenChange={() => setShowDeleteDialog(null)}>
+      <AlertDialog open={!!showDeleteDialog} onOpenChange={(open) => open ? null : closeDeleteDialog()}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить тест?</AlertDialogTitle>
@@ -1449,7 +1352,7 @@ export default function StudiesList() {
       </AlertDialog>
 
       {/* Delete Folder Dialog */}
-      <AlertDialog open={!!showDeleteFolderDialog} onOpenChange={() => setShowDeleteFolderDialog(null)}>
+      <AlertDialog open={!!showDeleteFolderDialog} onOpenChange={(open) => open ? null : closeDeleteFolderDialog()}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить папку?</AlertDialogTitle>
@@ -1470,7 +1373,7 @@ export default function StudiesList() {
       </AlertDialog>
 
       {/* Bulk Delete Dialog */}
-      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+      <AlertDialog open={showBulkDeleteDialog} onOpenChange={(open) => open ? openBulkDeleteDialog() : closeBulkDeleteDialog()}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить {selectedStudies.size} тест(ов)?</AlertDialogTitle>

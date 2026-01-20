@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { isValidUUID } from "./utils/validation";
+import { useAppStore } from "./store";
 
 interface AnalyticsProps {
   sessionId: string | null;
@@ -88,36 +89,86 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   // Приоритет: URL params > state > props > localStorage
   const selectedSessionId = params.sessionId || location.state?.sessionId || propSessionId || null;
   
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [sessionEvents, setSessionEvents] = useState<Record<string, SessionEvent[]>>({});
-  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
-  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [prototypes, setPrototypes] = useState<Record<string, Proto>>({}); // prototype_id -> Proto
-  const [prototypeTaskDescriptions, setPrototypeTaskDescriptions] = useState<Record<string, string | null>>({}); // prototype_id -> task_description
-  const [sessionPrototypeIds, setSessionPrototypeIds] = useState<Record<string, string>>({}); // session_id -> prototype_id
-  const [prototypeFlowIds, setPrototypeFlowIds] = useState<Record<string, string | null>>({}); // prototype_id -> flow_id (для фильтрации экранов)
-  const [heatmapFilterSessions, setHeatmapFilterSessions] = useState<Set<string>>(new Set()); // Фильтр хитмапа по сессиям (множественный выбор) - для глобального хитмапа
-  const [taskHeatmapFilterSessions, setTaskHeatmapFilterSessions] = useState<Record<string, Set<string>>>({}); // Фильтр хитмапа по сессиям для каждого task group (prototype_id -> Set<session_id>)
-  const [selectedHeatmapScreen, setSelectedHeatmapScreen] = useState<{ screen: Screen; proto: Proto; clicks: Array<{ x: number; y: number; count: number }> } | null>(null); // Выбранный экран для overlay
-  const [expandedTaskGroups, setExpandedTaskGroups] = useState<Set<string>>(new Set()); // Раскрытые группы заданий (prototype_id)
+  // Store selectors
+  const {
+    sessions,
+    sessionEvents,
+    expandedSessions,
+    selectedSessions,
+    analyticsLoading,
+    deleting,
+    prototypes,
+    prototypeTaskDescriptions,
+    sessionPrototypeIds,
+    prototypeFlowIds,
+    heatmapFilterSessions,
+    taskHeatmapFilterSessions,
+    selectedHeatmapScreen,
+    expandedTaskGroups,
+    setSessions,
+    setSessionEvents,
+    toggleSessionExpanded,
+    toggleSessionSelected,
+    selectAllSessions,
+    clearSessionSelection,
+    setAnalyticsLoading,
+    setDeleting,
+    setPrototypes,
+    setPrototypeTaskDescriptions,
+    setSessionPrototypeIds,
+    setPrototypeFlowIds,
+    setHeatmapFilterSessions,
+    setTaskHeatmapFilterSessions,
+    setSelectedHeatmapScreen,
+    toggleTaskGroupExpanded,
+    setExpandedSessions,
+  } = useAppStore();
+  
+  // Error handling from UI store
+  const { error, setError } = useAppStore();
 
   // Функция загрузки всех сессий
   // КРИТИЧНО: Загружаем только сессии для прототипов текущего пользователя
   const loadSessions = async () => {
-    setLoading(true);
+    setAnalyticsLoading(true);
     setError(null);
     console.log("Analytics: Loading sessions for current user's prototypes");
     
     try {
       // Сначала получаем текущего пользователя
-      const { data: { user } } = await supabase.auth.getUser();
+      let user = null;
+      try {
+        const result = await supabase.auth.getUser();
+        user = result.data?.user || null;
+        if (result.error) {
+          console.error("Analytics: Error getting user", result.error);
+          const errorName = (result.error as any)?.name || '';
+          const errorMessage = result.error.message || '';
+          if (errorName === 'AuthRetryableFetchError' || errorMessage.includes('Failed to fetch')) {
+            setError('Ошибка подключения к серверу. Проверьте интернет-соединение.');
+          } else {
+            setError("Требуется авторизация");
+          }
+          setAnalyticsLoading(false);
+          return;
+        }
+      } catch (fetchErr) {
+        console.error("Analytics: Network error getting user", fetchErr);
+        const errorMessage = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        const errorName = (fetchErr as any)?.name || '';
+        if (errorName === 'AuthRetryableFetchError' || errorMessage.includes('Failed to fetch')) {
+          setError('Ошибка подключения к серверу. Проверьте интернет-соединение.');
+        } else {
+          setError("Ошибка авторизации. Попробуйте обновить страницу.");
+        }
+        setAnalyticsLoading(false);
+        return;
+      }
+      
       if (!user) {
         console.error("Analytics: User not authenticated");
         setError("Требуется авторизация");
-        setLoading(false);
+        setAnalyticsLoading(false);
         return;
       }
 
@@ -129,8 +180,13 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
 
       if (prototypesError) {
         console.error("Analytics: Error loading user prototypes", prototypesError);
-        setError(prototypesError.message);
-        setLoading(false);
+        const errorMessage = prototypesError.message || '';
+        if (errorMessage.includes('Failed to fetch') || errorMessage.includes('fetch')) {
+          setError('Ошибка подключения к серверу. Проверьте интернет-соединение.');
+        } else {
+          setError(errorMessage || 'Ошибка загрузки прототипов');
+        }
+        setAnalyticsLoading(false);
         return;
       }
 
@@ -138,7 +194,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
         console.log("Analytics: No prototypes found for user");
         setSessions([]);
         setSessionEvents({});
-        setLoading(false);
+        setAnalyticsLoading(false);
         return;
       }
 
@@ -155,8 +211,13 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
 
       if (sessionsError) {
         console.error("Analytics: Error loading sessions", sessionsError);
-        setError(sessionsError.message);
-        setLoading(false);
+        const errorMessage = sessionsError.message || '';
+        if (errorMessage.includes('Failed to fetch') || errorMessage.includes('fetch')) {
+          setError('Ошибка подключения к серверу. Проверьте интернет-соединение.');
+        } else {
+          setError(errorMessage || 'Ошибка загрузки сессий');
+        }
+        setAnalyticsLoading(false);
         return;
       }
 
@@ -166,7 +227,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       if (sessionIds.length === 0) {
         setSessions([]);
         setSessionEvents({});
-        setLoading(false);
+        setAnalyticsLoading(false);
         return;
       }
 
@@ -178,8 +239,13 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
 
       if (eventsError) {
         console.error("Analytics: Error loading events", eventsError);
-        setError(eventsError.message);
-        setLoading(false);
+        const errorMessage = eventsError.message || '';
+        if (errorMessage.includes('Failed to fetch') || errorMessage.includes('fetch')) {
+          setError('Ошибка подключения к серверу. Проверьте интернет-соединение.');
+        } else {
+          setError(errorMessage || 'Ошибка загрузки событий');
+        }
+        setAnalyticsLoading(false);
         return;
       }
 
@@ -324,7 +390,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
 
       // Если есть selectedSessionId в URL, автоматически раскрываем эту сессию
       if (selectedSessionId && sessionsWithMetrics.some(s => s.id === selectedSessionId)) {
-        setExpandedSessions(new Set([selectedSessionId]));
+        // Раскрываем сессию через action
+        if (!expandedSessions.has(selectedSessionId)) {
+          toggleSessionExpanded(selectedSessionId);
+        }
         // Загружаем детали сессии
         const { data, error } = await supabase
           .from("events")
@@ -333,23 +402,44 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           .order("timestamp", { ascending: true });
         
         if (!error && data) {
-          setSessionEvents(prev => ({
-            ...prev,
+          setSessionEvents({
+            ...sessionEvents,
             [selectedSessionId]: data as SessionEvent[]
-          }));
+          });
         }
       }
     } catch (err) {
       console.error("Analytics: Unexpected error loading sessions", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setLoading(false);
+      setAnalyticsLoading(false);
     }
   };
 
+  // Ref для предотвращения повторных вызовов loadSessions
+  const loadingSessionsRef = useRef(false);
+  const lastSessionIdRef = useRef<string | null | undefined>(undefined);
+  const isInitialAuthCallRef = useRef(true);
+  
   // Загружаем список всех сессий
   useEffect(() => {
-    loadSessions();
+    // Пропускаем, если sessionId не изменился (кроме первого рендера)
+    if (lastSessionIdRef.current !== undefined && lastSessionIdRef.current === selectedSessionId) {
+      return;
+    }
+    
+    // Пропускаем, если уже загружаем
+    if (loadingSessionsRef.current) {
+      return;
+    }
+    
+    console.log("Analytics: useEffect running loadSessions", { selectedSessionId });
+    lastSessionIdRef.current = selectedSessionId;
+    loadingSessionsRef.current = true;
+    
+    loadSessions().finally(() => {
+      loadingSessionsRef.current = false;
+    });
   }, [selectedSessionId]);
 
   // КРИТИЧНО: Отслеживаем изменения авторизации для перезагрузки данных
@@ -358,10 +448,22 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Пропускаем первый вызов (он происходит сразу при подписке)
+      if (isInitialAuthCallRef.current) {
+        isInitialAuthCallRef.current = false;
+        console.log("Analytics: Skipping initial auth state change");
+        return;
+      }
+      
       console.log("Analytics: Auth state changed, reloading sessions", { hasSession: !!session });
       // Перезагружаем данные при изменении авторизации
       // RLS политики автоматически отфильтруют данные по текущему пользователю
-      loadSessions();
+      if (!loadingSessionsRef.current) {
+        loadingSessionsRef.current = true;
+        loadSessions().finally(() => {
+          loadingSessionsRef.current = false;
+        });
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -392,41 +494,28 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
 
     // ВСЕГДА обновляем события, даже если они уже были загружены
     // Это гарантирует актуальность данных при повторном прохождении теста
-    setSessionEvents(prev => ({
-      ...prev,
+    setSessionEvents({
+      ...sessionEvents,
       [sessionId]: (data || []) as SessionEvent[]
-    }));
+    });
     
     console.log("Analytics: Session details reloaded, events count:", (data || []).length);
   };
 
   const toggleSession = (sessionId: string) => {
-    const newExpanded = new Set(expandedSessions);
-    if (newExpanded.has(sessionId)) {
-      newExpanded.delete(sessionId);
-    } else {
-      newExpanded.add(sessionId);
+    const wasExpanded = expandedSessions.has(sessionId);
+    toggleSessionExpanded(sessionId);
+    if (!wasExpanded) {
       loadSessionDetails(sessionId);
     }
-    setExpandedSessions(newExpanded);
   };
 
   const toggleSelectSession = (sessionId: string) => {
-    const newSelected = new Set(selectedSessions);
-    if (newSelected.has(sessionId)) {
-      newSelected.delete(sessionId);
-    } else {
-      newSelected.add(sessionId);
-    }
-    setSelectedSessions(newSelected);
+    toggleSessionSelected(sessionId);
   };
 
   const toggleSelectAll = () => {
-    if (selectedSessions.size === sessions.length) {
-      setSelectedSessions(new Set());
-    } else {
-      setSelectedSessions(new Set(sessions.map(s => s.id)));
-    }
+    selectAllSessions(sessions.map(s => s.id));
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -520,16 +609,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       await loadSessions();
 
       // Очищаем состояние выбранных сессий
-      setSelectedSessions(prev => {
-        const newSelected = new Set(prev);
-        newSelected.delete(sessionId);
-        return newSelected;
-      });
-      setExpandedSessions(prev => {
-        const newExpanded = new Set(prev);
-        newExpanded.delete(sessionId);
-        return newExpanded;
-      });
+      toggleSessionSelected(sessionId);
+      if (expandedSessions.has(sessionId)) {
+        toggleSessionExpanded(sessionId);
+      }
     } catch (err) {
       console.error("Error deleting session:", err);
       setError(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -627,12 +710,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       await loadSessions();
 
       // Очищаем состояние выбранных сессий
-      setSelectedSessions(new Set());
-      setExpandedSessions(prev => {
-        const newExpanded = new Set(prev);
-        sessionIds.forEach(id => newExpanded.delete(id));
-        return newExpanded;
-      });
+      clearSessionSelection();
+      const newExpanded = new Set(expandedSessions);
+      sessionIds.forEach(id => newExpanded.delete(id));
+      setExpandedSessions(newExpanded);
     } catch (err) {
       console.error("Error deleting sessions:", err);
       setError(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
@@ -645,10 +726,17 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   // КРИТИЧНО: Загружаем только прототипы текущего пользователя
   const loadPrototypes = async (prototypeIds: string[]) => {
     try {
-      // Получаем текущего пользователя
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.error("Analytics: User not authenticated");
+      // Получаем текущего пользователя (с обработкой сетевых ошибок)
+      let user = null;
+      try {
+        const result = await supabase.auth.getUser();
+        user = result.data?.user || null;
+        if (result.error || !user) {
+          console.error("Analytics: Error or no user in loadPrototypes", result.error);
+          return;
+        }
+      } catch (fetchErr) {
+        console.error("Analytics: Network error in loadPrototypes", fetchErr);
         return;
       }
 
@@ -683,9 +771,9 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           }
           taskDescriptionsMap[p.id] = p.task_description || null;
         });
-        setPrototypes(prev => ({ ...prev, ...prototypesMap }));
-        setPrototypeTaskDescriptions(prev => ({ ...prev, ...taskDescriptionsMap }));
-        setPrototypeFlowIds(prev => ({ ...prev, ...flowIdMap }));
+        setPrototypes({ ...prototypes, ...prototypesMap });
+        setPrototypeTaskDescriptions({ ...prototypeTaskDescriptions, ...taskDescriptionsMap });
+        setPrototypeFlowIds({ ...prototypeFlowIds, ...flowIdMap });
       }
     } catch (err) {
       console.error("Analytics: Unexpected error loading prototypes", err);
@@ -1101,13 +1189,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   };
 
   const toggleTaskGroup = (prototypeId: string) => {
-    const newExpanded = new Set(expandedTaskGroups);
-    if (newExpanded.has(prototypeId)) {
-      newExpanded.delete(prototypeId);
-    } else {
-      newExpanded.add(prototypeId);
-    }
-    setExpandedTaskGroups(newExpanded);
+    toggleTaskGroupExpanded(prototypeId);
   };
 
   const deleteAllSessions = async () => {
@@ -1201,7 +1283,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       await loadSessions();
 
       // Очищаем состояние
-      setSelectedSessions(new Set());
+      clearSessionSelection();
       setExpandedSessions(new Set());
     } catch (err) {
       console.error("Error deleting all sessions:", err);
@@ -1262,7 +1344,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     color: "white"
   });
 
-  if (loading) {
+  if (analyticsLoading) {
     return (
       <div style={containerStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>

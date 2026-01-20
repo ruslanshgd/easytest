@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { translateAuthError } from "../utils/errorMessages";
 import { Button } from "@/components/ui/button";
@@ -6,14 +5,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, ArrowLeft, Loader2 } from "lucide-react";
+import { useAppStore } from "../store";
 
 export default function Auth() {
-  const [email, setEmail] = useState("");
-  const [otpCode, setOtpCode] = useState("");
-  const [step, setStep] = useState<"email" | "code">("email");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const {
+    email,
+    otpCode,
+    step,
+    loading,
+    error,
+    message,
+    setEmail,
+    setOtpCode,
+    setStep,
+    setLoading,
+    setError,
+    setMessage,
+    resetForm,
+  } = useAppStore();
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();

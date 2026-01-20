@@ -19,5 +19,37 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   );
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Диагностика: проверяем формат URL (только в development)
+if (import.meta.env.DEV) {
+  console.log('🔍 Supabase Configuration Check:');
+  console.log('  - URL:', SUPABASE_URL ? `${SUPABASE_URL.substring(0, 30)}...` : '❌ MISSING');
+  console.log('  - Anon Key:', SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 20)}...` : '❌ MISSING');
+  
+  // Проверяем, что URL начинается с https://
+  if (SUPABASE_URL && !SUPABASE_URL.startsWith('https://')) {
+    console.warn('⚠️ WARNING: SUPABASE_URL should start with https://');
+  }
+  
+  // Проверяем, что URL заканчивается на .supabase.co
+  if (SUPABASE_URL && !SUPABASE_URL.includes('.supabase.co')) {
+    console.warn('⚠️ WARNING: SUPABASE_URL should contain .supabase.co');
+  }
+}
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+  // Добавляем retry для сетевых ошибок
+  db: {
+    schema: 'public',
+  },
+  global: {
+    headers: {
+      'x-client-info': 'figma-analytics@1.0.0',
+    },
+  },
+});
 
