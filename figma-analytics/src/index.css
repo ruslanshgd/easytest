@@ -2,7 +2,7 @@
 
 @theme {
   /* Font */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
   
   /* Radius */
@@ -13,25 +13,28 @@
   
   /* Notion-inspired Light Theme */
   --color-background: #ffffff;
-  --color-foreground: #1f1f1f;
+  --color-foreground: rgba(25, 28, 48, 0.9); /* Основной текст: #191C30 90% */
   
   --color-card: #ffffff;
-  --color-card-foreground: #1f1f1f;
+  --color-card-foreground: rgba(25, 28, 48, 0.9);
   
   --color-popover: #ffffff;
-  --color-popover-foreground: #1f1f1f;
+  --color-popover-foreground: rgba(25, 28, 48, 0.9);
   
-  /* Accent — единственный яркий цвет (Notion blue) */
-  --color-primary: #2383e2;
+  /* Accent — единственный яркий цвет */
+  --color-primary: #526ED3;
   --color-primary-foreground: #ffffff;
+  --color-primary-hover: #6C86E2;
+  --color-primary-active: #314692;
+  --color-primary-disabled: rgba(82, 110, 211, 0.56);
   
   /* Secondary — warm gray */
   --color-secondary: #f7f7f5;
-  --color-secondary-foreground: #1f1f1f;
+  --color-secondary-foreground: rgba(25, 28, 48, 0.9);
   
   /* Muted */
   --color-muted: #f7f7f5;
-  --color-muted-foreground: #6b6b6b;
+  --color-muted-foreground: rgba(27, 31, 59, 0.65); /* Вторичные подписи, лейблы, плейсхолдеры: #1B1F3B 65% */
   
   /* Accent (same as primary for consistency) */
   --color-accent: #f7f7f5;
@@ -43,8 +46,26 @@
   
   /* Border */
   --color-border: #EDEDED;
-  --color-input: #e5e5e3;
-  --color-ring: #2383e2;
+  --color-input: #E0E0E0; /* Border для полей ввода */
+  --color-ring: #526ED3;
+  
+  /* Input/Textarea Typography */
+  --input-label-fs: 13px;
+  --input-label-lh: 20px;
+  --input-label-fw: 400;
+  --input-label-ls: 0px;
+  --input-label-color: rgba(27, 31, 59, 0.65); /* #1B1F3B 65% */
+  
+  --input-label-floating-fs: 11px;
+  --input-label-floating-lh: 16px;
+  --input-label-floating-fw: 400;
+  --input-label-floating-ls: 0.4px;
+  
+  --input-value-fs: 13px;
+  --input-value-lh: 20px;
+  --input-value-fw: 400;
+  --input-value-ls: 0px;
+  --input-value-color: rgba(25, 28, 48, 0.9); /* #191C30 90% */
   
   /* Semantic colors for badges */
   --color-success: #0f7b6c;
@@ -66,6 +87,55 @@
   /* Smooth focus transitions */
   *:focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+  
+  /* Button typography from design */
+  button {
+    font-weight: 800;
+    font-size: 13px;
+    line-height: 20px;
+  }
+  
+  /* Headings typography from design */
+  h2 {
+    font-weight: 800;
+    font-size: 15px;
+    line-height: 24px;
+  }
+  
+  /* Textarea styling from design */
+  textarea {
+    box-sizing: border-box;
+    min-height: 44px;
+    width: 100%;
+    padding: 12px 12px 8px 16px;
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    box-shadow: 0px 2px 3px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 24px;
+    color: rgba(25, 28, 48, 0.9);
+    resize: vertical;
+  }
+  
+  textarea::placeholder {
+    color: rgba(27, 31, 59, 0.65);
+    font-size: 15px;
+    line-height: 24px;
+  }
+  
+  textarea:focus {
+    outline: none;
+    ring: 1px;
+    ring-color: var(--color-ring);
+  }
+  
+  textarea:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 }
 

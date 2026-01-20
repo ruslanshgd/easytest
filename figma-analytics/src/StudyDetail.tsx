@@ -8,6 +8,8 @@ import StudyShareTab from "./components/StudyShareTab";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { FloatingInput } from "@/components/ui/floating-input";
+import { FloatingTextarea } from "@/components/ui/floating-textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,6 +37,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { 
   Layers, 
@@ -62,6 +70,7 @@ import {
   ChevronRight,
   CheckCircle2,
   Image as ImageIcon,
+  ImagePlus,
   type LucideIcon
 } from "lucide-react";
 
@@ -232,6 +241,8 @@ export default function StudyDetail() {
   const [prototypes, setPrototypes] = useState<Prototype[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
+  const [originalBlocksSnapshot, setOriginalBlocksSnapshot] = useState<string>("");
   
   const isSaving = savingCount > 0;
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -569,6 +580,15 @@ export default function StudyDetail() {
       }
 
       setBlocks(blocksData || []);
+      
+      // Сохраняем snapshot блоков для отслеживания изменений
+      if (studyData.status === "published") {
+        setOriginalBlocksSnapshot(JSON.stringify(blocksData || []));
+        setHasUnpublishedChanges(false);
+      } else {
+        setOriginalBlocksSnapshot("");
+        setHasUnpublishedChanges(false);
+      }
 
       const { data: prototypesData } = await supabase
         .from("prototypes")
@@ -626,6 +646,16 @@ export default function StudyDetail() {
       setEditedTitle(study.title);
     }
   }, [study?.title]);
+
+  // Отслеживание изменений в опубликованном тесте
+  useEffect(() => {
+    if (study?.status === "published" && originalBlocksSnapshot) {
+      const currentSnapshot = JSON.stringify(blocks);
+      setHasUnpublishedChanges(currentSnapshot !== originalBlocksSnapshot);
+    } else {
+      setHasUnpublishedChanges(false);
+    }
+  }, [blocks, study?.status, originalBlocksSnapshot]);
 
   const handlePublish = async () => {
     if (!study || !studyId) return;
@@ -1032,6 +1062,43 @@ export default function StudyDetail() {
     }
   };
 
+  const handleDuplicateBlock = async (blockId: string) => {
+    if (!studyId || study?.status !== "draft") return;
+
+    const blockToDuplicate = blocks.find(b => b.id === blockId);
+    if (!blockToDuplicate) return;
+
+    const maxOrderIndex = blocks.length > 0 ? Math.max(...blocks.map(b => b.order_index)) : -1;
+
+    const blockData: any = {
+      study_id: studyId,
+      type: blockToDuplicate.type,
+      order_index: maxOrderIndex + 1,
+      prototype_id: blockToDuplicate.prototype_id,
+      instructions: blockToDuplicate.instructions,
+      config: blockToDuplicate.config
+    };
+
+    incrementSaving();
+    try {
+      const { data: newBlock, error: insertError } = await supabase
+        .from("study_blocks")
+        .insert([blockData])
+        .select()
+        .single();
+
+      if (insertError || !newBlock) {
+        setError(insertError?.message || "Ошибка дублирования блока");
+        return;
+      }
+
+      // Добавляем новый блок в локальный state
+      setBlocks(prevBlocks => [...prevBlocks, newBlock as StudyBlock].sort((a, b) => a.order_index - b.order_index));
+    } finally {
+      decrementSaving();
+    }
+  };
+
   // Быстрое добавление блока с дефолтными значениями
   const handleQuickAddBlock = async (blockType: BlockType) => {
     if (!studyId || study?.status !== "draft") return;
@@ -1311,9 +1378,9 @@ export default function StudyDetail() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-[#F6F6F6]">
       {/* Top Header */}
-      <div className="border-b border-border bg-background px-4 py-2">
+      <div className="border-b border-border bg-[#F6F6F6] px-6 py-3">
         <div className="flex items-center justify-between">
           {/* Left: Back + Title */}
           <div className="flex items-center gap-3">
@@ -1339,7 +1406,7 @@ export default function StudyDetail() {
                 />
               ) : (
                 <h1 
-                  className="text-base font-medium cursor-pointer hover:bg-muted px-2 py-1 rounded transition-colors"
+                  className="text-[15px] font-medium leading-6 cursor-pointer hover:bg-muted px-2 py-1 rounded transition-colors"
                   onClick={() => {
                     setEditedTitle(study.title);
                     setIsEditingTitle(true);
@@ -1348,7 +1415,25 @@ export default function StudyDetail() {
                   {study.title}
                 </h1>
               )}
-              <Badge variant={status.variant}>{status.label}</Badge>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div 
+                      className={cn(
+                        "w-2 h-2 rounded-full flex-shrink-0",
+                        study.status === "published" 
+                          ? (hasUnpublishedChanges ? "bg-orange-500 cursor-help" : "bg-green-500")
+                          : "bg-gray-400"
+                      )}
+                    />
+                  </TooltipTrigger>
+                  {study.status === "published" && hasUnpublishedChanges && (
+                    <TooltipContent>
+                      <p>В вашем тесте есть неопубликованные изменения</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
               {isSaving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
                   Сохранение...
@@ -1358,7 +1443,7 @@ export default function StudyDetail() {
           </div>
 
           {/* Center: Tabs */}
-          <div className="flex gap-1">
+          <div className="flex gap-2">
             {[
               { key: "builder", label: "Тест" },
               { key: "share", label: "Пригласить респондентов" },
@@ -1368,9 +1453,9 @@ export default function StudyDetail() {
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as any)}
                 className={cn(
-                  "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+                  "px-4 py-1.5 text-[13px] font-extrabold leading-5 rounded-xl transition-colors",
                   activeTab === tab.key 
-                    ? "bg-primary/10 text-primary" 
+                    ? "bg-primary text-white" 
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 )}
               >
@@ -1396,9 +1481,6 @@ export default function StudyDetail() {
                 Остановить
               </Button>
             )}
-            <Button variant="ghost" size="sm" className="text-destructive" onClick={handleDelete}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
           </div>
         </div>
       </div>
@@ -1414,11 +1496,12 @@ export default function StudyDetail() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left Sidebar - Block List */}
-        <div className="w-64 border-r border-border bg-muted/30 flex flex-col">
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div className="w-80 border-r border-border bg-[#F6F6F6] flex flex-col">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {blocks.map((block, index) => {
               const typeInfo = getBlockTypeInfo(block.type);
               const IconComponent = typeInfo.Icon;
+              const fullBlockName = getBlockShortName(block, index);
               
               return (
                 <div
@@ -1428,48 +1511,81 @@ export default function StudyDetail() {
                   onDragOver={handleDragOver}
                   onDrop={() => handleDrop(block.id)}
                   className={cn(
-                    "flex items-center gap-2 p-3 rounded-lg transition-all group",
-                    "bg-background border border-border hover:border-primary/30",
+                    "flex items-center gap-2 p-2 rounded-xl transition-all group",
+                    "bg-white border border-border shadow-[0px_2px_3px_rgba(0,0,0,0.1)] hover:border-primary/30",
                     draggedBlockId === block.id && "opacity-50 border-dashed border-primary"
                   )}
                 >
                   {isEditable && (
-                    <GripVertical className="h-4 w-4 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-move" />
+                    <GripVertical className="h-4 w-4 text-muted-foreground cursor-move" />
                   )}
-                  <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <span className="text-xs font-semibold text-primary">{index + 1}</span>
-                  </div>
-                  <div className="w-6 h-6 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+                  <span className="text-[15px] font-medium leading-6">{index + 1}.</span>
+                  <div className="w-5 h-5 rounded bg-[#EDEDED] flex items-center justify-center flex-shrink-0">
                     <IconComponent size={14} className="text-muted-foreground" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">
-                      {getBlockShortName(block, index)}
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div 
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const blockElement = document.getElementById(`block-${block.id}`);
+                            if (blockElement) {
+                              blockElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                          }}
+                        >
+                          <div className="text-[15px] font-medium leading-6 truncate">
+                            {fullBlockName}
+                          </div>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{fullBlockName}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  {isEditable && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDuplicateBlock(block.id);
+                        }}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteBlock(block.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
             
-            {blocks.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                Нет блоков
-              </div>
-            )}
-          </div>
-          
-          {/* Add Block Button with Dropdown */}
-          {isEditable && (
-            <div className="p-3 border-t border-border">
+            {/* Add Block Button with Dropdown */}
+            {isEditable && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-start gap-2"
+                  <button 
+                    className="flex items-center gap-2 w-full p-2 rounded-xl transition-colors text-primary hover:text-[var(--color-primary-hover)] active:text-[var(--color-primary-active)]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span className="text-sm">Добавить блок</span>
-                  </Button>
+                    <span className="text-[15px] font-medium leading-6">Блок</span>
+                  </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-56">
                   {BLOCK_TYPES.map(type => {
@@ -1487,14 +1603,20 @@ export default function StudyDetail() {
                   })}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
-          )}
+            )}
+            
+            {blocks.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                Нет блоков
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden bg-[#F6F6F6]">
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-6 bg-[#F6F6F6]">
             {/* Builder Tab */}
             {activeTab === "builder" && (
               <div className="max-w-3xl mx-auto space-y-4">
@@ -1508,19 +1630,20 @@ export default function StudyDetail() {
 
                 {/* Все блоки с инлайн редактированием */}
                 {blocks.map((block, index) => (
-                  <InlineBlockEditor
-                    key={block.id}
-                    block={block}
-                    index={index}
-                    isEditable={isEditable}
-                    prototypes={prototypes}
-                    onDelete={() => handleDeleteBlock(block.id)}
-                    onUpdateBlock={updateBlockInState}
-                    onDragStart={() => handleDragStart(block.id)}
-                    onDragOver={handleDragOver}
-                    onDrop={() => handleDrop(block.id)}
-                    isDragging={draggedBlockId === block.id}
-                  />
+                  <div key={block.id} id={`block-${block.id}`}>
+                    <InlineBlockEditor
+                      block={block}
+                      index={index}
+                      isEditable={isEditable}
+                      prototypes={prototypes}
+                      onDelete={() => handleDeleteBlock(block.id)}
+                      onUpdateBlock={updateBlockInState}
+                      onDragStart={() => handleDragStart(block.id)}
+                      onDragOver={handleDragOver}
+                      onDrop={() => handleDrop(block.id)}
+                      isDragging={draggedBlockId === block.id}
+                    />
+                  </div>
                 ))}
 
                 {/* Пустое состояние */}
@@ -2240,6 +2363,113 @@ function InlineBlockEditor({
 
   // Локальный state для текстовых полей (для мгновенного отображения)
   const [localText, setLocalText] = useState<Record<string, string>>({});
+  const [localImage, setLocalImage] = useState<{ file: File | null; url: string } | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  
+  // Локальные состояния для card_sorting
+  const [localCards, setLocalCards] = useState<Array<{ id: string; title: string; description: string; imageUrl: string }>>([]);
+  const [localCategories, setLocalCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [showCardsModal, setShowCardsModal] = useState(false);
+  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
+  const [cardsShowImages, setCardsShowImages] = useState(false);
+  const [cardsShowDescriptions, setCardsShowDescriptions] = useState(false);
+  
+  // Локальные состояния для tree_testing
+  const [localTree, setLocalTree] = useState<TreeTestingNode[]>([]);
+  const [localTreeCorrectAnswers, setLocalTreeCorrectAnswers] = useState<string[]>([]);
+  const [localTreeExpandedNodes, setLocalTreeExpandedNodes] = useState<Set<string>>(new Set());
+  
+  // Состояние для drag-and-drop изображений в блоке предпочтение
+  const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(null);
+  
+  // Инициализация карточек и категорий из block.config
+  useEffect(() => {
+    if (block.type === "card_sorting") {
+      const cards = block.config?.cards || [];
+      const categories = block.config?.categories || [];
+      setLocalCards(cards);
+      setLocalCategories(categories);
+      // Показываем опции, если есть хотя бы одна карточка с изображением/описанием
+      setCardsShowImages(cards.length > 0 && cards.some((c: any) => c.imageUrl));
+      setCardsShowDescriptions(cards.length > 0 && cards.some((c: any) => c.description));
+    }
+    if (block.type === "tree_testing") {
+      const tree = block.config?.tree || [];
+      const correctAnswers = block.config?.correctAnswers || [];
+      setLocalTree(tree);
+      setLocalTreeCorrectAnswers(correctAnswers);
+      // Развернуть все узлы при загрузке
+      const allIds = new Set<string>();
+      const collectIds = (nodes: TreeTestingNode[]) => {
+        nodes.forEach(node => {
+          if (node.children.length > 0) {
+            allIds.add(node.id);
+            collectIds(node.children);
+          }
+        });
+      };
+      collectIds(tree);
+      setLocalTreeExpandedNodes(allIds);
+    }
+  }, [block.id, block.config?.cards, block.config?.categories, block.config?.tree, block.config?.correctAnswers]);
+
+  // Функция загрузки изображения
+  const uploadImage = async (file: File): Promise<string | null> => {
+    try {
+      setUploadingImage(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return null;
+      }
+
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("study-images")
+        .upload(fileName, file);
+
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        return null;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("study-images")
+        .getPublicUrl(fileName);
+
+      return publicUrl;
+    } catch (err) {
+      console.error("Upload error:", err);
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Получить значение изображения
+  const getImageValue = () => {
+    if (localImage) {
+      return localImage;
+    }
+    const imageUrl = block.config?.imageUrl;
+    return imageUrl ? { file: null, url: imageUrl } : { file: null, url: "" };
+  };
+
+  // Обработка загрузки изображения
+  const handleImageChange = async (file: File | null, url: string = "") => {
+    if (file) {
+      setLocalImage({ file, url: "" });
+      const uploadedUrl = await uploadImage(file);
+      if (uploadedUrl) {
+        setLocalImage({ file: null, url: uploadedUrl });
+        updateConfig("imageUrl", uploadedUrl);
+      }
+    } else {
+      setLocalImage({ file: null, url: "" });
+      updateConfig("imageUrl", undefined);
+    }
+  };
 
   // Получить значение текстового поля (локальное или из block.config)
   const getTextValue = (key: string, fallback: string = "") => {
@@ -2294,6 +2524,7 @@ function InlineBlockEditor({
   // Сброс локального state при изменении block извне
   useEffect(() => {
     setLocalText({});
+    setLocalImage(null);
   }, [block.id]);
 
   return (
@@ -2303,34 +2534,26 @@ function InlineBlockEditor({
       onDragOver={onDragOver}
       onDrop={onDrop}
       className={cn(
-        "transition-all",
+        "transition-all border border-border shadow-[0px_2px_3px_rgba(0,0,0,0.1)] rounded-[20px] group",
         isDragging && "opacity-50 border-dashed border-primary"
       )}
     >
-      <CardContent className="p-4">
+      <CardContent className="p-0">
         {/* Заголовок блока */}
-        <div className="flex items-center gap-3 mb-4">
-          {isEditable && (
-            <div className="cursor-grab active:cursor-grabbing">
-              <GripVertical className="h-5 w-5 text-muted-foreground/50 hover:text-muted-foreground" />
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <span className="text-[15px] font-medium leading-6">{index + 1}.</span>
+            <div className="w-5 h-5 rounded bg-[#EDEDED] flex items-center justify-center flex-shrink-0">
+              <IconComponent size={14} className="text-muted-foreground" />
             </div>
-          )}
-          
-          <div className="flex items-center gap-3 flex-1">
-            <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <span className="text-sm font-semibold text-primary">{index + 1}</span>
-            </div>
-            <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
-              <IconComponent size={16} className="text-muted-foreground" />
-            </div>
-            <span className="font-medium text-sm">{typeInfo.label}</span>
+            <span className="text-[15px] font-medium leading-6">{typeInfo.label}</span>
           </div>
 
           {isEditable && (
             <Button 
               variant="ghost" 
               size="sm" 
-              className="text-destructive hover:text-destructive h-8 w-8 p-0"
+              className="text-destructive hover:text-destructive h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={onDelete}
             >
               <Trash2 className="h-4 w-4" />
@@ -2339,12 +2562,12 @@ function InlineBlockEditor({
         </div>
 
         {/* Поля редактирования в зависимости от типа */}
-        <div className="space-y-3 pl-11">
+        <div className="space-y-3 p-5">
           {/* Прототип */}
           {block.type === "prototype" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Прототип</Label>
+                <Label className="text-[15px] font-medium leading-6 mb-1 block">Прототип</Label>
                 {prototypes.length === 0 ? (
                   <div className="text-sm text-warning bg-warning/10 p-2 rounded">
                     Нет прототипов. Создайте через Figma плагин.
@@ -2366,14 +2589,13 @@ function InlineBlockEditor({
                 )}
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Инструкции</Label>
-                <textarea 
+                <FloatingTextarea 
+                  label="Инструкции"
                   value={getInstructionsValue()} 
                   onChange={e => updateInstructions(e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите инструкции для респондента"
                   rows={2}
-                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
                 />
               </div>
             </>
@@ -2383,14 +2605,67 @@ function InlineBlockEditor({
           {block.type === "open_question" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
-                <textarea 
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleImageChange(null)}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-start cursor-pointer group">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && isEditable) {
+                                handleImageChange(file);
+                              }
+                            }}
+                            disabled={!isEditable || uploadingImage}
+                          />
+                          {uploadingImage ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : (
+                            <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <FloatingTextarea 
+                  label="Вопрос"
                   value={getTextValue("question")} 
                   onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите текст вопроса"
                   rows={2}
-                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
                 />
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -2406,8 +2681,8 @@ function InlineBlockEditor({
 
           {/* UMUX Lite */}
           {block.type === "umux_lite" && (
-            <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
-              📋 Стандартный опрос UMUX Lite из 2 вопросов по шкале 1-7
+            <div className="text-[15px] font-medium leading-6 text-foreground">
+              Стандартный опрос UMUX Lite из 2 вопросов по шкале 1-7
             </div>
           )}
 
@@ -2415,22 +2690,74 @@ function InlineBlockEditor({
           {block.type === "choice" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
-                <Input 
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleImageChange(null)}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-start cursor-pointer group">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && isEditable) {
+                                handleImageChange(file);
+                              }
+                            }}
+                            disabled={!isEditable || uploadingImage}
+                          />
+                          {uploadingImage ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : (
+                            <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <FloatingInput 
+                  label="Вопрос"
                   value={getTextValue("question")} 
                   onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите вопрос"
-                  className="text-sm"
                 />
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Варианты ответа</Label>
                 <div className="space-y-2">
                   {(block.config.options || []).map((opt: string, i: number) => (
                     <div key={i} className="flex gap-2 items-center">
                       <span className="text-xs text-muted-foreground w-5">{String.fromCharCode(65 + i)}.</span>
-                      <Input 
+                      <FloatingInput 
                         value={opt} 
                         onChange={e => {
                           const newOpts = [...(block.config.options || [])];
@@ -2438,8 +2765,8 @@ function InlineBlockEditor({
                           updateConfig("options", newOpts);
                         }}
                         disabled={!isEditable}
-                        className="text-sm flex-1"
-                        placeholder="Вариант ответа"
+                        className="flex-1"
+                        placeholder="Введите вариант ответа"
                       />
                       {isEditable && (block.config.options?.length || 0) > 2 && (
                         <Button 
@@ -2502,24 +2829,76 @@ function InlineBlockEditor({
           {block.type === "context" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Заголовок</Label>
-                <Input 
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleImageChange(null)}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-start cursor-pointer group">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && isEditable) {
+                                handleImageChange(file);
+                              }
+                            }}
+                            disabled={!isEditable || uploadingImage}
+                          />
+                          {uploadingImage ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : (
+                            <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <FloatingInput 
+                  label="Заголовок"
                   value={getTextValue("title")} 
                   onChange={e => updateConfigText("title", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите заголовок"
-                  className="text-sm"
                 />
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Описание</Label>
-                <textarea 
+                <FloatingTextarea 
+                  label="Описание"
                   value={getTextValue("description")} 
                   onChange={e => updateConfigText("description", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите описание"
                   rows={3}
-                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
                 />
               </div>
             </>
@@ -2529,13 +2908,66 @@ function InlineBlockEditor({
           {block.type === "scale" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
-                <Input 
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleImageChange(null)}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-start cursor-pointer group">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && isEditable) {
+                                handleImageChange(file);
+                              }
+                            }}
+                            disabled={!isEditable || uploadingImage}
+                          />
+                          {uploadingImage ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : (
+                            <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <FloatingInput 
+                  label="Вопрос"
                   value={getTextValue("question")} 
                   onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите вопрос"
-                  className="text-sm"
                 />
               </div>
               <div className="flex gap-2">
@@ -2562,7 +2994,7 @@ function InlineBlockEditor({
               {block.config.scaleType === "numeric" && (
                 <div className="flex gap-4 items-center">
                   <div className="flex items-center gap-2">
-                    <Label className="text-xs text-muted-foreground">От:</Label>
+                    <Label className="text-[15px] font-medium leading-6">От:</Label>
                     <select 
                       value={block.config.min || 1}
                       onChange={e => updateConfig("min", parseInt(e.target.value))}
@@ -2573,7 +3005,7 @@ function InlineBlockEditor({
                     </select>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Label className="text-xs text-muted-foreground">До:</Label>
+                    <Label className="text-[15px] font-medium leading-6">До:</Label>
                     <select 
                       value={block.config.max || 5}
                       onChange={e => updateConfig("max", parseInt(e.target.value))}
@@ -2600,14 +3032,117 @@ function InlineBlockEditor({
           {block.type === "preference" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Вопрос</Label>
-                <Input 
+                <FloatingInput 
+                  label="Вопрос"
                   value={getTextValue("question")} 
                   onChange={e => updateConfigText("question", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите вопрос"
-                  className="text-sm"
                 />
+              </div>
+              <div>
+                <div className="space-y-2">
+                  {(block.config.images || []).map((imgUrl: string, i: number) => {
+                    const handleImageDragStart = (e: React.DragEvent, index: number) => {
+                      if (!isEditable || !imgUrl) return;
+                      setDraggedImageIndex(index);
+                      e.dataTransfer.effectAllowed = "move";
+                    };
+
+                    const handleImageDragOver = (e: React.DragEvent) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                    };
+
+                    const handleImageDrop = (e: React.DragEvent, targetIndex: number) => {
+                      e.preventDefault();
+                      if (draggedImageIndex === null || draggedImageIndex === targetIndex || !isEditable) return;
+                      
+                      const newImages = [...(block.config.images || [])];
+                      const [draggedItem] = newImages.splice(draggedImageIndex, 1);
+                      newImages.splice(targetIndex, 0, draggedItem);
+                      updateConfig("images", newImages);
+                      setDraggedImageIndex(null);
+                    };
+
+                    return (
+                      <div 
+                        key={i} 
+                        className={cn(
+                          "flex gap-2 items-center",
+                          draggedImageIndex === i && "opacity-50"
+                        )}
+                        draggable={isEditable && !!imgUrl}
+                        onDragStart={(e) => handleImageDragStart(e, i)}
+                        onDragOver={handleImageDragOver}
+                        onDrop={(e) => handleImageDrop(e, i)}
+                        onDragEnd={() => setDraggedImageIndex(null)}
+                      >
+                        {isEditable && <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab flex-shrink-0" />}
+                        <span className="text-xs text-muted-foreground w-5 flex-shrink-0">{String.fromCharCode(65 + i)}.</span>
+                        {imgUrl ? (
+                          <div className="flex items-center gap-3 flex-1 p-2 border border-border rounded-xl bg-muted/30">
+                            <img 
+                              src={imgUrl} 
+                              alt={`Preview ${i + 1}`} 
+                              className="w-16 h-12 object-cover rounded-md border border-border flex-shrink-0"
+                            />
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  const newImages = [...(block.config.images || [])];
+                                  newImages.splice(i, 1);
+                                  updateConfig("images", newImages);
+                                }}
+                                className="text-destructive hover:text-destructive h-8 w-8 p-0 ml-auto"
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                        ) : (
+                          <label className="flex items-center justify-start cursor-pointer group flex-1">
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const uploadedUrl = await uploadImage(file);
+                                  if (uploadedUrl) {
+                                    const newImages = [...(block.config.images || [])];
+                                    newImages[i] = uploadedUrl;
+                                    updateConfig("images", newImages);
+                                  }
+                                }
+                              }}
+                              disabled={!isEditable || uploadingImage}
+                            />
+                            {uploadingImage ? (
+                              <span className="text-xs text-muted-foreground">...</span>
+                            ) : (
+                              <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                            )}
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {isEditable && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => updateConfig("images", [...(block.config.images || []), ""])}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Добавить вариант ответа
+                    </Button>
+                  )}
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
@@ -2635,9 +3170,16 @@ function InlineBlockEditor({
                   Попарное сравнение
                 </button>
               </div>
-              <div className="text-xs text-muted-foreground">
-                {(block.config.images?.length || 0)} изображений загружено
-              </div>
+              {block.config.comparisonType === "all" && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox 
+                    checked={block.config.shuffle || false}
+                    onCheckedChange={(checked) => updateConfig("shuffle", checked)}
+                    disabled={!isEditable}
+                  />
+                  <span>Перемешивать варианты ответа</span>
+                </label>
+              )}
             </>
           )}
 
@@ -2645,18 +3187,71 @@ function InlineBlockEditor({
           {block.type === "five_seconds" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Инструкция</Label>
-                <textarea 
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleImageChange(null)}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-start cursor-pointer group">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && isEditable) {
+                                handleImageChange(file);
+                              }
+                            }}
+                            disabled={!isEditable || uploadingImage}
+                          />
+                          {uploadingImage ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : (
+                            <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <FloatingTextarea 
+                  label="Инструкция"
                   value={getTextValue("instruction")} 
                   onChange={e => updateConfigText("instruction", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите инструкцию"
                   rows={2}
-                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
                 />
               </div>
               <div className="flex items-center gap-4">
-                <Label className="text-xs text-muted-foreground">Время показа:</Label>
+                <Label className="text-[15px] font-medium leading-6">Время показа:</Label>
                 <div className="flex items-center gap-2">
                   <input 
                     type="range" 
@@ -2670,9 +3265,6 @@ function InlineBlockEditor({
                   <span className="text-sm font-medium">{block.config.duration || 5} сек</span>
                 </div>
               </div>
-              {block.config.imageUrl && (
-                <div className="text-xs text-muted-foreground">✓ Изображение загружено</div>
-              )}
             </>
           )}
 
@@ -2680,72 +3272,338 @@ function InlineBlockEditor({
           {block.type === "card_sorting" && (
             <>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Задание</Label>
-                <textarea 
+                <FloatingTextarea 
+                  label="Задание"
                   value={getTextValue("task")} 
                   onChange={e => updateConfigText("task", e.target.value)}
                   disabled={!isEditable}
                   placeholder="Введите задание"
                   rows={2}
-                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
                 />
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => isEditable && updateConfig("sortingType", "closed")}
-                  disabled={!isEditable}
-                  className={cn(
-                    "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
-                    block.config.sortingType === "closed"
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border hover:border-primary/50"
+              
+              {/* Карточки */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[15px] font-medium leading-6">Карточки</h3>
+                  {isEditable && (
+                    <button
+                      onClick={() => setShowCardsModal(true)}
+                      className="flex items-center gap-1 text-primary hover:text-[var(--color-primary-hover)] transition-colors text-[13px] font-medium"
+                    >
+                      {localCards.filter(c => c.title.trim()).length === 0 ? (
+                        <>
+                          <Plus className="h-4 w-4" />
+                          Добавить
+                        </>
+                      ) : (
+                        <>
+                          <Pencil className="h-4 w-4" />
+                          Редактировать
+                        </>
+                      )}
+                    </button>
                   )}
-                >
-                  Закрытая
-                </button>
-                <button
-                  onClick={() => isEditable && updateConfig("sortingType", "open")}
-                  disabled={!isEditable}
-                  className={cn(
-                    "px-3 py-1.5 text-xs rounded-md border transition-colors flex-1",
-                    block.config.sortingType === "open"
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border hover:border-primary/50"
+                </div>
+                {localCards.filter(c => c.title.trim()).length === 0 ? (
+                  <div className="text-sm text-muted-foreground mb-2">Карточки не добавлены</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {localCards.filter(c => c.title.trim()).length} карточек
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox 
+                      checked={block.config.shuffleCards || false}
+                      onCheckedChange={(checked) => updateConfig("shuffleCards", checked)}
+                      disabled={!isEditable}
+                    />
+                    <span>Перемешивать карточки</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox 
+                      checked={block.config.allowPartialSort || false}
+                      onCheckedChange={(checked) => updateConfig("allowPartialSort", checked)}
+                      disabled={!isEditable}
+                    />
+                    <span>Разрешить не сортировать все карточки</span>
+                  </label>
+                  {block.config.allowPartialSort && (
+                    <div className="text-xs text-muted-foreground ml-6">
+                      Если эта опция включена, респондент сможет завершить сортировку, даже если не все карточки отсортированы.
+                    </div>
                   )}
-                >
-                  Открытая
-                </button>
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">
-                {block.config.cards?.length || 0} карточек • {block.config.categories?.length || 0} категорий
+              
+              {/* Категории */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[15px] font-medium leading-6">Категории</h3>
+                  {isEditable && (
+                    <button
+                      onClick={() => setShowCategoriesModal(true)}
+                      className="flex items-center gap-1 text-primary hover:text-[var(--color-primary-hover)] transition-colors text-[13px] font-medium"
+                    >
+                      {localCategories.filter(c => c.name.trim()).length === 0 ? (
+                        <>
+                          <Plus className="h-4 w-4" />
+                          Добавить
+                        </>
+                      ) : (
+                        <>
+                          <Pencil className="h-4 w-4" />
+                          Редактировать
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                {localCategories.filter(c => c.name.trim()).length === 0 ? (
+                  <div className="text-sm text-muted-foreground mb-2">Категории не добавлены</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {localCategories.filter(c => c.name.trim()).length} категорий
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox 
+                      checked={block.config.shuffleCategories || false}
+                      onCheckedChange={(checked) => updateConfig("shuffleCategories", checked)}
+                      disabled={!isEditable}
+                    />
+                    <span>Перемешивать категории</span>
+                  </label>
+                </div>
               </div>
+              
+              {/* Модальное окно для карточек */}
+              <Dialog open={showCardsModal} onOpenChange={setShowCardsModal}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Карточки ({localCards.filter(c => c.title.trim()).length})</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox 
+                          checked={cardsShowImages}
+                          onCheckedChange={setCardsShowImages}
+                        />
+                        <span>Добавить изображения</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox 
+                          checked={cardsShowDescriptions}
+                          onCheckedChange={setCardsShowDescriptions}
+                        />
+                        <span>Добавить описания</span>
+                      </label>
+                    </div>
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                      {localCards.map((card, i) => (
+                        <div key={card.id} className="flex gap-3 items-start p-3 border border-border rounded-xl">
+                          {cardsShowImages && (
+                            <div className="flex-shrink-0">
+                              {card.imageUrl ? (
+                                <div className="relative">
+                                  <img 
+                                    src={card.imageUrl} 
+                                    alt="" 
+                                    className="w-16 h-16 object-cover rounded-md border border-border"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={async () => {
+                                      const newCards = [...localCards];
+                                      newCards[i] = { ...newCards[i], imageUrl: "" };
+                                      setLocalCards(newCards);
+                                    }}
+                                    className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 p-0"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <label className="flex items-center justify-center w-16 h-16 border-2 border-dashed border-border rounded-md cursor-pointer hover:border-primary/50 transition-colors bg-muted/30">
+                                  <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const uploadedUrl = await uploadImage(file);
+                                        if (uploadedUrl) {
+                                          const newCards = [...localCards];
+                                          newCards[i] = { ...newCards[i], imageUrl: uploadedUrl };
+                                          setLocalCards(newCards);
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                                </label>
+                              )}
+                            </div>
+                          )}
+                          <div className="flex-1 space-y-2">
+                            <FloatingInput
+                              label="Название карточки"
+                              value={card.title}
+                              onChange={e => {
+                                const newCards = [...localCards];
+                                newCards[i] = { ...newCards[i], title: e.target.value };
+                                setLocalCards(newCards);
+                              }}
+                              placeholder="Введите название карточки"
+                            />
+                            {cardsShowDescriptions && (
+                              <FloatingInput
+                                label="Описание"
+                                value={card.description}
+                                onChange={e => {
+                                  const newCards = [...localCards];
+                                  newCards[i] = { ...newCards[i], description: e.target.value };
+                                  setLocalCards(newCards);
+                                }}
+                                placeholder="Введите описание"
+                              />
+                            )}
+                          </div>
+                          {localCards.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setLocalCards(localCards.filter((_, j) => j !== i));
+                              }}
+                              className="text-destructive hover:text-destructive flex-shrink-0"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setLocalCards([...localCards, { id: crypto.randomUUID(), title: "", description: "", imageUrl: "" }])}
+                      className="w-full"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Карточка
+                    </Button>
+                  </div>
+                  <DialogFooter>
+                    <Button 
+                      onClick={() => {
+                        const validCards = localCards.filter(c => c.title.trim()).map(c => ({
+                          id: c.id,
+                          title: c.title.trim(),
+                          description: cardsShowDescriptions ? (c.description || "") : "",
+                          imageUrl: cardsShowImages ? (c.imageUrl || "") : ""
+                        }));
+                        updateConfig("cards", validCards);
+                        setShowCardsModal(false);
+                      }}
+                    >
+                      Готово
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              
+              {/* Модальное окно для категорий */}
+              <Dialog open={showCategoriesModal} onOpenChange={setShowCategoriesModal}>
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Категории ({localCategories.filter(c => c.name.trim()).length})</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                      {localCategories.map((cat, i) => (
+                        <div key={cat.id} className="flex gap-2 items-center">
+                          <FloatingInput
+                            label="Название категории"
+                            value={cat.name}
+                            onChange={e => {
+                              const newCats = [...localCategories];
+                              newCats[i] = { ...newCats[i], name: e.target.value };
+                              setLocalCategories(newCats);
+                            }}
+                            placeholder="Введите название категории"
+                            className="flex-1"
+                          />
+                          {localCategories.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setLocalCategories(localCategories.filter((_, j) => j !== i));
+                              }}
+                              className="text-destructive hover:text-destructive flex-shrink-0"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setLocalCategories([...localCategories, { id: crypto.randomUUID(), name: "" }])}
+                      className="w-full"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Категория
+                    </Button>
+                  </div>
+                  <DialogFooter>
+                    <Button 
+                      onClick={() => {
+                        const validCategories = localCategories.filter(c => c.name.trim()).map(c => ({
+                          id: c.id,
+                          name: c.name.trim()
+                        }));
+                        updateConfig("categories", validCategories);
+                        setShowCategoriesModal(false);
+                      }}
+                    >
+                      Готово
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </>
           )}
 
           {/* Тестирование дерева */}
           {block.type === "tree_testing" && (
-            <>
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Задание</Label>
-                <textarea 
-                  value={getTextValue("task")} 
-                  onChange={e => updateConfigText("task", e.target.value)}
-                  disabled={!isEditable}
-                  placeholder="Введите задание"
-                  rows={2}
-                  className="w-full p-2 text-sm border border-border rounded-md bg-background resize-none"
-                />
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {(() => {
-                  const countNodes = (nodes: any[]): number => {
-                    if (!nodes) return 0;
-                    return nodes.reduce((acc, n) => acc + 1 + countNodes(n.children || []), 0);
-                  };
-                  return `${countNodes(block.config.tree || [])} категорий • ${block.config.correctAnswers?.length || 0} верных ответов`;
-                })()}
-              </div>
-            </>
+            <TreeTestingEditorInline
+              task={getTextValue("task")}
+              setTask={(task) => updateConfigText("task", task)}
+              description={getTextValue("description")}
+              setDescription={(desc) => updateConfigText("description", desc)}
+              tree={localTree}
+              setTree={(tree) => {
+                setLocalTree(tree);
+                updateConfig("tree", tree);
+              }}
+              correctAnswers={localTreeCorrectAnswers}
+              setCorrectAnswers={(answers) => {
+                setLocalTreeCorrectAnswers(answers);
+                updateConfig("correctAnswers", answers);
+              }}
+              allowSkip={block.config?.allowSkip || false}
+              setAllowSkip={(allow) => updateConfig("allowSkip", allow)}
+              expandedNodes={localTreeExpandedNodes}
+              setExpandedNodes={setLocalTreeExpandedNodes}
+              isEditable={isEditable}
+            />
           )}
         </div>
       </CardContent>
@@ -2760,6 +3618,340 @@ function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): (...
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => fn(...args), delay);
   };
+}
+
+// ============= Компонент TreeTestingEditorInline (встроенный в блок) =============
+interface TreeTestingEditorInlineProps {
+  task: string;
+  setTask: (task: string) => void;
+  description: string;
+  setDescription: (desc: string) => void;
+  tree: TreeTestingNode[];
+  setTree: (tree: TreeTestingNode[]) => void;
+  correctAnswers: string[];
+  setCorrectAnswers: (answers: string[]) => void;
+  allowSkip: boolean;
+  setAllowSkip: (allow: boolean) => void;
+  expandedNodes: Set<string>;
+  setExpandedNodes: (nodes: Set<string>) => void;
+  isEditable: boolean;
+}
+
+function TreeTestingEditorInline({
+  task,
+  setTask,
+  description,
+  setDescription,
+  tree,
+  setTree,
+  correctAnswers,
+  setCorrectAnswers,
+  allowSkip,
+  setAllowSkip,
+  expandedNodes,
+  setExpandedNodes,
+  isEditable
+}: TreeTestingEditorInlineProps) {
+  
+  // Обновить узел в дереве
+  const updateNode = (nodeId: string, updates: Partial<TreeTestingNode>, nodes: TreeTestingNode[]): TreeTestingNode[] => {
+    return nodes.map(node => {
+      if (node.id === nodeId) {
+        return { ...node, ...updates };
+      }
+      if (node.children.length > 0) {
+        return { ...node, children: updateNode(nodeId, updates, node.children) };
+      }
+      return node;
+    });
+  };
+
+  // Добавить дочерний узел
+  const addChildNode = (parentId: string, nodes: TreeTestingNode[]): TreeTestingNode[] => {
+    return nodes.map(node => {
+      if (node.id === parentId) {
+        const newChild: TreeTestingNode = { id: crypto.randomUUID(), name: "", children: [] };
+        return { ...node, children: [...node.children, newChild] };
+      }
+      if (node.children.length > 0) {
+        return { ...node, children: addChildNode(parentId, node.children) };
+      }
+      return node;
+    });
+  };
+
+  // Удалить узел
+  const removeNode = (nodeId: string, nodes: TreeTestingNode[]): TreeTestingNode[] => {
+    return nodes
+      .filter(node => node.id !== nodeId)
+      .map(node => ({
+        ...node,
+        children: removeNode(nodeId, node.children)
+      }));
+  };
+
+  // Добавить узел на верхнем уровне
+  const addRootNode = () => {
+    setTree([...tree, { id: crypto.randomUUID(), name: "", children: [] }]);
+  };
+
+  // Переключить развёрнутость узла
+  const toggleExpanded = (nodeId: string) => {
+    const newExpanded = new Set(expandedNodes);
+    if (newExpanded.has(nodeId)) {
+      newExpanded.delete(nodeId);
+    } else {
+      newExpanded.add(nodeId);
+    }
+    setExpandedNodes(newExpanded);
+  };
+
+  // Переключить верный ответ
+  const toggleCorrectAnswer = (nodeId: string) => {
+    if (correctAnswers.includes(nodeId)) {
+      setCorrectAnswers(correctAnswers.filter(id => id !== nodeId));
+    } else {
+      setCorrectAnswers([...correctAnswers, nodeId]);
+    }
+  };
+
+  // Развернуть все
+  const expandAll = () => {
+    const allIds = new Set<string>();
+    const collect = (nodes: TreeTestingNode[]) => {
+      nodes.forEach(node => {
+        if (node.children.length > 0) {
+          allIds.add(node.id);
+          collect(node.children);
+        }
+      });
+    };
+    collect(tree);
+    setExpandedNodes(allIds);
+  };
+
+  // Свернуть все
+  const collapseAll = () => {
+    setExpandedNodes(new Set());
+  };
+
+  // Рекурсивный рендер узла дерева
+  const renderTreeNode = (node: TreeTestingNode, depth: number = 0) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedNodes.has(node.id);
+    const isCorrect = correctAnswers.includes(node.id);
+
+    return (
+      <div key={node.id} className="ml-6" style={{ marginLeft: depth * 24 }}>
+        <div className="flex items-center gap-2 mb-2 py-1">
+          {/* Кнопка развернуть/свернуть */}
+          <button
+            onClick={() => hasChildren && isEditable && toggleExpanded(node.id)}
+            disabled={!isEditable}
+            className={cn(
+              "w-6 h-6 flex items-center justify-center bg-transparent border-none",
+              hasChildren && isEditable ? "cursor-pointer opacity-100" : "cursor-default opacity-30"
+            )}
+          >
+            {hasChildren ? (
+              isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />
+            ) : (
+              <span className="w-4" />
+            )}
+          </button>
+
+          {/* Drag handle */}
+          {isEditable && <GripVertical size={16} className="text-muted-foreground cursor-grab" />}
+
+          {/* Инпут названия */}
+          <FloatingInput
+            value={node.name}
+            onChange={e => setTree(updateNode(node.id, { name: e.target.value }, tree))}
+            placeholder="Введите название категории"
+            disabled={!isEditable}
+            className="flex-1"
+          />
+
+          {/* Кнопка "Отметить как верный" */}
+          {isEditable && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toggleCorrectAnswer(node.id)}
+              className={cn(
+                "h-8 px-3",
+                isCorrect && "bg-green-50 border-green-500 text-green-700"
+              )}
+            >
+              <CheckCircle2 size={16} className={cn("mr-1", isCorrect ? "text-green-500" : "text-muted-foreground")} />
+              {isCorrect && <span className="text-xs">Верный</span>}
+            </Button>
+          )}
+
+          {/* Кнопка добавить подкатегорию */}
+          {isEditable && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => {
+                setTree(addChildNode(node.id, tree));
+                const newExpanded = new Set(expandedNodes);
+                newExpanded.add(node.id);
+                setExpandedNodes(newExpanded);
+              }}
+              className="h-8 w-8"
+            >
+              <Plus size={16} />
+            </Button>
+          )}
+
+          {/* Кнопка удалить */}
+          {isEditable && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setTree(removeNode(node.id, tree));
+                if (correctAnswers.includes(node.id)) {
+                  setCorrectAnswers(correctAnswers.filter(id => id !== node.id));
+                }
+              }}
+              className="h-8 w-8 text-destructive hover:text-destructive"
+            >
+              <Trash2 size={16} />
+            </Button>
+          )}
+        </div>
+
+        {/* Дочерние узлы */}
+        {hasChildren && isExpanded && (
+          <div>
+            {node.children.map(child => renderTreeNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Получить список верных ответов для отображения
+  const getCorrectAnswerPaths = (): string[] => {
+    const paths: string[] = [];
+    
+    const findPath = (nodes: TreeTestingNode[], currentPath: string[] = []): void => {
+      nodes.forEach(node => {
+        const nodePath = [...currentPath, node.name].filter(Boolean);
+        if (correctAnswers.includes(node.id) && node.name.trim()) {
+          paths.push(nodePath.join(" › "));
+        }
+        if (node.children.length > 0) {
+          findPath(node.children, nodePath);
+        }
+      });
+    };
+    
+    findPath(tree);
+    return paths;
+  };
+
+  return (
+    <>
+      {/* Задание */}
+      <div>
+        <FloatingTextarea 
+          label="Задание"
+          value={task} 
+          onChange={e => setTask(e.target.value)}
+          disabled={!isEditable}
+          placeholder="Где бы вы искали товар?"
+          rows={2}
+        />
+      </div>
+
+      {/* Описание */}
+      <div>
+        <FloatingTextarea
+          label="Описание"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          disabled={!isEditable}
+          placeholder="Добавить дополнительный контекст для задания"
+          rows={2}
+        />
+      </div>
+
+      {/* Дерево */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[15px] font-medium leading-6">Дерево</h3>
+          {isEditable && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={collapseAll}>
+                Свернуть все
+              </Button>
+              <Button variant="outline" size="sm" onClick={expandAll}>
+                Развернуть все
+              </Button>
+            </div>
+          )}
+        </div>
+        
+        {/* Дерево узлов */}
+        <div className="border border-border rounded-xl p-4 bg-muted/30 max-h-[400px] overflow-y-auto">
+          {tree.length === 0 ? (
+            <div className="text-sm text-muted-foreground text-center py-8">
+              Дерево не настроено
+            </div>
+          ) : (
+            <>
+              {tree.map(node => renderTreeNode(node))}
+              {isEditable && (
+                <Button 
+                  variant="outline" 
+                  onClick={addRootNode}
+                  className="w-full mt-2"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Добавить категорию
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Верные ответы */}
+      {correctAnswers.length > 0 && (
+        <div>
+          <Label className="text-[15px] font-medium leading-6 mb-2 block">
+            {correctAnswers.length === 1 ? "Верный ответ" : "Верные ответы"}
+          </Label>
+          <div className="space-y-2">
+            {getCorrectAnswerPaths().map((path, i) => (
+              <div 
+                key={i} 
+                className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl"
+              >
+                <CheckCircle2 size={18} className="text-green-500 flex-shrink-0" />
+                <span className="text-sm">{path}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Опция разрешить пропуск */}
+      <div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <Checkbox 
+            checked={allowSkip}
+            onCheckedChange={setAllowSkip}
+            disabled={!isEditable}
+          />
+          <span>Разрешить пропустить задание</span>
+        </label>
+      </div>
+    </>
+  );
 }
 
 // ============= Компонент TreeTestingEditor =============
@@ -2924,19 +4116,11 @@ function TreeTestingEditor({
           <GripVertical size={16} style={{ color: "#999", cursor: "grab" }} />
 
           {/* Инпут названия */}
-          <input
-            type="text"
+          <FloatingInput
             value={node.name}
             onChange={e => setTree(updateNode(node.id, { name: e.target.value }, tree))}
-            placeholder="Название категории"
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              border: "1px solid #e0e0e0",
-              borderRadius: 6,
-              fontSize: 14,
-              background: "#f7f7f5"
-            }}
+            placeholder="Введите название категории"
+            className="flex-1"
           />
 
           {/* Кнопка "Отметить как верный" */}
@@ -3043,9 +4227,9 @@ function TreeTestingEditor({
   return (
     <>
       {/* Задание */}
-      <div style={{ marginBottom: 16 }}>
-        <Label style={{ display: "block", marginBottom: 8 }}>Задание</Label>
-        <Input
+      <div className="mb-4">
+        <FloatingInput
+          label="Задание"
           value={task}
           onChange={e => setTask(e.target.value)}
           placeholder="Где бы вы искали товар?"
@@ -3053,23 +4237,13 @@ function TreeTestingEditor({
       </div>
 
       {/* Описание */}
-      <div style={{ marginBottom: 16 }}>
-        <Label style={{ display: "block", marginBottom: 8 }}>Описание</Label>
-        <textarea
+      <div className="mb-4">
+        <FloatingTextarea
+          label="Описание"
           value={description}
           onChange={e => setDescription(e.target.value)}
           placeholder="Добавить дополнительный контекст для задания"
           rows={2}
-          style={{
-            width: "100%",
-            padding: "8px 12px",
-            border: "1px solid #e0e0e0",
-            borderRadius: 6,
-            fontSize: 14,
-            fontFamily: "inherit",
-            resize: "vertical",
-            boxSizing: "border-box"
-          }}
         />
       </div>
 
@@ -3192,7 +4366,6 @@ function ImageUploader({ label, image, onImageChange }: {
   
   return (
     <div style={{ marginBottom: 16 }}>
-      <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>{label}</label>
       {hasImage ? (
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "#f9f9f9", borderRadius: 8, border: "1px solid #e0e0e0" }}>
           <img 
@@ -3211,8 +4384,8 @@ function ImageUploader({ label, image, onImageChange }: {
           </div>
         </div>
       ) : (
-        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", border: "2px dashed #ddd", borderRadius: 8, cursor: "pointer", background: "#fafafa", transition: "border-color 0.2s" }}>
-          <span style={{ fontSize: 13, color: "#666" }}>📷 Выбрать изображение</span>
+        <label className="flex items-center justify-center cursor-pointer group">
+          <ImagePlus size={20} className="text-muted-foreground group-hover:text-primary transition-colors" />
           <input 
             type="file" 
             accept="image/*" 

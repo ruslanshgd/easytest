@@ -10,6 +10,7 @@ import ProfilePage from "./ProfilePage";
 import InvitePage from "./InvitePage";
 import { User } from "lucide-react";
 import { useAppStore } from "./store";
+import { Button } from "@/components/ui/button";
 
 function App() {
   const location = useLocation();
@@ -85,24 +86,12 @@ function App() {
           >
             ИзиТест
           </Link>
-          <Link
-            to="/profile"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              padding: "0.5rem 1rem",
-              backgroundColor: "#2383e2",
-              color: "white",
-              textDecoration: "none",
-              borderRadius: "6px",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-            }}
-          >
-            <User size={16} />
-            Профиль
-          </Link>
+          <Button asChild size="sm">
+            <Link to="/profile">
+              <User className="h-4 w-4 mr-2" />
+              Профиль
+            </Link>
+          </Button>
         </header>
       )}
       <Routes>

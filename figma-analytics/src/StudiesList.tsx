@@ -772,12 +772,6 @@ export default function StudiesList() {
             >
               Тесты
             </h1>
-            {breadcrumbs.length === 0 && (
-              <Button onClick={openCreateStudyModal}>
-                <Plus className="h-4 w-4 mr-2" />
-                Тест
-              </Button>
-            )}
           </div>
           {breadcrumbs.map((folder, index) => {
             const isDropTarget = dropTargetId === folder.id;
@@ -838,7 +832,7 @@ export default function StudiesList() {
       {/* Folders */}
       {currentFolderFolders.length > 0 && (
         <div className="mb-8">
-          <h2 className="text-sm font-medium text-muted-foreground mb-3">Папки</h2>
+          <h2 className="text-[15px] font-extrabold leading-6 text-foreground mb-3">Папки</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {currentFolderFolders.map(folder => {
               const isDraggedOver = dropTargetId === folder.id;
@@ -939,10 +933,19 @@ export default function StudiesList() {
       {/* Studies header with select all */}
       {(studies.length > 0 || currentFolderName) && (
         <div className="flex justify-between items-center mb-3">
+          <h2 className="text-[15px] font-extrabold leading-6 text-foreground">
+            Тесты {currentFolderName && `в папке "${currentFolderName}"`}
+          </h2>
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
-              Тесты {currentFolderName && `в папке "${currentFolderName}"`}
-            </h2>
+            {studies.length > 0 && (
+              <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
+                <Checkbox
+                  checked={selectedStudies.size === studies.length && studies.length > 0}
+                  onCheckedChange={handleToggleSelectAll}
+                />
+                Выбрать все
+              </label>
+            )}
             {currentFolderName && (
               <Button onClick={openCreateStudyModal} size="sm">
                 <Plus className="h-4 w-4 mr-2" />
@@ -950,15 +953,6 @@ export default function StudiesList() {
               </Button>
             )}
           </div>
-          {studies.length > 0 && (
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
-              <Checkbox
-                checked={selectedStudies.size === studies.length && studies.length > 0}
-                onCheckedChange={handleToggleSelectAll}
-              />
-              Выбрать все
-            </label>
-          )}
         </div>
       )}
 
@@ -992,13 +986,15 @@ export default function StudiesList() {
           </div>
         </Card>
       ) : studies.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="text-muted-foreground mb-4">В этой папке пока нет тестов</p>
-          <Button onClick={openCreateStudyModal}>
-            <Plus className="h-4 w-4 mr-2" />
-            Создать тест
-          </Button>
-        </Card>
+        <>
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-[15px] font-extrabold leading-6 text-foreground">Тесты</h2>
+            <Button onClick={openCreateStudyModal} size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              Тест
+            </Button>
+          </div>
+        </>
       ) : (
         <div className="space-y-2">
           {studies.map(study => {
@@ -1032,7 +1028,7 @@ export default function StudiesList() {
                       onCheckedChange={() => toggleSelection(study.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
-                    <span className="truncate">
+                    <span className="truncate text-[15px] font-medium leading-6">
                       {study.title}
                     </span>
                   </div>
@@ -1076,7 +1072,7 @@ export default function StudiesList() {
                   
                   {/* Status & Actions */}
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <Badge variant={statusConfig.variant} className="flex-shrink-0 bg-transparent text-foreground font-normal">
+                    <Badge variant={statusConfig.variant} className="flex-shrink-0 bg-transparent text-[15px] font-medium leading-6 text-muted-foreground">
                       {statusConfig.label}
                     </Badge>
                     <DropdownMenu>
