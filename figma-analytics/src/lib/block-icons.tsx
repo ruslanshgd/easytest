@@ -9,10 +9,11 @@ import {
   ClipboardList,
   LayoutGrid,
   GitBranch,
+  MousePointerClick,
   type LucideIcon
 } from "lucide-react";
 
-export type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
+export type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click";
 
 interface BlockTypeConfig {
   value: BlockType;
@@ -31,6 +32,7 @@ export const BLOCK_TYPE_CONFIG: Record<BlockType, BlockTypeConfig> = {
   card_sorting: { value: "card_sorting", label: "Сортировка карточек", icon: LayoutGrid },
   tree_testing: { value: "tree_testing", label: "Тестирование дерева", icon: GitBranch },
   umux_lite: { value: "umux_lite", label: "UMUX Lite", icon: ClipboardList },
+  first_click: { value: "first_click", label: "Тест первого клика", icon: MousePointerClick },
 };
 
 export const BLOCK_TYPES_LIST = Object.values(BLOCK_TYPE_CONFIG);

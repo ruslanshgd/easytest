@@ -1,5 +1,46 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
+import { getBlockTypeConfig, type BlockType } from "../lib/block-icons";
+import { cn } from "../lib/utils";
+import { Card } from "./ui/card";
+import { Button } from "./ui/button";
+import { 
+  UserRoundCheck, 
+  UserRoundX, 
+  UserRoundMinus, 
+  Clock, 
+  CircleCheck, 
+  CircleMinus,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  Info,
+  Map as MapIcon
+} from "lucide-react";
+import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
+import { Label } from "./ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
+import { 
+  ReactFlow,
+  Background, 
+  Controls, 
+  MiniMap, 
+  MarkerType
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 
 interface Screen {
   id: string;
@@ -37,8 +78,6 @@ interface StudyRun {
   client_meta: any;
 }
 
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
-
 interface StudyBlock {
   id: string;
   study_id: string;
@@ -75,37 +114,11 @@ interface StudyResultsTabProps {
   blocks: StudyBlock[];
 }
 
-const getBlockTypeColor = (type: BlockType): string => {
-  const colors: Record<BlockType, string> = {
-    prototype: "#2196f3",
-    open_question: "#9c27b0",
-    umux_lite: "#ff5722",
-    choice: "#4caf50",
-    context: "#607d8b",
-    scale: "#ff9800",
-    preference: "#e91e63",
-    five_seconds: "#795548",
-    card_sorting: "#00bcd4",
-    tree_testing: "#8bc34a"
-  };
-  return colors[type] || "#666";
-};
-
-const getBlockTypeLabel = (type: BlockType): string => {
-  const labels: Record<BlockType, string> = {
-    prototype: "Прототип",
-    open_question: "Открытый вопрос",
-    umux_lite: "UMUX Lite",
-    choice: "Выбор",
-    context: "Контекст",
-    scale: "Шкала",
-    preference: "Предпочтение",
-    five_seconds: "5 секунд",
-    card_sorting: "Сортировка карточек",
-    tree_testing: "Тестирование дерева"
-  };
-  return labels[type] || type;
-};
+type ReportViewMode = "summary" | "responses";
+type CardSortingView = "matrix" | "categories" | "cards";
+type TreeTestingView = "common_paths" | "first_clicks" | "final_points";
+type HeatmapView = "heatmap" | "clicks" | "image";
+type HeatmapTab = "by_screens" | "by_respondents";
 
 export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProps) {
   const [runs, setRuns] = useState<StudyRun[]>([]);
@@ -116,9 +129,37 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
   const [events, setEvents] = useState<any[]>([]);
   const [responses, setResponses] = useState<StudyBlockResponse[]>([]);
   const [prototypes, setPrototypes] = useState<Record<string, Proto>>({});
-  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
-  const [heatmapFilterSessions, setHeatmapFilterSessions] = useState<Record<string, Set<string>>>({});
-  const [selectedHeatmapScreen, setSelectedHeatmapScreen] = useState<{ screen: Screen; proto: Proto; clicks: Array<{ x: number; y: number; count: number }>; blockId: string } | null>(null);
+  
+  // UI State
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ReportViewMode>("summary");
+  const [cardSortingView, setCardSortingView] = useState<CardSortingView>("matrix");
+  const [treeTestingView, setTreeTestingView] = useState<TreeTestingView>("common_paths");
+  const [heatmapView, setHeatmapView] = useState<HeatmapView>("heatmap");
+  const [heatmapTab, setHeatmapTab] = useState<HeatmapTab>("by_screens");
+  const [selectedHeatmapScreen, setSelectedHeatmapScreen] = useState<{ 
+    screen: Screen; 
+    proto: Proto; 
+    blockId: string;
+    screenIndex: number;
+    totalScreens: number;
+  } | null>(null);
+  const [selectedRespondentScreen, setSelectedRespondentScreen] = useState<{
+    screen: Screen;
+    proto: Proto;
+    session: Session;
+    screenIndex: number;
+    totalScreens: number;
+  } | null>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [searchCategoryQuery, setSearchCategoryQuery] = useState("");
+  const [searchCardQuery, setSearchCardQuery] = useState("");
+  const [showHiddenCategories, setShowHiddenCategories] = useState(false);
+  const [onlyFirstClicks, setOnlyFirstClicks] = useState(false);
+  const [showClickOrder, setShowClickOrder] = useState(false);
 
   useEffect(() => {
     loadRuns();
@@ -134,6 +175,19 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
       setResponses([]);
     }
   }, [selectedRuns, studyId]);
+
+  // Auto-select first block or first session
+  useEffect(() => {
+    if (viewMode === "summary") {
+      if (blocks.length > 0 && !selectedBlockId) {
+        setSelectedBlockId(blocks[0].id);
+      }
+    } else if (viewMode === "responses") {
+      if (sessions.length > 0 && !selectedSessionId) {
+        setSelectedSessionId(sessions[0].id);
+      }
+    }
+  }, [blocks, selectedBlockId, sessions, selectedSessionId, viewMode]);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -172,7 +226,6 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
     const runIds = Array.from(selectedRuns);
 
     try {
-      // Load sessions with run_id (включая prototype_id)
       const { data: sessionsData, error: sessionsError } = await supabase
         .from("sessions")
         .select("id, run_id, block_id, study_id, prototype_id, started_at, completed, aborted")
@@ -184,7 +237,6 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         return;
       }
 
-      // Load events with run_id
       const { data: eventsData, error: eventsError } = await supabase
         .from("events")
         .select("*")
@@ -200,24 +252,18 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
       const sessionsWithMetrics = (sessionsData || []).map(session => {
         const sessionEvents = (eventsData || []).filter(e => e.session_id === session.id);
         
-        // Сортируем события по времени для определения финального статуса
         const sortedEvents = [...sessionEvents].sort((a, b) => 
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
         
-        // Проверяем события на наличие completed/aborted/closed
         const hasCompletedEvent = sortedEvents.some(e => e.event_type === "completed");
         const hasAbortedEvent = sortedEvents.some(e => e.event_type === "aborted");
         const hasClosedEvent = sortedEvents.some(e => e.event_type === "closed");
         
-        // Определяем статус: приоритет у событий, затем БД
-        // Если есть событие completed - пройден
-        // Если есть aborted или closed (и нет completed после них) - сдался
         let isCompleted = false;
         let isAborted = false;
         
         if (hasCompletedEvent) {
-          // Проверяем, было ли completed последним из терминальных событий
           const completedIdx = sortedEvents.findIndex(e => e.event_type === "completed");
           const abortedIdx = sortedEvents.findIndex(e => e.event_type === "aborted");
           const closedIdx = sortedEvents.findIndex(e => e.event_type === "closed");
@@ -226,13 +272,11 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
           const abortedTime = abortedIdx >= 0 ? new Date(sortedEvents[abortedIdx].timestamp).getTime() : 0;
           const closedTime = closedIdx >= 0 ? new Date(sortedEvents[closedIdx].timestamp).getTime() : 0;
           
-          // Completed считается если оно последнее из терминальных событий
           isCompleted = completedTime >= abortedTime && completedTime >= closedTime;
           isAborted = !isCompleted && (hasAbortedEvent || hasClosedEvent);
         } else if (hasAbortedEvent || hasClosedEvent) {
           isAborted = true;
         } else {
-          // Если нет событий - используем данные из БД
           isCompleted = session.completed === true;
           isAborted = session.aborted === true;
         }
@@ -245,10 +289,33 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         };
       });
 
-      setSessions(sessionsWithMetrics);
+      // Sort sessions by started_at descending (newest first)
+      const sortedSessions = [...sessionsWithMetrics].sort((a, b) => 
+        new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+      );
+      
+      setSessions(sortedSessions);
       setEvents(eventsData || []);
 
-      // Load prototypes for prototype blocks and sessions
+      // Логирование для диагностики
+      console.log("StudyResultsTab: Loaded sessions and events:", {
+        sessions_count: sessionsWithMetrics.length,
+        events_count: eventsData?.length || 0,
+        sessions_with_block_id: sessionsWithMetrics.filter(s => s.block_id).length,
+        sessions_without_block_id: sessionsWithMetrics.filter(s => !s.block_id).length,
+        events_with_block_id: (eventsData || []).filter(e => e.block_id).length,
+        events_without_block_id: (eventsData || []).filter(e => !e.block_id).length,
+        unique_block_ids_in_sessions: [...new Set(sessionsWithMetrics.map(s => s.block_id).filter(Boolean))],
+        unique_block_ids_in_events: [...new Set((eventsData || []).map(e => e.block_id).filter(Boolean))],
+        sample_session: sessionsWithMetrics[0] ? {
+          id: sessionsWithMetrics[0].id,
+          run_id: sessionsWithMetrics[0].run_id,
+          block_id: sessionsWithMetrics[0].block_id,
+          study_id: sessionsWithMetrics[0].study_id
+        } : null
+      });
+
+      // Load prototypes
       const prototypeIdsFromBlocks = Array.from(new Set(
         blocks
           .filter(b => b.type === "prototype" && b.prototype_id)
@@ -296,1297 +363,2469 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         .in("run_id", runIds);
 
       if (responsesError) {
-        console.error("Error loading responses:", responsesError);
+        console.error("StudyResultsTab: Error loading responses:", responsesError);
         return;
       }
+
+      // Логирование для диагностики
+      console.log("StudyResultsTab: Loaded responses:", {
+        count: responsesData?.length || 0,
+        runIds: runIds.length,
+        sample: responsesData?.slice(0, 3).map(r => ({
+          id: r.id,
+          run_id: r.run_id,
+          block_id: r.block_id,
+          has_answer: !!r.answer,
+          duration_ms: r.duration_ms
+        })),
+        blockIds: [...new Set(responsesData?.map(r => r.block_id).filter(Boolean) || [])],
+        responsesWithoutBlockId: responsesData?.filter(r => !r.block_id).length || 0
+      });
 
       setResponses(responsesData || []);
     } catch (err) {
-      console.error("Unexpected error loading responses:", err);
+      console.error("StudyResultsTab: Unexpected error loading responses:", err);
     }
   };
 
-  const calculateAggregates = () => {
-    const totalRuns = runs.length;
-    const finishedRuns = runs.filter(r => r.status === "finished").length;
-    const completionRate = totalRuns > 0 ? ((finishedRuns / totalRuns) * 100).toFixed(1) : "0";
+  // Calculate total responses count
+  const totalResponsesCount = responses.length;
+
+  // Get selected block
+  const selectedBlock = blocks.find(b => b.id === selectedBlockId) || blocks[0] || null;
+  const selectedRun = runs.find(r => r.id === selectedRunId) || null;
+
+  // Parse user agent to get OS and browser
+  const parseUserAgent = (userAgent: string | null | undefined) => {
+    if (!userAgent) return { os: "Неизвестно", browser: "Неизвестно" };
     
-    const finishedRunsWithDuration = runs.filter(r => r.status === "finished" && r.finished_at && r.started_at);
-    const avgDuration = finishedRunsWithDuration.length > 0
-      ? finishedRunsWithDuration.reduce((sum, r) => {
-          const duration = new Date(r.finished_at!).getTime() - new Date(r.started_at).getTime();
-          return sum + duration;
-        }, 0) / finishedRunsWithDuration.length / 1000 / 60 // Convert to minutes
-      : 0;
-
-    return {
-      total: totalRuns,
-      finished: finishedRuns,
-      completionRate,
-      avgDurationMinutes: avgDuration.toFixed(1)
-    };
-  };
-
-  // Вспомогательные функции для работы с прототипами
-  const getScreenName = (prototypeId: string | null, screenId: string | null): string => {
-    if (!screenId) return "-";
-    if (!prototypeId) return screenId;
-    const proto = prototypes[prototypeId];
-    if (!proto) return screenId;
-    const screen = proto.screens?.find((s: any) => s.id === screenId);
-    return screen ? screen.name : screenId;
-  };
-
-  const getHotspotName = (prototypeId: string | null, hotspotId: string | null, screenId: string | null): string => {
-    if (!hotspotId) {
-      if (screenId) {
-        return getScreenName(prototypeId, screenId);
-      }
-      return "-";
-    }
-    if (!prototypeId) return hotspotId;
-    const proto = prototypes[prototypeId];
-    if (!proto) return hotspotId;
-    const hotspot = proto.hotspots?.find((h: any) => 
-      h.id === hotspotId && 
-      (screenId ? h.frame === screenId : true)
-    );
-    return hotspot?.name || hotspotId;
-  };
-
-  const translateEventType = (eventType: string): string => {
-    const translations: Record<string, string> = {
-      "screen_load": "Загрузка экрана",
-      "hotspot_click": "Клик по области",
-      "click": "Клик в пустую область",
-      "scroll": "Скролл",
-      "scroll_start": "Начало скролла",
-      "scroll_end": "Конец скролла",
-      "completed": "Пройден",
-      "aborted": "Сдался",
-      "closed": "Закрыл тест",
-      "overlay_open": "Открыт оверлей",
-      "overlay_close": "Закрыт оверлей",
-      "overlay_swap": "Переключил оверлей"
-    };
-    return translations[eventType] || eventType;
-  };
-
-  const groupClicksByScreen = (events: any[], prototypeId: string | null): Array<{
-    timestamp: string;
-    event_type: string;
-    screen_id: string | null;
-    clicks: string;
-    isClickGroup: boolean;
-    scroll_type?: string;
-  }> => {
-    const result: Array<{
-      timestamp: string;
-      event_type: string;
-      screen_id: string | null;
-      clicks: string;
-      isClickGroup: boolean;
-      scroll_type?: string;
-    }> = [];
-
-    const sortedEvents = [...events].sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
-    let currentScreenId: string | null = null;
-    let currentScreenClicks: any[] = [];
-
-    sortedEvents.forEach((event) => {
-      if (event.event_type === "screen_load") {
-        if (currentScreenClicks.length > 0 && currentScreenId) {
-          const clicksList = currentScreenClicks.map(click => {
-            if (click.hotspot_id) {
-              return getHotspotName(prototypeId, click.hotspot_id, click.screen_id);
-            } else {
-              return getScreenName(prototypeId, click.screen_id);
-            }
-          });
-          result.push({
-            timestamp: currentScreenClicks[0].timestamp,
-            event_type: "clicks",
-            screen_id: currentScreenId,
-            clicks: clicksList.join(", "),
-            isClickGroup: true,
-            scroll_type: undefined
-          });
-          currentScreenClicks = [];
-        }
-        currentScreenId = event.screen_id;
-        result.push({
-          timestamp: event.timestamp,
-          event_type: event.event_type,
-          screen_id: event.screen_id,
-          clicks: "-",
-          isClickGroup: false,
-          scroll_type: undefined
-        });
-      } else if (event.event_type === "hotspot_click" || event.event_type === "click") {
-        if (event.screen_id === currentScreenId) {
-          currentScreenClicks.push(event);
-        } else {
-          if (currentScreenClicks.length > 0 && currentScreenId) {
-            const clicksList = currentScreenClicks.map(click => {
-              if (click.hotspot_id) {
-                return getHotspotName(prototypeId, click.hotspot_id, click.screen_id);
-              } else {
-                return getScreenName(prototypeId, click.screen_id);
-              }
-            });
-            result.push({
-              timestamp: currentScreenClicks[0].timestamp,
-              event_type: "clicks",
-              screen_id: currentScreenId,
-              clicks: clicksList.join(", "),
-              isClickGroup: true
-            });
-            currentScreenClicks = [];
-          }
-          currentScreenId = event.screen_id;
-          currentScreenClicks = [event];
-        }
-      } else if (event.event_type === "scroll") {
-        if (currentScreenClicks.length > 0 && currentScreenId) {
-          const clicksList = currentScreenClicks.map(click => {
-            if (click.hotspot_id) {
-              return getHotspotName(prototypeId, click.hotspot_id, click.screen_id);
-            } else {
-              return getScreenName(prototypeId, click.screen_id);
-            }
-          });
-          result.push({
-            timestamp: currentScreenClicks[0].timestamp,
-            event_type: "clicks",
-            screen_id: currentScreenId,
-            clicks: clicksList.join(", "),
-            isClickGroup: true,
-            scroll_type: undefined
-          });
-          currentScreenClicks = [];
-        }
-        result.push({
-          timestamp: event.timestamp,
-          event_type: event.event_type,
-          screen_id: event.screen_id,
-          clicks: "-",
-          isClickGroup: false,
-          scroll_type: event.scroll_type
-        });
-      } else {
-        if (currentScreenClicks.length > 0 && currentScreenId) {
-          const clicksList = currentScreenClicks.map(click => {
-            if (click.hotspot_id) {
-              return getHotspotName(prototypeId, click.hotspot_id, click.screen_id);
-            } else {
-              return getScreenName(prototypeId, click.screen_id);
-            }
-          });
-          result.push({
-            timestamp: currentScreenClicks[0].timestamp,
-            event_type: "clicks",
-            screen_id: currentScreenId,
-            clicks: clicksList.join(", "),
-            isClickGroup: true,
-            scroll_type: undefined
-          });
-          currentScreenClicks = [];
-        }
-        result.push({
-          timestamp: event.timestamp,
-          event_type: event.event_type,
-          screen_id: event.screen_id,
-          clicks: getHotspotName(prototypeId, event.hotspot_id, event.screen_id),
-          isClickGroup: false,
-          scroll_type: undefined
-        });
-      }
-    });
-
-    if (currentScreenClicks.length > 0 && currentScreenId) {
-      const clicksList = currentScreenClicks.map(click => {
-        if (click.hotspot_id) {
-          return getHotspotName(prototypeId, click.hotspot_id, click.screen_id);
-        } else {
-          return getScreenName(prototypeId, click.screen_id);
-        }
-      });
-      result.push({
-        timestamp: currentScreenClicks[0].timestamp,
-        event_type: "clicks",
-        screen_id: currentScreenId,
-        clicks: clicksList.join(", "),
-        isClickGroup: true
-      });
-    }
-
-    return result;
-  };
-
-  const calculatePrototypeBlockMetrics = (blockId: string) => {
-    const blockSessions = sessions.filter(s => s.block_id === blockId);
-    const blockEvents = events.filter(e => e.block_id === blockId);
+    let os = "Неизвестно";
+    let browser = "Неизвестно";
     
-    const completed = blockSessions.filter(s => s.completed).length;
-    const aborted = blockSessions.filter(s => s.aborted).length;
-    const totalEvents = blockEvents.length;
-    
-    // Group events by type
-    const eventsByType: Record<string, number> = {};
-    blockEvents.forEach(e => {
-      eventsByType[e.event_type] = (eventsByType[e.event_type] || 0) + 1;
-    });
-
-    // Calculate heatmap data (clicks) - агрегированные по всем сессиям
-    const clicks: Array<{ x: number; y: number; count: number; screenId?: string }> = [];
-    const clickMap: Record<string, { x: number; y: number; count: number; screenId?: string }> = {};
-    
-    blockEvents.forEach(e => {
-      if ((e.event_type === "hotspot_click" || e.event_type === "click") && e.x !== undefined && e.y !== undefined) {
-        const screenId = e.screen_id || "";
-        const key = `${screenId}_${Math.floor(e.x / 10) * 10}_${Math.floor(e.y / 10) * 10}`; // Группируем по 10px
-        if (!clickMap[key]) {
-          clickMap[key] = { x: e.x, y: e.y, count: 0, screenId };
-        }
-        clickMap[key].count += 1;
-      }
-    });
-    
-    clicks.push(...Object.values(clickMap));
-
-    // Данные по сессиям с событиями
-    const sessionsData = blockSessions.map(session => {
-      const sessionEvents = blockEvents.filter(e => e.session_id === session.id);
-      const sessionClicks: Array<{ x: number; y: number; screenId?: string }> = [];
-      sessionEvents.forEach(e => {
-        if ((e.event_type === "hotspot_click" || e.event_type === "click") && e.x !== undefined && e.y !== undefined) {
-          sessionClicks.push({ x: e.x, y: e.y, screenId: e.screen_id || undefined });
-        }
-      });
-
-      // Определяем статус: completed имеет приоритет над aborted
-      let status: "completed" | "aborted" | "in_progress" = "in_progress";
-      if (session.completed) {
-        status = "completed";
-      } else if (session.aborted) {
-        status = "aborted";
-      }
-      
-      return {
-        session: {
-          ...session,
-          prototype_id: session.prototype_id || null
-        },
-        events: sessionEvents,
-        clicks: sessionClicks,
-        status
-      };
-    });
-
-    return {
-      sessionsCount: blockSessions.length,
-      completed,
-      aborted,
-      totalEvents,
-      eventsByType,
-      clicks,
-      sessionsData
-    };
-  };
-
-  // Функция для расчета хитмапа по экранам
-  const calculateHeatmapData = (blockId: string, sessionIdFilters?: Set<string>): Record<string, Array<{ x: number; y: number; count: number }>> => {
-    const heatmapMap: Record<string, Record<string, { x: number; y: number; count: number }>> = {};
-    
-    let blockSessions = sessions.filter(s => s.block_id === blockId);
-    if (sessionIdFilters && sessionIdFilters.size > 0) {
-      blockSessions = blockSessions.filter(s => sessionIdFilters.has(s.id));
+    // Parse OS
+    if (userAgent.includes("Mac OS X") || userAgent.includes("Macintosh")) {
+      os = "Mac OS";
+    } else if (userAgent.includes("Windows")) {
+      os = "Windows";
+    } else if (userAgent.includes("Linux")) {
+      os = "Linux";
+    } else if (userAgent.includes("Android")) {
+      os = "Android";
+    } else if (userAgent.includes("iOS")) {
+      os = "iOS";
     }
     
-    const blockSessionIds = new Set(blockSessions.map(s => s.id));
-    const blockEvents = events.filter(e => e.block_id === blockId && blockSessionIds.has(e.session_id));
-    
-    blockEvents.forEach(event => {
-      if ((event.event_type === "hotspot_click" || event.event_type === "click") && event.screen_id && event.x !== undefined && event.y !== undefined) {
-        const screenId = event.screen_id;
-        const x = event.x;
-        const y = event.y;
-        
-        if (!heatmapMap[screenId]) {
-          heatmapMap[screenId] = {};
-        }
-        
-        const key = `${x},${y}`;
-        if (!heatmapMap[screenId][key]) {
-          heatmapMap[screenId][key] = { x, y, count: 0 };
-        }
-        heatmapMap[screenId][key].count += 1;
-      }
-    });
-    
-    const result: Record<string, Array<{ x: number; y: number; count: number }>> = {};
-    Object.keys(heatmapMap).forEach(screenId => {
-      result[screenId] = Object.values(heatmapMap[screenId]);
-    });
-    
-    return result;
-  };
-
-  // Функция для расчета времени на экранах
-  const calculateScreenTimes = (blockId: string): Array<{ screenId: string; screenName: string; totalTime: number; visitCount: number }> => {
-    const screenTimesMap: Record<string, { totalTime: number; visitCount: number; prototypeId?: string }> = {};
-    
-    const blockSessions = sessions.filter(s => s.block_id === blockId);
-    const blockSessionIds = new Set(blockSessions.map(s => s.id));
-    const blockEvents = events.filter(e => e.block_id === blockId && blockSessionIds.has(e.session_id));
-    
-    // Группируем события по сессиям
-    const eventsBySession: Record<string, any[]> = {};
-    blockEvents.forEach(e => {
-      if (!eventsBySession[e.session_id]) {
-        eventsBySession[e.session_id] = [];
-      }
-      eventsBySession[e.session_id].push(e);
-    });
-    
-    blockSessions.forEach(session => {
-      const sessionEvts = eventsBySession[session.id] || [];
-      const prototypeId = session.prototype_id;
-      
-      const screenLoads = sessionEvts
-        .filter(e => e.event_type === "screen_load" && e.screen_id)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      
-      screenLoads.forEach((loadEvent, index) => {
-        const screenId = loadEvent.screen_id;
-        const loadTime = new Date(loadEvent.timestamp).getTime();
-        
-        let endTime: number;
-        if (index < screenLoads.length - 1) {
-          endTime = new Date(screenLoads[index + 1].timestamp).getTime();
-        } else {
-          const lastEvent = sessionEvts[sessionEvts.length - 1];
-          endTime = lastEvent ? new Date(lastEvent.timestamp).getTime() : loadTime;
-        }
-        
-        const timeSpent = Math.max(0, endTime - loadTime);
-        
-        if (!screenTimesMap[screenId]) {
-          screenTimesMap[screenId] = { totalTime: 0, visitCount: 0, prototypeId: prototypeId || undefined };
-        }
-        
-        screenTimesMap[screenId].totalTime += timeSpent;
-        screenTimesMap[screenId].visitCount += 1;
-      });
-    });
-    
-    return Object.entries(screenTimesMap).map(([screenId, data]) => {
-      let screenName = screenId;
-      if (data.prototypeId && prototypes[data.prototypeId]) {
-        const screen = prototypes[data.prototypeId].screens?.find(s => s.id === screenId);
-        if (screen) screenName = screen.name;
-      }
-      
-      return {
-        screenId,
-        screenName,
-        totalTime: data.totalTime,
-        visitCount: data.visitCount
-      };
-    }).sort((a, b) => b.totalTime - a.totalTime);
-  };
-
-  // Функция форматирования времени
-  const formatTime = (ms: number): string => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    if (minutes > 0) {
-      return `${minutes}м ${remainingSeconds}с`;
-    }
-    return `${seconds}с`;
-  };
-
-  const formatAnswer = (answer: any, blockType?: BlockType): string => {
-    if (answer === null || answer === undefined) {
-      return "";
+    // Parse Browser
+    if (userAgent.includes("Chrome") && !userAgent.includes("Edg") && !userAgent.includes("OPR")) {
+      browser = "Chrome";
+    } else if (userAgent.includes("Firefox")) {
+      browser = "Firefox";
+    } else if (userAgent.includes("Safari") && !userAgent.includes("Chrome")) {
+      browser = "Safari";
+    } else if (userAgent.includes("Edg")) {
+      browser = "Edge";
+    } else if (userAgent.includes("OPR")) {
+      browser = "Opera";
+    } else if (userAgent.includes("MSIE") || userAgent.includes("Trident")) {
+      browser = "Internet Explorer";
     }
     
-    // Если это строка, возвращаем как есть
-    if (typeof answer === "string") {
-      return answer;
-    }
-    
-    // Если это объект, форматируем в зависимости от типа блока
-    if (typeof answer === "object") {
-      // Открытый вопрос
-      if (answer.text !== undefined) {
-        return String(answer.text);
-      }
-      
-      // UMUX Lite
-      if (answer.umux_lite_score !== undefined) {
-        return `UMUX Lite: ${answer.umux_lite_score}% | SUS: ${answer.sus_score?.toFixed(1) || "—"} | ${answer.item1}-${answer.item2}${answer.feedback ? ` | "${answer.feedback}"` : ""}`;
-      }
-      
-      // Выбор (choice)
-      if (blockType === "choice" || answer.selected !== undefined) {
-        const parts: string[] = [];
-        if (answer.selected && answer.selected.length > 0) {
-          parts.push(answer.selected.join(", "));
-        }
-        if (answer.other) {
-          parts.push(`Другое: "${answer.other}"`);
-        }
-        if (answer.none) {
-          parts.push("Ничего из вышеперечисленного");
-        }
-        return parts.join(" | ") || "(пусто)";
-      }
-      
-      // Шкала (scale)
-      if (blockType === "scale" || answer.scaleType !== undefined) {
-        const scaleTypes: Record<string, string> = { numeric: "Числовая", emoji: "Эмодзи", stars: "Звезды" };
-        return `${answer.value !== null ? answer.value : "(не выбрано)"} (${scaleTypes[answer.scaleType] || ""})`;
-      }
-      
-      // Предпочтение (preference)
-      if (blockType === "preference" || answer.type === "all" || answer.type === "pairwise") {
-        if (answer.type === "all") {
-          return `Выбран вариант ${String.fromCharCode(65 + (answer.selectedIndex || 0))}`;
-        } else if (answer.type === "pairwise" && answer.wins) {
-          const winEntries = Object.entries(answer.wins as Record<string, number>);
-          winEntries.sort((a, b) => (b[1] as number) - (a[1] as number));
-          return `Победы: ${winEntries.map(([idx, count]) => `${String.fromCharCode(65 + parseInt(idx))}:${count}`).join(", ")}`;
-        }
-      }
-      
-      // Тестирование дерева (tree_testing)
-      if (blockType === "tree_testing" || answer.selectedPath !== undefined) {
-        const pathNames = answer.pathNames || [];
-        const isCorrect = answer.isCorrect;
-        const pathStr = pathNames.length > 0 ? pathNames.join(" › ") : "(не выбрано)";
-        if (isCorrect !== undefined) {
-          return `${pathStr} ${isCorrect ? "✅" : "❌"}`;
-        }
-        return pathStr;
-      }
-      
-      // Карточная сортировка (card_sorting)
-      if (blockType === "card_sorting" || answer.categories !== undefined) {
-        const categories = answer.categories || {};
-        const catEntries = Object.entries(categories);
-        if (catEntries.length === 0) return "(не отсортировано)";
-        return catEntries.map(([catName, cards]) => {
-          const cardList = Array.isArray(cards) ? cards : [];
-          return `${catName}: ${cardList.length} карт.`;
-        }).join(" | ");
-      }
-      
-      // Если это массив, показываем элементы через запятую
-      if (Array.isArray(answer)) {
-        return answer.map(item => String(item)).join(", ");
-      }
-      
-      // Для других объектов показываем значения через двоеточие
-      const entries = Object.entries(answer);
-      if (entries.length > 0) {
-        return entries.map(([key, value]) => {
-          if (value === null || value === undefined) {
-            return `${key}: (пусто)`;
-          }
-          return `${key}: ${String(value)}`;
-        }).join("; ");
-      }
-    }
-    
-    // Fallback: преобразуем в строку
-    return String(answer);
+    return { os, browser };
   };
-
-  const calculateQuestionBlockMetrics = (blockId: string) => {
-    const blockResponses = responses.filter(r => r.block_id === blockId);
-    
-    return {
-      responsesCount: blockResponses.length,
-      responses: blockResponses.map(r => ({
-        run_id: r.run_id,
-        answer: r.answer,
-        duration_ms: r.duration_ms,
-        created_at: r.created_at
-      }))
-    };
-  };
-
-  const handleToggleRun = (runId: string) => {
-    const newSelected = new Set(selectedRuns);
-    if (newSelected.has(runId)) {
-      newSelected.delete(runId);
-    } else {
-      newSelected.add(runId);
-    }
-    setSelectedRuns(newSelected);
-  };
-
-  const handleSelectAll = () => {
-    setSelectedRuns(new Set(runs.map(r => r.id)));
-  };
-
-  const handleDeselectAll = () => {
-    setSelectedRuns(new Set());
-  };
-
-  const handleDeleteSelectedRuns = async () => {
-    if (selectedRuns.size === 0) {
-      setError("Выберите хотя бы одно прохождение для удаления");
-      return;
-    }
-
-    if (!confirm(`Удалить ${selectedRuns.size} прохождений? Это каскадно удалит ответы и связанные события.`)) {
-      return;
-    }
-
-    const runIds = Array.from(selectedRuns);
-
-    try {
-      // 1. Удаляем study_block_responses
-      const { data: deletedResponses, error: responsesError } = await supabase
-        .from("study_block_responses")
-        .delete()
-        .in("run_id", runIds)
-        .select();
-
-      if (responsesError) {
-        console.error("Error deleting responses:", responsesError);
-        setError(`Ошибка удаления ответов: ${responsesError.message}`);
-        return;
-      }
-      console.log(`Удалено ответов: ${deletedResponses?.length || 0}`);
-
-      // 2. Удаляем sessions где run_id IS NOT NULL (ВАЖНО: только run-linked sessions)
-      const { data: deletedSessions, error: sessionsError } = await supabase
-        .from("sessions")
-        .delete()
-        .in("run_id", runIds)
-        .not("run_id", "is", null)
-        .select();
-
-      if (sessionsError) {
-        console.error("Error deleting sessions:", sessionsError);
-        setError(`Ошибка удаления сессий: ${sessionsError.message}`);
-        return;
-      }
-      console.log(`Удалено сессий: ${deletedSessions?.length || 0}`);
-
-      // 3. Удаляем events где run_id IS NOT NULL (ВАЖНО: только run-linked events)
-      const { data: deletedEvents, error: eventsError } = await supabase
-        .from("events")
-        .delete()
-        .in("run_id", runIds)
-        .not("run_id", "is", null)
-        .select();
-
-      if (eventsError) {
-        console.error("Error deleting events:", eventsError);
-        setError(`Ошибка удаления событий: ${eventsError.message}`);
-        return;
-      }
-      console.log(`Удалено событий: ${deletedEvents?.length || 0}`);
-
-      // 4. Удаляем study_runs
-      const { data: deletedRuns, error: runsError } = await supabase
-        .from("study_runs")
-        .delete()
-        .in("id", runIds)
-        .select();
-
-      if (runsError) {
-        console.error("Error deleting runs:", runsError);
-        setError(`Ошибка удаления прохождений: ${runsError.message}. Проверьте права доступа.`);
-        return;
-      }
-
-      if (!deletedRuns || deletedRuns.length === 0) {
-        setError("Не удалось удалить прохождения. Возможно, у вас нет прав на удаление.");
-        return;
-      }
-
-      console.log(`Успешно удалено ${deletedRuns.length} прохождений из ${runIds.length} запрошенных`);
-
-      // Очищаем выбранные прохождения
-      setSelectedRuns(new Set());
-      
-      // Обновляем список прохождений (без авто-выбора)
-      setLoading(true);
-      setError(null); // Очищаем ошибки после успешного удаления
-      try {
-        const { data: runsData, error: reloadError } = await supabase
-          .from("study_runs")
-          .select("*")
-          .eq("study_id", studyId)
-          .order("started_at", { ascending: false });
-
-        if (reloadError) {
-          console.error("Error reloading runs:", reloadError);
-          setError(reloadError.message);
-        } else {
-          setRuns(runsData || []);
-          // Очищаем связанные данные
-          setSessions([]);
-          setEvents([]);
-          setResponses([]);
-        }
-      } catch (err) {
-        console.error("Error reloading runs:", err);
-        setError(`Ошибка обновления списка: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        setLoading(false);
-      }
-    } catch (err) {
-      console.error("Unexpected error deleting runs:", err);
-      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const aggregates = calculateAggregates();
 
   if (loading) {
-    return <div style={{ padding: 20 }}>Загрузка результатов...</div>;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-muted-foreground">Загрузка результатов...</div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div style={{ padding: 20, color: "red" }}>Ошибка: {error}</div>;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-destructive">Ошибка: {error}</div>
+      </div>
+    );
   }
 
   return (
-    <div style={{ padding: "20px 0" }}>
-      {/* Aggregates */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-        gap: 16,
-        marginBottom: 24
-      }}>
-        <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8 }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Всего прохождений</div>
-          <div style={{ fontSize: 24, fontWeight: "bold", color: "#333" }}>{aggregates.total}</div>
-        </div>
-        <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8 }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Завершено</div>
-          <div style={{ fontSize: 24, fontWeight: "bold", color: "#333" }}>{aggregates.finished}</div>
-        </div>
-        <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8 }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Процент завершения</div>
-          <div style={{ fontSize: 24, fontWeight: "bold", color: "#333" }}>{aggregates.completionRate}%</div>
-        </div>
-        <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8 }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Среднее время</div>
-          <div style={{ fontSize: 24, fontWeight: "bold", color: "#333" }}>{aggregates.avgDurationMinutes} мин</div>
-        </div>
-      </div>
-
-      {/* Runs list with checkboxes */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 18 }}>Прохождения ({selectedRuns.size} выбрано)</h3>
-          <div style={{ display: "flex", gap: 8 }}>
+    <div className="flex flex-1 overflow-hidden h-full">
+      {/* Left Sidebar - Block List or Sessions List */}
+      <div className="w-80 bg-[#F6F6F6] flex flex-col relative">
+        {/* Full height border */}
+        <div className="absolute right-0 top-0 bottom-0 w-px bg-border" />
+        
+        {/* Tabs */}
+        <div className="px-3 pt-3 pb-3 flex-shrink-0">
+          <div className="flex gap-2">
             <button
-              onClick={handleSelectAll}
-              style={{ padding: "6px 12px", fontSize: 12, background: "#2196f3", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+              onClick={() => {
+                setViewMode("summary");
+                if (blocks.length > 0 && !selectedBlockId) {
+                  setSelectedBlockId(blocks[0].id);
+                }
+              }}
+              className={cn(
+                "flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
+                viewMode === "summary"
+                  ? "bg-primary text-white"
+                  : "bg-white text-muted-foreground hover:bg-muted"
+              )}
             >
-              Выбрать все
+              Сводный
             </button>
             <button
-              onClick={handleDeselectAll}
-              style={{ padding: "6px 12px", fontSize: 12, background: "#666", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+              onClick={() => {
+                setViewMode("responses");
+                if (sessions.length > 0 && !selectedSessionId) {
+                  setSelectedSessionId(sessions[0].id);
+                } else if (runs.length > 0 && !selectedRunId) {
+                  setSelectedRunId(runs[0].id);
+                }
+              }}
+              className={cn(
+                "flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
+                viewMode === "responses"
+                  ? "bg-primary text-white"
+                  : "bg-white text-muted-foreground hover:bg-muted"
+              )}
             >
-              Снять выбор
+              Ответы {totalResponsesCount}
             </button>
-            {selectedRuns.size > 0 && (
-              <button
-                onClick={handleDeleteSelectedRuns}
-                style={{ padding: "6px 12px", fontSize: 12, background: "#f44336", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: "bold" }}
-              >
-                Удалить выбранные ({selectedRuns.size})
-              </button>
-            )}
           </div>
         </div>
-        <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #ddd", borderRadius: 4 }}>
-          {runs.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: "#666" }}>Нет прохождений для этого теста</div>
+
+        {/* Block List or Sessions List */}
+        <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
+          {viewMode === "summary" ? (
+            // Show blocks in summary mode
+            blocks.map((block, index) => {
+              const blockConfig = getBlockTypeConfig(block.type);
+              const IconComponent = blockConfig.icon;
+              const isSelected = selectedBlockId === block.id;
+              
+              return (
+                <button
+                  key={block.id}
+                  onClick={() => setSelectedBlockId(block.id)}
+                  className={cn(
+                    "w-full flex items-center gap-2 p-2 rounded-xl transition-all text-left",
+                    isSelected
+                      ? "bg-primary text-white shadow-md"
+                      : "bg-white border border-border hover:border-primary/30"
+                  )}
+                >
+                  <span className="text-sm font-medium">{index + 1}.</span>
+                  <div className={cn(
+                    "w-5 h-5 rounded flex items-center justify-center flex-shrink-0",
+                    isSelected ? "bg-white/20" : "bg-[#EDEDED]"
+                  )}>
+                    <IconComponent size={14} className={isSelected ? "text-white" : "text-muted-foreground"} />
+                  </div>
+                  <span className="flex-1 text-sm font-medium truncate">
+                    {blockConfig.label}
+                  </span>
+                </button>
+              );
+            })
           ) : (
-            runs.map(run => (
-              <div
-                key={run.id}
-                style={{
-                  padding: 12,
-                  borderBottom: "1px solid #eee",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedRuns.has(run.id)}
-                  onChange={() => handleToggleRun(run.id)}
-                  style={{ cursor: "pointer" }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>
-                    {new Date(run.started_at).toLocaleString()}
+            // Show sessions in responses mode
+            sessions.map((session) => {
+              const isSelected = selectedSessionId === session.id;
+              
+              // Find run for this session to get client_meta
+              const run = runs.find(r => r.id === session.run_id);
+              let userAgent: string | null = null;
+              
+              if (run) {
+                try {
+                  const clientMeta = run.client_meta;
+                  if (typeof clientMeta === "string") {
+                    const parsed = JSON.parse(clientMeta);
+                    userAgent = parsed.user_agent || null;
+                  } else if (clientMeta && typeof clientMeta === "object") {
+                    userAgent = (clientMeta as any).user_agent || null;
+                  }
+                } catch (e) {
+                  console.error("Error parsing client_meta:", e);
+                }
+              }
+              
+              const { os, browser } = parseUserAgent(userAgent);
+              const date = new Date(session.started_at);
+              
+              return (
+                <button
+                  key={session.id}
+                  onClick={() => setSelectedSessionId(session.id)}
+                  className={cn(
+                    "w-full flex flex-col gap-1 p-2 rounded-xl transition-all text-left",
+                    isSelected
+                      ? "bg-primary text-white shadow-md"
+                      : "bg-white border border-border hover:border-primary/30"
+                  )}
+                >
+                  <div className={cn("text-xs font-medium", isSelected ? "text-white" : "text-foreground")}>
+                    {date.toLocaleString("ru-RU")}
                   </div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
-                    Статус: {run.status === "finished" ? "Завершен" : run.status === "started" ? "В процессе" : run.status} {run.finished_at ? `• Завершен: ${new Date(run.finished_at).toLocaleString()}` : ""}
+                  <div className={cn("flex items-center gap-2 text-xs", isSelected ? "text-white/80" : "text-muted-foreground")}>
+                    <span>{os}</span>
+                    <span>•</span>
+                    <span>{browser}</span>
                   </div>
-                </div>
-              </div>
-            ))
+                </button>
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* Block metrics */}
-      {selectedRuns.size > 0 && blocks.length > 0 && (
-        <div>
-          <h3 style={{ marginBottom: 16, fontSize: 18 }}>Метрики по блокам</h3>
-          {blocks.map((block, index) => (
-            <div
-              key={block.id}
-              style={{
-                padding: 16,
-                background: "#fff",
-                borderRadius: 8,
-                marginBottom: 16,
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{
-                  padding: "2px 6px",
-                  borderRadius: 3,
-                  background: getBlockTypeColor(block.type),
-                  color: "white",
-                  fontSize: 11,
-                  fontWeight: "bold"
-                }}>
-                  {getBlockTypeLabel(block.type)} #{index + 1}
-                </span>
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-[#F6F6F6]">
+        <div className="flex-1 overflow-y-auto bg-[#F6F6F6]">
+          <div className="max-w-3xl mx-auto pt-6">
+          {viewMode === "summary" && selectedBlock && (() => {
+            const filteredResponses = responses.filter(r => r.block_id === selectedBlock.id);
+            const filteredSessions = sessions.filter(s => s.block_id === selectedBlock.id);
+            const filteredEvents = events.filter(e => e.block_id === selectedBlock.id);
+            
+            // Логирование для диагностики фильтрации
+            console.log("StudyResultsTab: Filtering data for block:", {
+              block_id: selectedBlock.id,
+              block_type: selectedBlock.type,
+              total_responses: responses.length,
+              filtered_responses: filteredResponses.length,
+              total_sessions: sessions.length,
+              filtered_sessions: filteredSessions.length,
+              total_events: events.length,
+              filtered_events: filteredEvents.length,
+              sample_response: filteredResponses[0] ? {
+                id: filteredResponses[0].id,
+                run_id: filteredResponses[0].run_id,
+                block_id: filteredResponses[0].block_id
+              } : null
+            });
+            
+            return (
+              <BlockReportView
+                block={selectedBlock}
+                responses={filteredResponses}
+                sessions={filteredSessions}
+                events={filteredEvents}
+              prototypes={prototypes}
+              viewMode={viewMode}
+              cardSortingView={cardSortingView}
+              setCardSortingView={setCardSortingView}
+              treeTestingView={treeTestingView}
+              setTreeTestingView={setTreeTestingView}
+              heatmapView={heatmapView}
+              setHeatmapView={setHeatmapView}
+              heatmapTab={heatmapTab}
+              setHeatmapTab={setHeatmapTab}
+              selectedHeatmapScreen={selectedHeatmapScreen}
+              setSelectedHeatmapScreen={setSelectedHeatmapScreen}
+              selectedRespondentScreen={selectedRespondentScreen}
+              setSelectedRespondentScreen={setSelectedRespondentScreen}
+              expandedCategories={expandedCategories}
+              setExpandedCategories={setExpandedCategories}
+              expandedCards={expandedCards}
+              setExpandedCards={setExpandedCards}
+              searchCategoryQuery={searchCategoryQuery}
+              setSearchCategoryQuery={setSearchCategoryQuery}
+              searchCardQuery={searchCardQuery}
+              setSearchCardQuery={setSearchCardQuery}
+              showHiddenCategories={showHiddenCategories}
+              setShowHiddenCategories={setShowHiddenCategories}
+              onlyFirstClicks={onlyFirstClicks}
+              setOnlyFirstClicks={setOnlyFirstClicks}
+              showClickOrder={showClickOrder}
+              setShowClickOrder={setShowClickOrder}
+              />
+            );
+          })()}
+          {viewMode === "responses" && selectedSessionId && (() => {
+            const selectedSession = sessions.find(s => s.id === selectedSessionId);
+            if (!selectedSession) return null;
+            
+            return (
+              <AllBlocksReportView
+                blocks={blocks}
+                sessionId={selectedSession.id}
+                runId={selectedSession.run_id}
+                responses={responses.filter(r => r.run_id === selectedSession.run_id)}
+                sessions={sessions.filter(s => s.run_id === selectedSession.run_id)}
+                events={events.filter(e => e.run_id === selectedSession.run_id)}
+                prototypes={prototypes}
+              />
+            );
+          })()}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Component for rendering block-specific report views
+interface BlockReportViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  sessions: Session[];
+  events: any[];
+  prototypes: Record<string, Proto>;
+  viewMode: ReportViewMode;
+  cardSortingView: CardSortingView;
+  setCardSortingView: (view: CardSortingView) => void;
+  treeTestingView: TreeTestingView;
+  setTreeTestingView: (view: TreeTestingView) => void;
+  heatmapView: HeatmapView;
+  setHeatmapView: (view: HeatmapView) => void;
+  heatmapTab: HeatmapTab;
+  setHeatmapTab: (tab: HeatmapTab) => void;
+  selectedHeatmapScreen: { screen: Screen; proto: Proto; blockId: string; screenIndex: number; totalScreens: number } | null;
+  setSelectedHeatmapScreen: (screen: { screen: Screen; proto: Proto; blockId: string; screenIndex: number; totalScreens: number } | null) => void;
+  selectedRespondentScreen: { screen: Screen; proto: Proto; session: Session; screenIndex: number; totalScreens: number } | null;
+  setSelectedRespondentScreen: (screen: { screen: Screen; proto: Proto; session: Session; screenIndex: number; totalScreens: number } | null) => void;
+  expandedCategories: Set<string>;
+  setExpandedCategories: (set: Set<string>) => void;
+  expandedCards: Set<string>;
+  setExpandedCards: (set: Set<string>) => void;
+  searchCategoryQuery: string;
+  setSearchCategoryQuery: (query: string) => void;
+  searchCardQuery: string;
+  setSearchCardQuery: (query: string) => void;
+  showHiddenCategories: boolean;
+  setShowHiddenCategories: (show: boolean) => void;
+  onlyFirstClicks: boolean;
+  setOnlyFirstClicks: (only: boolean) => void;
+  showClickOrder: boolean;
+  setShowClickOrder: (show: boolean) => void;
+}
+
+function BlockReportView({
+  block,
+  responses,
+  sessions,
+  events,
+  prototypes,
+  viewMode,
+  cardSortingView,
+  setCardSortingView,
+  treeTestingView,
+  setTreeTestingView,
+  heatmapView,
+  setHeatmapView,
+  heatmapTab,
+  setHeatmapTab,
+  selectedHeatmapScreen,
+  setSelectedHeatmapScreen,
+  selectedRespondentScreen,
+  setSelectedRespondentScreen,
+  expandedCategories,
+  setExpandedCategories,
+  expandedCards,
+  setExpandedCards,
+  searchCategoryQuery,
+  setSearchCategoryQuery,
+  searchCardQuery,
+  setSearchCardQuery,
+  showHiddenCategories,
+  setShowHiddenCategories,
+  onlyFirstClicks,
+  setOnlyFirstClicks,
+  showClickOrder,
+  setShowClickOrder
+}: BlockReportViewProps) {
+  // Render based on block type
+  switch (block.type) {
+    case "open_question":
+      return <OpenQuestionView block={block} responses={responses} viewMode={viewMode} />;
+    case "scale":
+      return <ScaleView block={block} responses={responses} viewMode={viewMode} />;
+    case "choice":
+      return <ChoiceView block={block} responses={responses} viewMode={viewMode} />;
+    case "preference":
+      return <PreferenceView block={block} responses={responses} viewMode={viewMode} />;
+    case "card_sorting":
+      return (
+        <CardSortingViewComponent
+          block={block}
+          responses={responses}
+          viewMode={viewMode}
+          cardSortingView={cardSortingView}
+          setCardSortingView={setCardSortingView}
+          expandedCategories={expandedCategories}
+          setExpandedCategories={setExpandedCategories}
+          expandedCards={expandedCards}
+          setExpandedCards={setExpandedCards}
+          searchCategoryQuery={searchCategoryQuery}
+          setSearchCategoryQuery={setSearchCategoryQuery}
+          searchCardQuery={searchCardQuery}
+          setSearchCardQuery={setSearchCardQuery}
+          showHiddenCategories={showHiddenCategories}
+          setShowHiddenCategories={setShowHiddenCategories}
+        />
+      );
+    case "tree_testing":
+      return (
+        <TreeTestingView
+          block={block}
+          responses={responses}
+          viewMode={viewMode}
+          treeTestingView={treeTestingView}
+          setTreeTestingView={setTreeTestingView}
+        />
+      );
+    case "prototype":
+      return (
+        <PrototypeView
+          block={block}
+          sessions={sessions}
+          events={events}
+          prototypes={prototypes}
+          viewMode={viewMode}
+          heatmapView={heatmapView}
+          setHeatmapView={setHeatmapView}
+          heatmapTab={heatmapTab}
+          setHeatmapTab={setHeatmapTab}
+          selectedHeatmapScreen={selectedHeatmapScreen}
+          setSelectedHeatmapScreen={setSelectedHeatmapScreen}
+          selectedRespondentScreen={selectedRespondentScreen}
+          setSelectedRespondentScreen={setSelectedRespondentScreen}
+          onlyFirstClicks={onlyFirstClicks}
+          setOnlyFirstClicks={setOnlyFirstClicks}
+          showClickOrder={showClickOrder}
+          setShowClickOrder={setShowClickOrder}
+        />
+      );
+    case "umux_lite":
+      return <UmuxLiteView block={block} responses={responses} viewMode={viewMode} />;
+    case "context":
+      return <ContextView block={block} responses={responses} viewMode={viewMode} />;
+    case "five_seconds":
+      return <FiveSecondsView block={block} responses={responses} viewMode={viewMode} />;
+    case "first_click":
+      return <FirstClickView block={block} responses={responses} viewMode={viewMode} />;
+    default:
+      return (
+        <div className="max-w-full">
+          <Card className="p-6">
+            <div className="text-lg font-semibold mb-4">
+              {getBlockTypeConfig(block.type).label}
+            </div>
+            <div className="text-muted-foreground">
+              Визуализация для этого типа блока пока не реализована.
+            </div>
+          </Card>
+        </div>
+      );
+  }
+}
+
+// Open Question View
+interface OpenQuestionViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function OpenQuestionView({ block, responses, viewMode }: OpenQuestionViewProps) {
+  const question = block.config?.question || "Вопрос";
+  const imageUrl = block.config?.image;
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Question Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Вопрос</h2>
+            <p className="text-base mb-4">{question}</p>
+            {imageUrl && (
+              <div className="mb-4">
+                <img 
+                  src={imageUrl} 
+                  alt="Question image" 
+                  className="max-w-full h-auto rounded-lg border border-border"
+                />
               </div>
+            )}
+          </div>
 
-              {block.type === "prototype" ? (
-                <div>
-                  {(() => {
-                    const metrics = calculatePrototypeBlockMetrics(block.id);
-                    
-                    return (
-                      <div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
-                          <div>
-                            <div style={{ fontSize: 12, color: "#666" }}>Сессий</div>
-                            <div style={{ fontSize: 18, fontWeight: "bold" }}>{metrics.sessionsCount}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 12, color: "#666" }}>Завершено</div>
-                            <div style={{ fontSize: 18, fontWeight: "bold", color: "#4caf50" }}>{metrics.completed}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 12, color: "#666" }}>Сдались</div>
-                            <div style={{ fontSize: 18, fontWeight: "bold", color: "#ff9800" }}>{metrics.aborted}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 12, color: "#666" }}>Всего событий</div>
-                            <div style={{ fontSize: 18, fontWeight: "bold" }}>{metrics.totalEvents}</div>
-                          </div>
-                        </div>
-                        
-                        {Object.keys(metrics.eventsByType).length > 0 && (
-                          <div style={{ marginBottom: 16 }}>
-                            <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>События по типу:</div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                              {Object.entries(metrics.eventsByType).map(([type, count]) => (
-                                <span key={type} style={{ padding: "4px 8px", background: "#f5f5f5", borderRadius: 4, fontSize: 12 }}>
-                                  {type}: {count}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        
-                        
-                        {metrics.sessionsData && metrics.sessionsData.length > 0 && (
-                          <div style={{ marginTop: 20 }}>
-                            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: "#333" }}>Респонденты ({metrics.sessionsData.length})</div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                              {metrics.sessionsData.map(({ session, events: sessionEvents, clicks: sessionClicks, status }) => (
-                                <div key={session.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, background: "#fff" }}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                                    <div style={{ flex: 1 }}>
-                                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                                        Сессия {session.id.substring(0, 8)}...
-                                      </div>
-                                      <div style={{ fontSize: 11, color: "#666" }}>
-                                        {new Date(session.started_at).toLocaleString("ru-RU")}
-                                        {session.event_count !== undefined && ` • ${session.event_count} событий`}
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <span style={{
-                                        padding: "4px 8px",
-                                        borderRadius: 4,
-                                        fontSize: 11,
-                                        fontWeight: 500,
-                                        background: status === "completed" ? "#e8f5e9" : status === "aborted" ? "#fff3e0" : "#e3f2fd",
-                                        color: status === "completed" ? "#2e7d32" : status === "aborted" ? "#e65100" : "#1565c0"
-                                      }}>
-                                        {status === "completed" ? "✓ Пройден" : status === "aborted" ? "⚠ Сдался" : "⏳ В процессе"}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  
-                                  {expandedSessions.has(session.id) ? (
-                                    <div style={{ marginTop: 12 }}>
-                                      <button
-                                        onClick={() => {
-                                          const newSet = new Set(expandedSessions);
-                                          newSet.delete(session.id);
-                                          setExpandedSessions(newSet);
-                                        }}
-                                        style={{ marginBottom: 12, padding: "6px 12px", background: "#f5f5f5", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
-                                      >
-                                        Свернуть
-                                      </button>
-                                      
-                                      <div style={{ marginBottom: 12 }}>
-                                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>События ({sessionEvents.length})</div>
-                                        <div style={{ maxHeight: 400, overflowY: "auto", border: "1px solid #eee", borderRadius: 4 }}>
-                                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                                            <thead style={{ background: "#f5f5f5", position: "sticky", top: 0 }}>
-                                              <tr>
-                                                <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Время</th>
-                                                <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Тип</th>
-                                                <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Экран</th>
-                                                <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>Область клика</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {groupClicksByScreen(sessionEvents, session.prototype_id || null).map((groupedEvent, idx) => (
-                                                <tr key={`${groupedEvent.timestamp}-${idx}`} style={{ borderBottom: "1px solid #eee" }}>
-                                                  <td style={{ padding: "8px" }}>
-                                                    {new Date(groupedEvent.timestamp).toLocaleTimeString("ru-RU")}
-                                                  </td>
-                                                  <td style={{ padding: "8px" }}>
-                                                    <span style={{
-                                                      padding: "2px 6px",
-                                                      borderRadius: 3,
-                                                      background: groupedEvent.event_type === "completed" ? "#4caf50" : 
-                                                                groupedEvent.event_type === "clicks" ? "#2196f3" :
-                                                                groupedEvent.event_type === "hotspot_click" ? "#2196f3" :
-                                                                groupedEvent.event_type === "scroll" ? "#9c27b0" :
-                                                                groupedEvent.event_type === "closed" ? "#f44336" :
-                                                                groupedEvent.event_type === "aborted" ? "#ff9800" : "#ff9800",
-                                                      color: "white",
-                                                      fontSize: 10
-                                                    }}>
-                                                      {groupedEvent.event_type === "clicks" ? "Клики" : translateEventType(groupedEvent.event_type)}
-                                                      {groupedEvent.event_type === "scroll" && groupedEvent.scroll_type && (
-                                                        <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.9 }}>
-                                                          ({groupedEvent.scroll_type === "vertical" ? "верт." : groupedEvent.scroll_type === "horizontal" ? "гор." : "оба"})
-                                                        </span>
-                                                      )}
-                                                    </span>
-                                                  </td>
-                                                  <td style={{ padding: "8px", fontSize: 11 }}>
-                                                    {getScreenName(session.prototype_id || null, groupedEvent.screen_id)}
-                                                  </td>
-                                                  <td style={{ padding: "8px", fontSize: 11 }}>
-                                                    {groupedEvent.clicks || "-"}
-                                                  </td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      </div>
-                                      
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={() => {
-                                        const newSet = new Set(expandedSessions);
-                                        newSet.add(session.id);
-                                        setExpandedSessions(newSet);
-                                      }}
-                                      style={{ marginTop: 8, padding: "6px 12px", background: "#007AFF", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
-                                    >
-                                      Показать детали
-                                    </button>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        
-                        {/* Хитмап кликов по экранам */}
-                        {(() => {
-                          const protoId = block.prototype_id;
-                          const proto = protoId ? prototypes[protoId] : null;
-                          if (!proto || !proto.screens || proto.screens.length === 0) {
-                            return null;
-                          }
-
-                          const currentFilter = heatmapFilterSessions[block.id] || new Set<string>();
-                          const blockSessionsForHeatmap = metrics.sessionsData?.map(s => s.session) || [];
-                          const blockSessionIds = new Set(blockSessionsForHeatmap.map(s => s.id));
-                          const filteredSessionIds = currentFilter.size > 0 ? currentFilter : blockSessionIds;
-                          const heatmapData = calculateHeatmapData(block.id, filteredSessionIds);
-                          const screenTimes = calculateScreenTimes(block.id);
-                          const screenTimesMap = screenTimes.reduce((acc, st) => {
-                            acc[st.screenId] = st;
-                            return acc;
-                          }, {} as Record<string, { screenId: string; screenName: string; totalTime: number; visitCount: number }>);
-
-                          // Фильтруем экраны по flow
-                          const validScreenIds = new Set<string>();
-                          if (proto.start) validScreenIds.add(proto.start);
-                          if (proto.end) validScreenIds.add(proto.end);
-                          (proto.edges || []).forEach(edge => {
-                            validScreenIds.add(edge.from);
-                            validScreenIds.add(edge.to);
-                          });
-                          
-                          const taskScreens = proto.screens
-                            .filter(screen => validScreenIds.has(screen.id))
-                            .map(screen => ({ screen, proto }));
-                          
-                          if (taskScreens.length === 0) return null;
-
-                          // Сортируем экраны по пути
-                          taskScreens.sort((a, b) => {
-                            if (!proto.start || !proto.end) return 0;
-                            if (a.screen.id === proto.start) return -1;
-                            if (b.screen.id === proto.start) return 1;
-                            if (a.screen.id === proto.end) return 1;
-                            if (b.screen.id === proto.end) return -1;
-                            return 0;
-                          });
-
-                          const containerWidth = 700;
-                          const screenCount = taskScreens.length;
-                          const gapSize = 16;
-                          const availableWidth = containerWidth - (screenCount - 1) * gapSize;
-                          const baseWidth = availableWidth / Math.max(screenCount, 1);
-                          const scale = baseWidth / Math.max(...taskScreens.map(s => s.screen.width), 300);
-
-                          return (
-                            <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid #eee" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-                                <h4 style={{ fontSize: 14, margin: 0, color: "#333" }}>Хитмап кликов</h4>
-                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                  <label style={{ fontSize: 11, color: "#666" }}>Фильтр:</label>
-                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                                    <button
-                                      onClick={() => {
-                                        if (currentFilter.size === blockSessionsForHeatmap.length) {
-                                          setHeatmapFilterSessions(prev => ({ ...prev, [block.id]: new Set<string>() }));
-                                        } else {
-                                          setHeatmapFilterSessions(prev => ({ ...prev, [block.id]: blockSessionIds }));
-                                        }
-                                      }}
-                                      style={{
-                                        padding: "3px 6px",
-                                        borderRadius: 4,
-                                        border: "1px solid #ddd",
-                                        fontSize: 10,
-                                        cursor: "pointer",
-                                        background: currentFilter.size === blockSessionsForHeatmap.length ? "#2196f3" : "white",
-                                        color: currentFilter.size === blockSessionsForHeatmap.length ? "white" : "#333"
-                                      }}
-                                    >
-                                      {currentFilter.size === blockSessionsForHeatmap.length ? "Снять все" : "Все"}
-                                    </button>
-                                    {blockSessionsForHeatmap.slice(0, 5).map(session => {
-                                      const isSelected = currentFilter.has(session.id);
-                                      return (
-                                        <button
-                                          key={session.id}
-                                          onClick={() => {
-                                            const newFilter = new Set(currentFilter);
-                                            if (isSelected) {
-                                              newFilter.delete(session.id);
-                                            } else {
-                                              newFilter.add(session.id);
-                                            }
-                                            setHeatmapFilterSessions(prev => ({ ...prev, [block.id]: newFilter }));
-                                          }}
-                                          style={{
-                                            padding: "3px 6px",
-                                            borderRadius: 4,
-                                            border: "1px solid #ddd",
-                                            fontSize: 10,
-                                            cursor: "pointer",
-                                            background: isSelected ? "#2196f3" : "white",
-                                            color: isSelected ? "white" : "#333"
-                                          }}
-                                        >
-                                          {session.id.substring(0, 6)}...
-                                        </button>
-                                      );
-                                    })}
-                                    {blockSessionsForHeatmap.length > 5 && (
-                                      <span style={{ fontSize: 10, color: "#999", padding: "3px" }}>+{blockSessionsForHeatmap.length - 5} ещё</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              <div style={{ 
-                                display: "flex", 
-                                gap: gapSize, 
-                                overflowX: "auto",
-                                paddingBottom: 8
-                              }}>
-                                {taskScreens.map(({ screen }) => {
-                                  const clicks = heatmapData[screen.id] || [];
-                                  const maxCount = clicks.length > 0 ? Math.max(...clicks.map(c => c.count)) : 0;
-                                  const previewWidth = Math.min(screen.width * scale, 200);
-                                  const previewHeight = previewWidth * (screen.height / screen.width);
-                                  const isFinalScreen = screen.id === proto.end || screen.name.toLowerCase().includes('[final]');
-                                  const screenTimeData = screenTimesMap[screen.id];
-                                  
-                                  return (
-                                    <div 
-                                      key={screen.id} 
-                                      style={{ 
-                                        flexShrink: 0,
-                                        cursor: "pointer",
-                                        transition: "transform 0.2s"
-                                      }}
-                                      onClick={() => setSelectedHeatmapScreen({ screen, proto, clicks, blockId: block.id })}
-                                      onMouseEnter={(e) => {
-                                        e.currentTarget.style.transform = "scale(1.05)";
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        e.currentTarget.style.transform = "scale(1)";
-                                      }}
-                                    >
-                                      <div style={{ marginBottom: 6, fontSize: 11, fontWeight: 500, textAlign: "center", maxWidth: previewWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                        {screen.name}
-                                      </div>
-                                      <div style={{ 
-                                        position: "relative", 
-                                        display: "inline-block", 
-                                        border: "1px solid #ddd", 
-                                        borderRadius: 4,
-                                        width: previewWidth,
-                                        height: previewHeight,
-                                        overflow: "hidden"
-                                      }}>
-                                        <img 
-                                          src={screen.image} 
-                                          alt={screen.name}
-                                          style={{ 
-                                            display: "block", 
-                                            width: previewWidth,
-                                            height: previewHeight,
-                                            objectFit: "contain"
-                                          }}
-                                        />
-                                        {clicks.length > 0 && (
-                                          <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
-                                            {clicks.map((click, idx) => {
-                                              const opacity = maxCount > 0 ? Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5) : 0.5;
-                                              const size = Math.max(4, Math.min(16, 4 + (click.count / maxCount) * 12));
-                                              return (
-                                                <div
-                                                  key={idx}
-                                                  style={{
-                                                    position: "absolute",
-                                                    left: `${(click.x / screen.width) * 100}%`,
-                                                    top: `${(click.y / screen.height) * 100}%`,
-                                                    width: size,
-                                                    height: size,
-                                                    borderRadius: "50%",
-                                                    background: `rgba(255, 0, 0, ${opacity})`,
-                                                    transform: "translate(-50%, -50%)",
-                                                    pointerEvents: "none",
-                                                    border: "1px solid rgba(255, 255, 255, 0.8)",
-                                                    boxShadow: "0 0 2px rgba(0,0,0,0.3)"
-                                                  }}
-                                                  title={`${click.count} клик${click.count > 1 ? "ов" : ""}`}
-                                                />
-                                              );
-                                            })}
-                                          </div>
-                                        )}
-                                      </div>
-                                      {screenTimeData && (
-                                        <div style={{ fontSize: 9, color: "#666", marginTop: 4, textAlign: "center" }}>
-                                          <div>Всего: {formatTime(screenTimeData.totalTime)}</div>
-                                          <div>Посещений: {screenTimeData.visitCount}</div>
-                                        </div>
-                                      )}
-                                      {clicks.length === 0 && !isFinalScreen && (
-                                        <div style={{ fontSize: 9, color: "#999", marginTop: 4, textAlign: "center" }}>
-                                          Нет кликов
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })()}
+          {/* Results Section */}
+          {viewMode === "responses" && (
+            <div className="border-t border-border pt-6">
+              <h3 className="text-lg font-semibold mb-4">Ответы ({responses.length})</h3>
+              <div className="space-y-4">
+                {responses.map((response, idx) => {
+                  const answerText = typeof response.answer === "string" 
+                    ? response.answer 
+                    : response.answer?.text || JSON.stringify(response.answer);
+                  const date = new Date(response.created_at);
+                  
+                  return (
+                    <div key={response.id || idx} className="border-b border-border pb-4 last:border-0">
+                      <div className="text-sm text-muted-foreground mb-2">
+                        {date.toLocaleString("ru-RU")}
                       </div>
-                    );
-                  })()}
-                </div>
-              ) : block.type === "context" || block.type === "five_seconds" ? (
-                <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8, fontSize: 13, color: "#666" }}>
-                  {block.type === "context" ? "Информационный блок — не собирает данные" : "Блок «5 секунд» — переход без сохранения данных"}
-                </div>
-              ) : (
-                <div>
-                  {(() => {
-                    const metrics = calculateQuestionBlockMetrics(block.id);
-                    return (
-                      <div>
-                        <div style={{ marginBottom: 12 }}>
-                          <div style={{ fontSize: 12, color: "#666" }}>Ответов</div>
-                          <div style={{ fontSize: 18, fontWeight: "bold" }}>{metrics.responsesCount}</div>
-                        </div>
-                        {metrics.responses.length > 0 && (
-                          <div style={{ marginTop: 12 }}>
-                            <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>Ответы:</div>
-                            <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                              {metrics.responses.slice(0, 10).map((r, idx) => (
-                                <div key={idx} style={{ padding: 8, background: "#f9f9f9", borderRadius: 4, marginBottom: 8 }}>
-                                  <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
-                                    {new Date(r.created_at).toLocaleString()}
-                                    {r.duration_ms && ` • ${(r.duration_ms / 1000).toFixed(1)}s`}
-                                  </div>
-                                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                    {formatAnswer(r.answer, block.type)}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                      <div className="text-base whitespace-pre-wrap">{answerText}</div>
+                    </div>
+                  );
+                })}
+                {responses.length === 0 && (
+                  <div className="text-center text-muted-foreground py-8">
+                    Нет ответов
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Scale View
+interface ScaleViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function ScaleView({ block, responses, viewMode }: ScaleViewProps) {
+  const question = block.config?.question || "Вопрос";
+  const imageUrl = block.config?.image;
+  const scaleType = block.config?.scaleType || "numeric";
+  const minValue = block.config?.minValue || 1;
+  const maxValue = block.config?.maxValue || 5;
+
+  // Calculate statistics
+  const scaleValues: Record<number, number> = {};
+  responses.forEach(r => {
+    const value = typeof r.answer === "object" ? r.answer?.value : r.answer;
+    if (typeof value === "number" && value >= minValue && value <= maxValue) {
+      scaleValues[value] = (scaleValues[value] || 0) + 1;
+    }
+  });
+
+  const totalResponses = responses.length;
+  const maxCount = Math.max(...Object.values(scaleValues), 1);
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Question Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Вопрос</h2>
+            <p className="text-base mb-4">{question}</p>
+            {imageUrl && (
+              <div className="mb-4">
+                <img 
+                  src={imageUrl} 
+                  alt="Question image" 
+                  className="max-w-full h-auto rounded-lg border border-border"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Results Section */}
+          <div className="border-t border-border pt-6">
+            <h3 className="text-lg font-semibold mb-4">Результаты</h3>
+            <div className="space-y-4">
+              {Array.from({ length: maxValue - minValue + 1 }, (_, i) => minValue + i).map(value => {
+                const count = scaleValues[value] || 0;
+                const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                
+                return (
+                  <div key={value} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{value}</span>
+                      <span className="text-muted-foreground">
+                        ответы {count}
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {totalResponses === 0 && (
+                <div className="text-center text-muted-foreground py-8">
+                  Нет ответов
                 </div>
               )}
             </div>
-          ))}
+          </div>
         </div>
-      )}
+      </Card>
+    </div>
+  );
+}
+
+// Choice View
+interface ChoiceViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function ChoiceView({ block, responses, viewMode }: ChoiceViewProps) {
+  const question = block.config?.question || "Вопрос";
+  const imageUrl = block.config?.image;
+  const options = block.config?.options || [];
+  const allowMultiple = block.config?.allowMultiple || false;
+  const allowOther = block.config?.allowOther || false;
+
+  // Calculate statistics
+  const optionCounts: Record<string, number> = {};
+  const otherAnswers: string[] = [];
+
+  responses.forEach(r => {
+    const answer = r.answer;
+    if (typeof answer === "object") {
+      if (answer.selected && Array.isArray(answer.selected)) {
+        answer.selected.forEach((opt: string) => {
+          optionCounts[opt] = (optionCounts[opt] || 0) + 1;
+        });
+      }
+      if (answer.other) {
+        otherAnswers.push(answer.other);
+      }
+    }
+  });
+
+  const totalResponses = responses.length;
+  const maxCount = Math.max(...Object.values(optionCounts), 1);
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Question Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Вопрос</h2>
+            <p className="text-base mb-4">{question}</p>
+            {imageUrl && (
+              <div className="mb-4">
+                <img 
+                  src={imageUrl} 
+                  alt="Question image" 
+                  className="max-w-full h-auto rounded-lg border border-border"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Results Section */}
+          <div className="border-t border-border pt-6">
+            <h3 className="text-lg font-semibold mb-4">Результаты</h3>
+            <div className="space-y-4">
+              {options.map((option: string, idx: number) => {
+                const count = optionCounts[option] || 0;
+                const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                
+                return (
+                  <div key={idx} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{option}</span>
+                      <span className="text-muted-foreground">
+                        ответы {count}
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {allowOther && otherAnswers.length > 0 && (
+                <div className="mt-6 pt-6 border-t border-border">
+                  <h4 className="text-sm font-semibold mb-3">Другое ({otherAnswers.length})</h4>
+                  <div className="space-y-2">
+                    {otherAnswers.map((answer, idx) => (
+                      <div key={idx} className="text-sm text-muted-foreground">
+                        • {answer}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {totalResponses === 0 && (
+                <div className="text-center text-muted-foreground py-8">
+                  Нет ответов
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Preference View
+interface PreferenceViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function PreferenceView({ block, responses, viewMode }: PreferenceViewProps) {
+  const question = block.config?.question || "Вопрос";
+  const imageUrl = block.config?.image;
+  const options = block.config?.options || [];
+  const optionImages = block.config?.optionImages || [];
+
+  // Calculate statistics
+  const optionCounts: Record<number, number> = {};
+
+  responses.forEach(r => {
+    const answer = r.answer;
+    if (typeof answer === "object") {
+      if (answer.selectedIndex !== undefined) {
+        const idx = answer.selectedIndex;
+        optionCounts[idx] = (optionCounts[idx] || 0) + 1;
+      } else if (answer.wins && typeof answer.wins === "object") {
+        // For pairwise comparison, count wins
+        Object.entries(answer.wins).forEach(([idx, wins]) => {
+          optionCounts[parseInt(idx)] = (optionCounts[parseInt(idx)] || 0) + (wins as number);
+        });
+      }
+    }
+  });
+
+  const totalResponses = responses.length;
+  const maxCount = Math.max(...Object.values(optionCounts), 1);
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Question Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Вопрос</h2>
+            <p className="text-base mb-4">{question}</p>
+            {imageUrl && (
+              <div className="mb-4">
+                <img 
+                  src={imageUrl} 
+                  alt="Question image" 
+                  className="max-w-full h-auto rounded-lg border border-border"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Results Section */}
+          <div className="border-t border-border pt-6">
+            <h3 className="text-lg font-semibold mb-4">Результаты</h3>
+            <div className="space-y-4">
+              {options.map((option: string, idx: number) => {
+                const count = optionCounts[idx] || 0;
+                const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                const optionImage = optionImages[idx];
+                const letter = String.fromCharCode(65 + idx); // A, B, C, etc.
+                
+                return (
+                  <div key={idx} className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      {optionImage && (
+                        <img 
+                          src={optionImage} 
+                          alt={`Option ${letter}`}
+                          className="w-16 h-16 object-cover rounded border border-border"
+                        />
+                      )}
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-sm mb-1">
+                          <span className="font-medium">
+                            {letter}. {option}
+                          </span>
+                          <span className="text-muted-foreground">
+                            ответы {count}
+                          </span>
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                          <div
+                            className="bg-primary h-full transition-all"
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {totalResponses === 0 && (
+                <div className="text-center text-muted-foreground py-8">
+                  Нет ответов
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Card Sorting View
+interface CardSortingViewComponentProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+  cardSortingView: CardSortingView;
+  setCardSortingView: (view: CardSortingView) => void;
+  expandedCategories: Set<string>;
+  setExpandedCategories: (set: Set<string>) => void;
+  expandedCards: Set<string>;
+  setExpandedCards: (set: Set<string>) => void;
+  searchCategoryQuery: string;
+  setSearchCategoryQuery: (query: string) => void;
+  searchCardQuery: string;
+  setSearchCardQuery: (query: string) => void;
+  showHiddenCategories: boolean;
+  setShowHiddenCategories: (show: boolean) => void;
+}
+
+function CardSortingViewComponent({
+  block,
+  responses,
+  viewMode,
+  cardSortingView,
+  setCardSortingView,
+  expandedCategories,
+  setExpandedCategories,
+  expandedCards,
+  setExpandedCards,
+  searchCategoryQuery,
+  setSearchCategoryQuery,
+  searchCardQuery,
+  setSearchCardQuery,
+  showHiddenCategories,
+  setShowHiddenCategories
+}: CardSortingViewComponentProps) {
+  const task = block.config?.task || "Задание";
+  const cards = block.config?.cards || [];
+  const categories = block.config?.categories || [];
+
+  // Helper function to get card identifier (string) from card object or string
+  const getCardId = (card: any): string => {
+    if (typeof card === "string") return card;
+    if (typeof card === "object" && card !== null) {
+      // Card can be {id, title, imageUrl, description} or {value, ...}
+      return card.id || card.value || card.title || String(card);
+    }
+    return String(card);
+  };
+
+  // Helper function to get card display name
+  const getCardName = (card: any): string => {
+    if (typeof card === "string") return card;
+    if (typeof card === "object" && card !== null) {
+      return card.title || card.value || card.id || String(card);
+    }
+    return String(card);
+  };
+
+  // Process responses
+  const categoryCardMap: Record<string, Record<string, number>> = {};
+  const cardCategoryMap: Record<string, Record<string, number>> = {};
+
+  responses.forEach(r => {
+    const answer = r.answer;
+    if (typeof answer === "object" && answer.categories) {
+      Object.entries(answer.categories).forEach(([catName, cardList]) => {
+        const cardArray = Array.isArray(cardList) ? cardList : [];
+        if (!categoryCardMap[catName]) categoryCardMap[catName] = {};
+        cardArray.forEach((card: any) => {
+          const cardId = getCardId(card);
+          categoryCardMap[catName][cardId] = (categoryCardMap[catName][cardId] || 0) + 1;
+          
+          if (!cardCategoryMap[cardId]) cardCategoryMap[cardId] = {};
+          cardCategoryMap[cardId][catName] = (cardCategoryMap[cardId][catName] || 0) + 1;
+        });
+      });
+    }
+  });
+
+  const totalResponses = responses.length;
+
+  // Matrix view
+  const renderMatrixView = () => {
+    const categoryNames = Object.keys(categoryCardMap).length > 0 
+      ? Object.keys(categoryCardMap) 
+      : categories.map((c: any) => c.name || c);
+    
+    return (
+      <div className="space-y-4">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className="border border-border p-2 text-left"></th>
+                {categoryNames.map((cat: string, idx: number) => (
+                  <th key={idx} className="border border-border p-2 text-center font-medium">
+                    {idx + 1}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cards.map((card: any, cardIdx: number) => {
+                const cardId = getCardId(card);
+                const cardName = getCardName(card);
+                return (
+                  <tr key={cardIdx}>
+                    <td className="border border-border p-2 font-medium">{cardName}</td>
+                    {categoryNames.map((cat: string, catIdx: number) => {
+                      const count = categoryCardMap[cat]?.[cardId] || 0;
+                      const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                      return (
+                        <td key={catIdx} className="border border-border p-2 text-center">
+                          {count > 0 ? (
+                            <div className="inline-flex items-center justify-center px-2 py-1 rounded bg-green-100 text-green-800 text-sm font-medium">
+                              {percentage.toFixed(0)}%
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-muted"></div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // Categories view
+  const renderCategoriesView = () => {
+    const categoryNames = Object.keys(categoryCardMap).length > 0 
+      ? Object.keys(categoryCardMap) 
+      : categories.map((c: any) => c.name || c);
+    
+    const filteredCategories = categoryNames.filter((cat: string) => {
+      if (searchCategoryQuery) {
+        return cat.toLowerCase().includes(searchCategoryQuery.toLowerCase());
+      }
+      return true;
+    });
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Поиск категорий"
+              value={searchCategoryQuery}
+              onChange={(e) => setSearchCategoryQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="show-hidden"
+              checked={showHiddenCategories}
+              onCheckedChange={(checked) => setShowHiddenCategories(checked === true)}
+            />
+            <Label htmlFor="show-hidden" className="text-sm">Показать скрытые</Label>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {filteredCategories.map((cat: string, idx: number) => {
+            const cardsInCategory = Object.keys(categoryCardMap[cat] || {});
+            const isExpanded = expandedCategories.has(cat);
+            
+            return (
+              <div key={`category-${cat}-${idx}`} className="border border-border rounded-lg">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const newSet = new Set(expandedCategories);
+                    if (newSet.has(cat)) {
+                      newSet.delete(cat);
+                    } else {
+                      newSet.add(cat);
+                    }
+                    setExpandedCategories(newSet);
+                  }}
+                  className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{idx + 1}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {cardsInCategory.length} карточки
+                    </span>
+                  </div>
+                  {isExpanded ? (
+                    <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+                {isExpanded && cardsInCategory.length > 0 && (
+                  <div className="p-3 pt-0 space-y-2">
+                    {cardsInCategory.map((cardId, cardIdx) => {
+                      const count = categoryCardMap[cat][cardId];
+                      const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                      // Find original card to get display name
+                      const originalCard = cards.find((c: any) => getCardId(c) === cardId);
+                      const cardName = originalCard ? getCardName(originalCard) : cardId;
+                      return (
+                        <div
+                          key={cardIdx}
+                          className="flex items-center justify-between p-2 rounded bg-green-50 border border-green-200"
+                        >
+                          <span className="text-sm font-medium">{cardName}</span>
+                          <span className="text-sm text-muted-foreground">
+                            {percentage.toFixed(0)}% ({count})
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // Cards view
+  const renderCardsView = () => {
+    const allCards = cards.map((c: any) => ({
+      original: c,
+      id: getCardId(c),
+      name: getCardName(c)
+    }));
+    const filteredCards = allCards.filter((card: { original: any; id: string; name: string }) => {
+      if (searchCardQuery) {
+        return card.name.toLowerCase().includes(searchCardQuery.toLowerCase());
+      }
+      return true;
+    });
+
+    return (
+      <div className="space-y-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Поиск карточек"
+            value={searchCardQuery}
+            onChange={(e) => setSearchCardQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        <div className="space-y-4">
+          {filteredCards.map((card: { original: any; id: string; name: string }, idx: number) => {
+            const categoriesForCard = cardCategoryMap[card.id] || {};
+            const totalCount = Object.values(categoriesForCard).reduce((sum: number, count: number) => sum + count, 0);
+            const isExpanded = expandedCards.has(card.id);
+            
+            return (
+              <div key={idx} className="border border-border rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-lg font-semibold">{card.name}</span>
+                  <button
+                    onClick={() => {
+                      const newSet = new Set(expandedCards);
+                      if (isExpanded) {
+                        newSet.delete(card.id);
+                      } else {
+                        newSet.add(card.id);
+                      }
+                      setExpandedCards(newSet);
+                    }}
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                    <div
+                      className="bg-primary h-full transition-all"
+                      style={{ width: `${totalResponses > 0 ? (totalCount / totalResponses) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {Object.keys(categoriesForCard).length} категория
+                    </span>
+                    <span className="text-muted-foreground">
+                      {totalResponses > 0 ? ((totalCount / totalResponses) * 100).toFixed(0) : 0}% ({totalCount})
+                    </span>
+                  </div>
+                  
+                  {isExpanded && Object.keys(categoriesForCard).length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-border space-y-2">
+                      {Object.entries(categoriesForCard).map(([cat, count]) => {
+                        const percentage = totalResponses > 0 ? ((count as number) / totalResponses) * 100 : 0;
+                        return (
+                          <div key={cat} className="flex items-center justify-between text-sm">
+                            <span>{cat}</span>
+                            <span className="text-muted-foreground">
+                              {percentage.toFixed(0)}% ({count})
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Task Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Задание</h2>
+            <p className="text-base">{task}</p>
+          </div>
+
+          {/* Results Section */}
+          <div className="border-t border-border pt-6">
+            <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setCardSortingView("matrix")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              cardSortingView === "matrix"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            Матрица
+          </button>
+          <button
+            onClick={() => setCardSortingView("categories")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              cardSortingView === "categories"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            Категории
+          </button>
+          <button
+            onClick={() => setCardSortingView("cards")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              cardSortingView === "cards"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            Карточки
+          </button>
+        </div>
+
+            {cardSortingView === "matrix" && renderMatrixView()}
+            {cardSortingView === "categories" && renderCategoriesView()}
+            {cardSortingView === "cards" && renderCardsView()}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Tree Testing View
+interface TreeTestingViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+  treeTestingView: TreeTestingView;
+  setTreeTestingView: (view: TreeTestingView) => void;
+}
+
+function TreeTestingView({
+  block,
+  responses,
+  viewMode,
+  treeTestingView,
+  setTreeTestingView
+}: TreeTestingViewProps) {
+  const question = block.config?.question || "Вопрос";
+  const correctPath = block.config?.correctPath || [];
+
+  // Calculate metrics
+  let successCount = 0;
+  let directnessCount = 0;
+  const pathTimes: number[] = [];
+  const paths: Array<{ path: string[]; count: number; isCorrect: boolean }> = [];
+  const firstClicks: Record<string, number> = {};
+  const finalPoints: Record<string, number> = {};
+
+  responses.forEach(r => {
+    const answer = r.answer;
+    if (typeof answer === "object") {
+      if (answer.isCorrect) successCount++;
+      if (answer.isDirect) directnessCount++;
+      if (answer.duration_ms) pathTimes.push(answer.duration_ms);
       
-      {/* Модальное окно для просмотра хитмапа экрана */}
+      const path = answer.pathNames || answer.selectedPath || [];
+      if (path.length > 0) {
+        const pathStr = Array.isArray(path) ? path.join(" › ") : path;
+        const existing = paths.find(p => p.path.join(" › ") === pathStr);
+        if (existing) {
+          existing.count++;
+        } else {
+          paths.push({
+            path: Array.isArray(path) ? path : [path],
+            count: 1,
+            isCorrect: answer.isCorrect || false
+          });
+        }
+      }
+      
+      if (answer.firstClick) {
+        firstClicks[answer.firstClick] = (firstClicks[answer.firstClick] || 0) + 1;
+      }
+      
+      if (answer.finalPoint) {
+        finalPoints[answer.finalPoint] = (finalPoints[answer.finalPoint] || 0) + 1;
+      }
+    }
+  });
+
+  const totalResponses = responses.length;
+  const successRate = totalResponses > 0 ? (successCount / totalResponses) * 100 : 0;
+  const directnessRate = totalResponses > 0 ? (directnessCount / totalResponses) * 100 : 0;
+  const avgTime = pathTimes.length > 0 
+    ? pathTimes.reduce((a, b) => a + b, 0) / pathTimes.length / 1000 
+    : 0;
+  const medianTime = pathTimes.length > 0
+    ? [...pathTimes].sort((a, b) => a - b)[Math.floor(pathTimes.length / 2)] / 1000
+    : 0;
+
+  const sortedPaths = [...paths].sort((a, b) => b.count - a.count);
+  const sortedFirstClicks = Object.entries(firstClicks).sort((a, b) => b[1] - a[1]);
+  const sortedFinalPoints = Object.entries(finalPoints).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Question Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Вопрос</h2>
+            <p className="text-base">{question}</p>
+          </div>
+
+          {/* Results Section */}
+          <div className="border-t border-border pt-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Процент успеха</div>
+            <div className="text-2xl font-bold">{successRate.toFixed(0)}%</div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
+              Прямота
+              <div className="group relative">
+                <span className="cursor-help">ℹ️</span>
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-popover border border-border rounded shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                  Измерять, насколько эффективно респонденты добирались до цели. Больше процент означает, что респонденты сделали меньше ненужных шагов
+                </div>
+              </div>
+            </div>
+            <div className="text-2xl font-bold">{directnessRate.toFixed(0)}%</div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Среднее время</div>
+            <div className="text-2xl font-bold">{avgTime.toFixed(2)} с</div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Медианное время</div>
+            <div className="text-2xl font-bold">{medianTime.toFixed(2)} с</div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setTreeTestingView("common_paths")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              treeTestingView === "common_paths"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            Самые частые пути
+          </button>
+          <button
+            onClick={() => setTreeTestingView("first_clicks")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              treeTestingView === "first_clicks"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            Первые клики
+          </button>
+          <button
+            onClick={() => setTreeTestingView("final_points")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              treeTestingView === "final_points"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            Финальные точки
+          </button>
+        </div>
+
+        <div className="space-y-4">
+            {treeTestingView === "common_paths" && (
+            <>
+              {sortedPaths.map((pathData, idx) => {
+                const percentage = totalResponses > 0 ? (pathData.count / totalResponses) * 100 : 0;
+                return (
+                  <div key={idx} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        {pathData.isCorrect ? (
+                          <CircleCheck className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <CircleMinus className="h-4 w-4 text-muted-foreground" />
+                        )}
+                        <span className="font-medium">{pathData.path.join(" › ")}</span>
+                      </div>
+                      <span className="text-muted-foreground">
+                        {percentage.toFixed(1)}% ({pathData.count})
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {treeTestingView === "first_clicks" && (
+            <>
+              {sortedFirstClicks.map(([click, count], idx) => {
+                const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                return (
+                  <div key={idx} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{click}</span>
+                      <span className="text-muted-foreground">
+                        {percentage.toFixed(1)}% ({count})
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {treeTestingView === "final_points" && (
+            <>
+              {sortedFinalPoints.map(([point, count], idx) => {
+                const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                return (
+                  <div key={idx} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{point}</span>
+                      <span className="text-muted-foreground">
+                        {percentage.toFixed(1)}% ({count})
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-6 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {totalResponses === 0 && (
+            <div className="text-center text-muted-foreground py-8">
+              Нет ответов
+            </div>
+          )}
+        </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// UMUX Lite View
+interface UmuxLiteViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function UmuxLiteView({ block, responses, viewMode }: UmuxLiteViewProps) {
+  // Calculate statistics
+  const scores: number[] = [];
+  const susScores: number[] = [];
+  const feedbacks: string[] = [];
+
+  responses.forEach(r => {
+    const answer = r.answer;
+    if (typeof answer === "object") {
+      if (typeof answer.umux_lite_score === "number") {
+        scores.push(answer.umux_lite_score);
+      }
+      if (typeof answer.sus_score === "number") {
+        susScores.push(answer.sus_score);
+      }
+      if (typeof answer.feedback === "string" && answer.feedback.trim()) {
+        feedbacks.push(answer.feedback);
+      }
+    }
+  });
+
+  const totalResponses = responses.length;
+  const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  const avgSusScore = susScores.length > 0 ? susScores.reduce((a, b) => a + b, 0) / susScores.length : 0;
+  const medianScore = scores.length > 0
+    ? [...scores].sort((a, b) => a - b)[Math.floor(scores.length / 2)]
+    : 0;
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          {/* Question Section */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4">UMUX Lite</h2>
+            <p className="text-base text-muted-foreground mb-4">
+              Метрика удобства использования интерфейса
+            </p>
+          </div>
+
+          {/* Results Section */}
+          <div className="border-t border-border pt-6">
+            <h3 className="text-lg font-semibold mb-4">Результаты</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Средний UMUX Lite</div>
+            <div className="text-2xl font-bold">{avgScore.toFixed(1)}</div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Медианный UMUX Lite</div>
+            <div className="text-2xl font-bold">{medianScore.toFixed(1)}</div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Средний SUS Score</div>
+            <div className="text-2xl font-bold">{avgSusScore.toFixed(1)}</div>
+          </div>
+        </div>
+
+        {viewMode === "responses" && (
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold">Ответы ({totalResponses})</h4>
+            {responses.map((response, idx) => {
+              const answer = response.answer;
+              const umuxScore = typeof answer === "object" && typeof answer.umux_lite_score === "number" 
+                ? answer.umux_lite_score 
+                : null;
+              const susScore = typeof answer === "object" && typeof answer.sus_score === "number"
+                ? answer.sus_score
+                : null;
+              const feedback = typeof answer === "object" && typeof answer.feedback === "string"
+                ? answer.feedback
+                : null;
+              const date = new Date(response.created_at);
+              
+              return (
+                <div key={response.id || idx} className="border-b border-border pb-4 last:border-0">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm text-muted-foreground">
+                      {date.toLocaleString("ru-RU")}
+                    </div>
+                    <div className="flex gap-4 text-sm">
+                      {umuxScore !== null && (
+                        <span className="font-medium">UMUX: {umuxScore.toFixed(1)}</span>
+                      )}
+                      {susScore !== null && (
+                        <span className="font-medium">SUS: {susScore.toFixed(1)}</span>
+                      )}
+                    </div>
+                  </div>
+                  {feedback && (
+                    <div className="text-base whitespace-pre-wrap mt-2">{feedback}</div>
+                  )}
+                </div>
+              );
+            })}
+            {totalResponses === 0 && (
+              <div className="text-center text-muted-foreground py-8">
+                Нет ответов
+              </div>
+            )}
+            </div>
+          )}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Context View
+interface ContextViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function ContextView({ block, responses, viewMode }: ContextViewProps) {
+  const title = block.config?.title || "Контекст";
+  const description = block.config?.description;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold mb-4">{title}</h2>
+        {description && (
+          <p className="text-base text-muted-foreground">{description}</p>
+        )}
+        <div className="mt-4 text-sm text-muted-foreground">
+          Блок контекста не собирает ответы. Он используется для отображения информации респондентам.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Five Seconds View
+interface FiveSecondsViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function FiveSecondsView({ block, responses, viewMode }: FiveSecondsViewProps) {
+  const instruction = block.config?.instruction || "Инструкция";
+  const imageUrl = block.config?.imageUrl;
+  const duration = block.config?.duration || 5;
+
+  const totalResponses = responses.length;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Тест на {duration} секунд</h2>
+        <p className="text-base mb-4">{instruction}</p>
+        {imageUrl && (
+          <div className="mb-4">
+            <img 
+              src={imageUrl} 
+              alt="Test image" 
+              className="max-w-full h-auto rounded-lg border border-border"
+            />
+          </div>
+        )}
+      </Card>
+
+      {viewMode === "responses" && (
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold mb-4">Ответы ({totalResponses})</h3>
+          <div className="space-y-4">
+            {responses.map((response, idx) => {
+              const answerText = typeof response.answer === "string" 
+                ? response.answer 
+                : response.answer?.text || response.answer?.answer || JSON.stringify(response.answer);
+              const date = new Date(response.created_at);
+              
+              return (
+                <div key={response.id || idx} className="border-b border-border pb-4 last:border-0">
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {date.toLocaleString("ru-RU")}
+                  </div>
+                  <div className="text-base whitespace-pre-wrap">{answerText}</div>
+                </div>
+              );
+            })}
+            {totalResponses === 0 && (
+              <div className="text-center text-muted-foreground py-8">
+                Нет ответов
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+const MEDIAN_TOOLTIP = "Медиана — это значение, разделяющее верхнюю половину от нижней половины ответов. На неё не влияют ответы с очень длинным или коротким временем.";
+
+// First Click View
+interface FirstClickViewProps {
+  block: StudyBlock;
+  responses: StudyBlockResponse[];
+  viewMode: ReportViewMode;
+}
+
+function FirstClickView({ block, responses, viewMode }: FirstClickViewProps) {
+  const [clickMapOpen, setClickMapOpen] = useState(false);
+  const [clickMapTab, setClickMapTab] = useState<"heatmap" | "clicks" | "image">("image");
+
+  const instruction = block.config?.instruction || "Задание";
+  const imageUrl = block.config?.imageUrl;
+  const durations = responses
+    .map((r) => (r.duration_ms != null ? r.duration_ms / 1000 : null))
+    .filter((d): d is number => d != null);
+  const n = durations.length;
+  const avgTime = n > 0 ? durations.reduce((a, b) => a + b, 0) / n : 0;
+  const sorted = [...durations].sort((a, b) => a - b);
+  const medianTime = n > 0 ? sorted[Math.floor(n / 2)]! : 0;
+
+  const clicks = responses
+    .map((r) => {
+      const a = r.answer;
+      if (a && typeof a === "object" && typeof a.x === "number" && typeof a.y === "number") {
+        return { x: a.x, y: a.y };
+      }
+      return null;
+    })
+    .filter((c): c is { x: number; y: number } => c != null);
+
+  return (
+    <div className="max-w-full">
+      <Card className="p-6">
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold mb-2">Тест первого клика</h2>
+            <p className="text-base mb-4">{instruction}</p>
+          </div>
+          {imageUrl && (
+            <div className="flex flex-wrap items-start gap-4">
+              <div className="w-32 h-24 rounded-lg border border-border overflow-hidden bg-muted/30 flex-shrink-0">
+                <img
+                  src={imageUrl}
+                  alt=""
+                  className="w-full h-full object-cover blur-md"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-start">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Среднее время:</span>
+                  <span className="font-medium">{avgTime.toFixed(2)} с</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Медианное время:</span>
+                  <span className="font-medium">{medianTime.toFixed(2)} с</span>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
+                          <Info className="h-4 w-4" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-[240px]">
+                        <p className="text-sm whitespace-pre-line">{MEDIAN_TOOLTIP}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setClickMapOpen(true)}>
+                  <MapIcon className="h-4 w-4 mr-2" />
+                  Открыть карту кликов
+                </Button>
+              </div>
+            </div>
+          )}
+          {!imageUrl && (
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Среднее время:</span>
+                <span className="font-medium">{avgTime.toFixed(2)} с</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Медианное время:</span>
+                <span className="font-medium">{medianTime.toFixed(2)} с</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
+                        <Info className="h-4 w-4" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[240px]">
+                      <p className="text-sm whitespace-pre-line">{MEDIAN_TOOLTIP}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setClickMapOpen(true)}>
+                <MapIcon className="h-4 w-4 mr-2" />
+                Открыть карту кликов
+              </Button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Dialog open={clickMapOpen} onOpenChange={setClickMapOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-8" title={instruction}>
+              {instruction}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex gap-2 mb-4">
+            {(["heatmap", "clicks", "image"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setClickMapTab(tab)}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  clickMapTab === tab
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                {tab === "heatmap" ? "Тепловая карта" : tab === "clicks" ? "Клики" : "Изображение"}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-6">
+            <div className="flex-1 min-w-0">
+              {imageUrl && (
+                <div className="relative rounded-lg border border-border overflow-hidden bg-muted/30">
+                  <img
+                    src={imageUrl}
+                    alt=""
+                    className="w-full h-auto max-h-[50vh] object-contain"
+                  />
+                  {clickMapTab === "clicks" &&
+                    clicks.map((c, i) => (
+                      <div
+                        key={i}
+                        className="absolute w-3 h-3 rounded-full bg-green-500 border-2 border-white shadow"
+                        style={{
+                          left: `${typeof c.x === "number" && c.x <= 1 ? c.x * 100 : 0}%`,
+                          top: `${typeof c.y === "number" && c.y <= 1 ? c.y * 100 : 0}%`,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      />
+                    ))}
+                </div>
+              )}
+              {!imageUrl && (
+                <div className="rounded-lg border border-dashed border-border p-12 text-center text-muted-foreground">
+                  Нет изображения
+                </div>
+              )}
+            </div>
+            <div className="w-48 flex-shrink-0 space-y-3">
+              <div>
+                <div className="text-sm text-muted-foreground">Респонденты</div>
+                <div className="text-lg font-semibold">{n}</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Среднее время</div>
+                <div className="text-lg font-semibold">{avgTime.toFixed(2)} с</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Медианное время</div>
+                <div className="text-lg font-semibold">{medianTime.toFixed(2)} с</div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// Prototype View
+interface PrototypeViewProps {
+  block: StudyBlock;
+  sessions: Session[];
+  events: any[];
+  prototypes: Record<string, Proto>;
+  viewMode: ReportViewMode;
+  heatmapView: HeatmapView;
+  setHeatmapView: (view: HeatmapView) => void;
+  heatmapTab: HeatmapTab;
+  setHeatmapTab: (tab: HeatmapTab) => void;
+  selectedHeatmapScreen: { screen: Screen; proto: Proto; blockId: string; screenIndex: number; totalScreens: number } | null;
+  setSelectedHeatmapScreen: (screen: { screen: Screen; proto: Proto; blockId: string; screenIndex: number; totalScreens: number } | null) => void;
+  selectedRespondentScreen: { screen: Screen; proto: Proto; session: Session; screenIndex: number; totalScreens: number } | null;
+  setSelectedRespondentScreen: (screen: { screen: Screen; proto: Proto; session: Session; screenIndex: number; totalScreens: number } | null) => void;
+  onlyFirstClicks: boolean;
+  setOnlyFirstClicks: (only: boolean) => void;
+  showClickOrder: boolean;
+  setShowClickOrder: (show: boolean) => void;
+}
+
+function PrototypeView({
+  block,
+  sessions,
+  events,
+  prototypes,
+  viewMode,
+  heatmapView,
+  setHeatmapView,
+  heatmapTab,
+  setHeatmapTab,
+  selectedHeatmapScreen,
+  setSelectedHeatmapScreen,
+  selectedRespondentScreen,
+  setSelectedRespondentScreen,
+  onlyFirstClicks,
+  setOnlyFirstClicks,
+  showClickOrder,
+  setShowClickOrder
+}: PrototypeViewProps) {
+  const protoId = block.prototype_id;
+  const proto = protoId ? prototypes[protoId] : null;
+  const taskDescription = block.config?.task || block.instructions || "Задание";
+
+  // Calculate metrics
+  const completedCount = sessions.filter(s => s.completed).length;
+  const abortedCount = sessions.filter(s => s.aborted).length;
+  const closedCount = sessions.filter(s => {
+    const sessionEvents = events.filter(e => e.session_id === s.id);
+    return sessionEvents.some(e => e.event_type === "closed");
+  }).length;
+
+  // Calculate average and median time
+  const sessionTimes: number[] = [];
+  sessions.forEach(session => {
+    const sessionEvents = events.filter(e => e.session_id === session.id);
+    if (sessionEvents.length > 0) {
+      const sortedEvents = [...sessionEvents].sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+      const startTime = new Date(sortedEvents[0].timestamp).getTime();
+      const endTime = new Date(sortedEvents[sortedEvents.length - 1].timestamp).getTime();
+      sessionTimes.push((endTime - startTime) / 1000); // in seconds
+    }
+  });
+
+  const avgTime = sessionTimes.length > 0
+    ? sessionTimes.reduce((a, b) => a + b, 0) / sessionTimes.length
+    : 0;
+  const medianTime = sessionTimes.length > 0
+    ? [...sessionTimes].sort((a, b) => a - b)[Math.floor(sessionTimes.length / 2)]
+    : 0;
+
+  // Get screens for prototype
+  const screens = proto?.screens || [];
+  const screenMap = new Map(screens.map(s => [s.id, s]));
+
+  // Calculate flow data for xyflow
+  const getFlowData = () => {
+    if (!proto) return { nodes: [], edges: [] };
+
+    const nodes = screens.map((screen, idx) => ({
+      id: screen.id,
+      type: 'default',
+      position: { x: idx * 200, y: 0 },
+      data: { label: screen.name },
+      style: { width: 150, height: 100 }
+    }));
+
+    const edges = (proto.edges || []).map(edge => ({
+      id: edge.id,
+      source: edge.from,
+      target: edge.to,
+      type: 'smoothstep',
+      animated: true,
+      markerEnd: { type: MarkerType.ArrowClosed }
+    }));
+
+    return { nodes, edges };
+  };
+
+  const { nodes, edges } = getFlowData();
+
+  // Calculate heatmap data
+  const getHeatmapData = (screenId: string) => {
+    const screenEvents = events.filter(e => 
+      e.screen_id === screenId && 
+      (e.event_type === "click" || e.event_type === "hotspot_click") &&
+      e.x !== undefined && e.y !== undefined
+    );
+
+    const clickMap: Record<string, { x: number; y: number; count: number }> = {};
+    screenEvents.forEach(e => {
+      if (onlyFirstClicks) {
+        // Only count first click per session
+        const sessionFirstClicks = new Set<string>();
+        const sessionId = e.session_id;
+        if (!sessionFirstClicks.has(sessionId)) {
+          sessionFirstClicks.add(sessionId);
+          const key = `${Math.floor(e.x! / 10) * 10}_${Math.floor(e.y! / 10) * 10}`;
+          if (!clickMap[key]) {
+            clickMap[key] = { x: e.x!, y: e.y!, count: 0 };
+          }
+          clickMap[key].count += 1;
+        }
+      } else {
+        const key = `${Math.floor(e.x! / 10) * 10}_${Math.floor(e.y! / 10) * 10}`;
+        if (!clickMap[key]) {
+          clickMap[key] = { x: e.x!, y: e.y!, count: 0 };
+        }
+        clickMap[key].count += 1;
+      }
+    });
+
+    return Object.values(clickMap);
+  };
+
+  // Get screen statistics
+  const getScreenStats = (screenId: string) => {
+    const screenEvents = events.filter(e => e.screen_id === screenId);
+    const screenSessions = new Set(screenEvents.map(e => e.session_id));
+    const clicks = screenEvents.filter(e => 
+      e.event_type === "click" || e.event_type === "hotspot_click"
+    );
+    const misses = clicks.filter(e => !e.hotspot_id).length;
+    
+    // Calculate time on screen
+    const screenLoads = screenEvents.filter(e => e.event_type === "screen_load");
+    let totalTime = 0;
+    screenLoads.forEach(load => {
+      const nextEvent = screenEvents.find(e => 
+        e.timestamp > load.timestamp && 
+        (e.event_type === "screen_load" || e.event_type === "completed" || e.event_type === "aborted")
+      );
+      if (nextEvent) {
+        totalTime += new Date(nextEvent.timestamp).getTime() - new Date(load.timestamp).getTime();
+      }
+    });
+    const avgTimeOnScreen = screenSessions.size > 0 ? (totalTime / screenSessions.size) / 1000 : 0;
+    const medianTimeOnScreen = avgTimeOnScreen; // Simplified
+
+    return {
+      respondents: screenSessions.size,
+      totalClicks: clicks.length,
+      misses,
+      avgTime: avgTimeOnScreen,
+      medianTime: medianTimeOnScreen
+    };
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Header with task number and response count */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-4">
+            <div className="text-2xl font-bold">#{block.order_index + 1}</div>
+            <div>
+              <h2 className="text-xl font-semibold">Задание: {taskDescription}</h2>
+            </div>
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {sessions.length} ответов
+          </div>
+        </div>
+
+        {/* Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
+          <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg">
+            <UserRoundCheck className="h-6 w-6 text-green-600" />
+            <div>
+              <div className="text-sm text-muted-foreground">Справились</div>
+              <div className="text-2xl font-bold">{completedCount}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg">
+            <UserRoundX className="h-6 w-6 text-orange-600" />
+            <div>
+              <div className="text-sm text-muted-foreground">Сдались</div>
+              <div className="text-2xl font-bold">{abortedCount}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg">
+            <UserRoundMinus className="h-6 w-6 text-gray-600" />
+            <div>
+              <div className="text-sm text-muted-foreground">Закрыли прототип</div>
+              <div className="text-2xl font-bold">{closedCount}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg">
+            <Clock className="h-6 w-6 text-blue-600" />
+            <div>
+              <div className="text-sm text-muted-foreground">Среднее время</div>
+              <div className="text-2xl font-bold">{avgTime.toFixed(1)} с</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg">
+            <Clock className="h-6 w-6 text-blue-600" />
+            <div>
+              <div className="text-sm text-muted-foreground">Медианное время</div>
+              <div className="text-2xl font-bold">{medianTime.toFixed(1)} с</div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Flow visualization */}
+      {proto && (
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold mb-4">Пути</h3>
+          <div style={{ height: '400px', width: '100%' }}>
+            <ReactFlow nodes={nodes} edges={edges} fitView>
+              <Background />
+              <Controls />
+              <MiniMap />
+            </ReactFlow>
+          </div>
+        </Card>
+      )}
+
+      {/* Heatmaps and clicks */}
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold mb-4">
+          Тепловые карты и клики
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Смотрите тепловые карты и клики для каждого экрана или отдельных ответов
+        </p>
+
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setHeatmapTab("by_screens")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              heatmapTab === "by_screens"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            По экранам
+          </button>
+          <button
+            onClick={() => setHeatmapTab("by_respondents")}
+            className={cn(
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              heatmapTab === "by_respondents"
+                ? "bg-primary text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            По респондентам
+          </button>
+        </div>
+
+        {heatmapTab === "by_screens" && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {screens.map((screen, idx) => (
+              <button
+                key={screen.id}
+                onClick={() => setSelectedHeatmapScreen({
+                  screen,
+                  proto: proto!,
+                  blockId: block.id,
+                  screenIndex: idx + 1,
+                  totalScreens: screens.length
+                })}
+                className="text-left space-y-2"
+              >
+                <img
+                  src={screen.image}
+                  alt={screen.name}
+                  className="w-full h-auto rounded border border-border"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+                <div className="text-sm font-medium">{screen.name}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {heatmapTab === "by_respondents" && (
+          <div className="space-y-4">
+            {sessions.map((session, idx) => {
+              const sessionEvents = events.filter(e => e.session_id === session.id);
+              const screenIds = Array.from(new Set(sessionEvents.map(e => e.screen_id).filter(Boolean)));
+              
+              return (
+                <div key={session.id} className="border border-border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm">
+                      <div className="font-medium">
+                        {new Date(session.started_at).toLocaleString("ru-RU")}
+                      </div>
+                      <div className="text-muted-foreground">
+                        {session.completed ? "Завершено" : session.aborted ? "Сдался" : "В процессе"}
+                      </div>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {sessionEvents.length} событий
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {screenIds.map((screenId, screenIdx) => {
+                      const screen = screenMap.get(screenId);
+                      if (!screen) return null;
+                      return (
+                        <button
+                          key={screenIdx}
+                          onClick={() => setSelectedRespondentScreen({
+                            screen,
+                            proto: proto!,
+                            session,
+                            screenIndex: screenIdx + 1,
+                            totalScreens: screenIds.length
+                          })}
+                          className="relative"
+                        >
+                          <img
+                            src={screen.image}
+                            alt={screen.name}
+                            className="w-24 h-auto rounded border border-border"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* Modal for heatmap screen */}
       {selectedHeatmapScreen && (
         <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.8)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000
-          }}
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
           onClick={() => setSelectedHeatmapScreen(null)}
         >
           <div
-            style={{
-              position: "relative",
-              maxWidth: "90vw",
-              maxHeight: "90vh",
-              background: "white",
-              borderRadius: 8,
-              padding: 20,
-              overflow: "auto"
-            }}
+            className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              onClick={() => setSelectedHeatmapScreen(null)}
-              style={{
-                position: "absolute",
-                top: 10,
-                right: 10,
-                background: "rgba(0,0,0,0.1)",
-                border: "none",
-                borderRadius: "50%",
-                width: 32,
-                height: 32,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                fontSize: 18
-              }}
-            >
-              ✕
-            </button>
-            
-            <h3 style={{ margin: "0 0 16px 0", fontSize: 18 }}>{selectedHeatmapScreen.screen.name}</h3>
-            
-            <div style={{ position: "relative", display: "inline-block" }}>
-              <img
-                src={selectedHeatmapScreen.screen.image}
-                alt={selectedHeatmapScreen.screen.name}
-                style={{
-                  maxWidth: "80vw",
-                  maxHeight: "70vh",
-                  objectFit: "contain",
-                  borderRadius: 4,
-                  border: "1px solid #ddd"
-                }}
-              />
-              {selectedHeatmapScreen.clicks.length > 0 && (
-                <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
-                  {selectedHeatmapScreen.clicks.map((click, idx) => {
-                    const maxCount = Math.max(...selectedHeatmapScreen.clicks.map(c => c.count));
-                    const opacity = maxCount > 0 ? Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5) : 0.5;
-                    const size = Math.max(8, Math.min(32, 8 + (click.count / maxCount) * 24));
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          position: "absolute",
-                          left: `${(click.x / selectedHeatmapScreen.screen.width) * 100}%`,
-                          top: `${(click.y / selectedHeatmapScreen.screen.height) * 100}%`,
-                          width: size,
-                          height: size,
-                          borderRadius: "50%",
-                          background: `rgba(255, 0, 0, ${opacity})`,
-                          transform: "translate(-50%, -50%)",
-                          pointerEvents: "none",
-                          border: "2px solid rgba(255, 255, 255, 0.9)",
-                          boxShadow: "0 0 4px rgba(0,0,0,0.4)"
-                        }}
-                        title={`${click.count} клик${click.count > 1 ? "ов" : ""}`}
-                      />
-                    );
-                  })}
-                </div>
-              )}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold">
+                {selectedHeatmapScreen.screen.name} ({selectedHeatmapScreen.screenIndex} из {selectedHeatmapScreen.totalScreens})
+              </h3>
+              <button
+                onClick={() => setSelectedHeatmapScreen(null)}
+                className="p-2 hover:bg-muted rounded"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            
-            <div style={{ marginTop: 16, fontSize: 12, color: "#666" }}>
-              <div>Размер экрана: {selectedHeatmapScreen.screen.width} × {selectedHeatmapScreen.screen.height}px</div>
-              <div>Кликов: {selectedHeatmapScreen.clicks.length} позиций, {selectedHeatmapScreen.clicks.reduce((sum, c) => sum + c.count, 0)} всего</div>
+
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setHeatmapView("heatmap")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  heatmapView === "heatmap"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                Тепловая карта
+              </button>
+              <button
+                onClick={() => setHeatmapView("clicks")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  heatmapView === "clicks"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                Клики
+              </button>
+              <button
+                onClick={() => setHeatmapView("image")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  heatmapView === "image"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                Изображение
+              </button>
+            </div>
+
+            <div className="flex gap-6">
+              <div className="flex-1">
+                <div className="relative border border-border rounded-lg overflow-hidden bg-black">
+                  <img
+                    src={selectedHeatmapScreen.screen.image}
+                    alt={selectedHeatmapScreen.screen.name}
+                    className="w-full h-auto"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const errorDiv = document.createElement('div');
+                      errorDiv.className = 'flex items-center justify-center h-64 text-white';
+                      errorDiv.textContent = 'Возможно прототип был изменен после импорта';
+                      target.parentElement?.appendChild(errorDiv);
+                    }}
+                  />
+                  {(heatmapView === "heatmap" || heatmapView === "clicks") && (
+                    <div className="absolute inset-0 pointer-events-none">
+                      {getHeatmapData(selectedHeatmapScreen.screen.id).map((click, idx) => {
+                        const maxCount = Math.max(...getHeatmapData(selectedHeatmapScreen.screen.id).map(c => c.count), 1);
+                        const opacity = Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5);
+                        const size = Math.max(8, Math.min(32, 8 + (click.count / maxCount) * 24));
+                        return (
+                          <div
+                            key={idx}
+                            className="absolute rounded-full bg-red-500 border-2 border-white"
+                            style={{
+                              left: `${(click.x / selectedHeatmapScreen.screen.width) * 100}%`,
+                              top: `${(click.y / selectedHeatmapScreen.screen.height) * 100}%`,
+                              width: `${size}px`,
+                              height: `${size}px`,
+                              transform: 'translate(-50%, -50%)',
+                              opacity
+                            }}
+                            title={`${click.count} клик${click.count > 1 ? 'ов' : ''}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="w-64 space-y-4">
+                {(() => {
+                  const stats = getScreenStats(selectedHeatmapScreen.screen.id);
+                  return (
+                    <>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Респонденты</div>
+                        <div className="text-lg font-semibold">{stats.respondents}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Всего кликов</div>
+                        <div className="text-lg font-semibold">{stats.totalClicks}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Промахи</div>
+                        <div className="text-lg font-semibold">{stats.misses}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Среднее время</div>
+                        <div className="text-lg font-semibold">{stats.avgTime.toFixed(1)} с</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Медианное время</div>
+                        <div className="text-lg font-semibold">{stats.medianTime.toFixed(1)} с</div>
+                      </div>
+                      <div className="pt-4 border-t border-border">
+                        <div className="text-sm font-medium mb-2">Настройки</div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="only-first-clicks"
+                            checked={onlyFirstClicks}
+                            onCheckedChange={(checked) => setOnlyFirstClicks(checked === true)}
+                          />
+                          <Label htmlFor="only-first-clicks" className="text-sm">
+                            Только первые клики
+                          </Label>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for respondent screen */}
+      {selectedRespondentScreen && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          onClick={() => setSelectedRespondentScreen(null)}
+        >
+          <div
+            className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold">
+                {selectedRespondentScreen.screen.name} ({selectedRespondentScreen.screenIndex} из {selectedRespondentScreen.totalScreens})
+              </h3>
+              <button
+                onClick={() => setSelectedRespondentScreen(null)}
+                className="p-2 hover:bg-muted rounded"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex gap-6">
+              <div className="flex-1">
+                <div className="relative border border-border rounded-lg overflow-hidden bg-black">
+                  <img
+                    src={selectedRespondentScreen.screen.image}
+                    alt={selectedRespondentScreen.screen.name}
+                    className="w-full h-auto"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const errorDiv = document.createElement('div');
+                      errorDiv.className = 'flex items-center justify-center h-64 text-white';
+                      errorDiv.textContent = 'Возможно прототип был изменен после импорта';
+                      target.parentElement?.appendChild(errorDiv);
+                    }}
+                  />
+                  {(() => {
+                    const sessionClicks = events
+                      .filter(e => 
+                        e.session_id === selectedRespondentScreen.session.id &&
+                        e.screen_id === selectedRespondentScreen.screen.id &&
+                        (e.event_type === "click" || e.event_type === "hotspot_click") &&
+                        e.x !== undefined && e.y !== undefined
+                      )
+                      .map((e, idx) => ({ ...e, clickOrder: idx + 1 }));
+                    
+                    return (
+                      <div className="absolute inset-0 pointer-events-none">
+                        {sessionClicks.map((click, idx) => (
+                          <div
+                            key={idx}
+                            className="absolute rounded-full bg-red-500 border-2 border-white flex items-center justify-center text-white text-xs font-bold"
+                            style={{
+                              left: `${(click.x! / selectedRespondentScreen.screen.width) * 100}%`,
+                              top: `${(click.y! / selectedRespondentScreen.screen.height) * 100}%`,
+                              width: '24px',
+                              height: '24px',
+                              transform: 'translate(-50%, -50%)'
+                            }}
+                            title={`Клик ${click.clickOrder}`}
+                          >
+                            {showClickOrder && click.clickOrder}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="w-64 space-y-4">
+                {(() => {
+                  const sessionEvents = events.filter(e => 
+                    e.session_id === selectedRespondentScreen.session.id &&
+                    e.screen_id === selectedRespondentScreen.screen.id
+                  );
+                  const clicks = sessionEvents.filter(e => 
+                    e.event_type === "click" || e.event_type === "hotspot_click"
+                  );
+                  const misses = clicks.filter(e => !e.hotspot_id).length;
+                  
+                  // Calculate time on screen
+                  const screenLoad = sessionEvents.find(e => e.event_type === "screen_load");
+                  const nextScreenLoad = events.find(e => 
+                    e.session_id === selectedRespondentScreen.session.id &&
+                    e.timestamp > (screenLoad?.timestamp || '') &&
+                    e.event_type === "screen_load"
+                  );
+                  const timeOnScreen = screenLoad && nextScreenLoad
+                    ? (new Date(nextScreenLoad.timestamp).getTime() - new Date(screenLoad.timestamp).getTime()) / 1000
+                    : 0;
+
+                  return (
+                    <>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Всего кликов</div>
+                        <div className="text-lg font-semibold">{clicks.length}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Промахов</div>
+                        <div className="text-lg font-semibold">{misses}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Время на экране</div>
+                        <div className="text-lg font-semibold">{timeOnScreen.toFixed(1)} с</div>
+                      </div>
+                      <div className="pt-4 border-t border-border">
+                        <div className="text-sm font-medium mb-2">Настройки</div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="click-order"
+                            checked={showClickOrder}
+                            onCheckedChange={(checked) => setShowClickOrder(checked === true)}
+                          />
+                          <Label htmlFor="click-order" className="text-sm">
+                            Порядок кликов
+                          </Label>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </div>
@@ -1595,3 +2834,79 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
   );
 }
 
+// All Blocks Report View - shows all blocks in one card with 1px borders
+interface AllBlocksReportViewProps {
+  blocks: StudyBlock[];
+  sessionId: string;
+  runId: string;
+  responses: StudyBlockResponse[];
+  sessions: Session[];
+  events: any[];
+  prototypes: Record<string, Proto>;
+}
+
+function AllBlocksReportView({
+  blocks,
+  sessionId,
+  runId,
+  responses,
+  sessions,
+  events,
+  prototypes
+}: AllBlocksReportViewProps) {
+  return (
+    <div className="max-w-full">
+      <Card className="p-0 overflow-hidden">
+        <div className="space-y-0">
+          {blocks.map((block, index) => {
+            const blockResponses = responses.filter(r => r.block_id === block.id);
+            const blockSessions = sessions.filter(s => s.block_id === block.id);
+            const blockEvents = events.filter(e => e.block_id === block.id);
+            
+            return (
+              <div key={block.id} className="relative">
+                {index > 0 && <div className="absolute top-0 left-0 right-0 h-px bg-border" />}
+                <div className="p-6">
+                  <BlockReportView
+                    block={block}
+                    responses={blockResponses}
+                    sessions={blockSessions}
+                    events={blockEvents}
+                    prototypes={prototypes}
+                    viewMode="responses"
+                    cardSortingView="matrix"
+                    setCardSortingView={() => {}}
+                    treeTestingView="common_paths"
+                    setTreeTestingView={() => {}}
+                    heatmapView="heatmap"
+                    setHeatmapView={() => {}}
+                    heatmapTab="by_screens"
+                    setHeatmapTab={() => {}}
+                    selectedHeatmapScreen={null}
+                    setSelectedHeatmapScreen={() => {}}
+                    selectedRespondentScreen={null}
+                    setSelectedRespondentScreen={() => {}}
+                    expandedCategories={new Set()}
+                    setExpandedCategories={() => {}}
+                    expandedCards={new Set()}
+                    setExpandedCards={() => {}}
+                    searchCategoryQuery=""
+                    setSearchCategoryQuery={() => {}}
+                    searchCardQuery=""
+                    setSearchCardQuery={() => {}}
+                    showHiddenCategories={false}
+                    setShowHiddenCategories={() => {}}
+                    onlyFirstClicks={false}
+                    setOnlyFirstClicks={() => {}}
+                    showClickOrder={false}
+                    setShowClickOrder={() => {}}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}

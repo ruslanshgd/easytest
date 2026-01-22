@@ -71,11 +71,13 @@ import {
   CheckCircle2,
   Image as ImageIcon,
   ImagePlus,
+  CircleAlert,
+  MousePointerClick,
   type LucideIcon
 } from "lucide-react";
 
 // Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click";
 
 interface Study {
   id: string;
@@ -150,6 +152,12 @@ interface FiveSecondsConfig {
   imageUrl: string;
 }
 
+// Конфиг для типа "Тест первого клика"
+interface FirstClickConfig {
+  instruction: string;
+  imageUrl: string;
+}
+
 // Конфиг для типа "Карточная сортировка"
 interface CardSortingCard {
   id: string;
@@ -202,6 +210,36 @@ const BLOCK_TYPES: { value: BlockType; label: string; Icon: LucideIcon }[] = [
   { value: "card_sorting", label: "Сортировка карточек", Icon: LayoutGrid },
   { value: "tree_testing", label: "Тестирование дерева", Icon: GitBranch },
   { value: "umux_lite", label: "UMUX Lite", Icon: ClipboardList },
+  { value: "first_click", label: "Тест первого клика", Icon: MousePointerClick },
+];
+
+/** Блоки для "Начать с нуля": колонки с иконкой, названием и коротким описанием */
+const START_FROM_SCRATCH_COLUMNS: { title: string; blocks: { type: BlockType; label: string; description: string }[] }[] = [
+  {
+    title: "Базовые блоки",
+    blocks: [
+      { type: "open_question", label: "Вопрос", description: "Свободный ответ на ваш вопрос. Собирайте обратную связь и идеи." },
+      { type: "choice", label: "Выбор", description: "Один или несколько вариантов из списка. Опросы и выбор сценариев." },
+      { type: "scale", label: "Шкала", description: "Оценка по шкале (числа, эмодзи или звёзды). Согласие, удобство, NPS." },
+      { type: "preference", label: "Предпочтение", description: "Сравнение вариантов. Узнайте, какой вариант нравится больше." },
+      { type: "card_sorting", label: "Сортировка карточек", description: "Раскладка карточек по категориям. Изучайте ментальные модели." },
+      { type: "five_seconds", label: "5 секунд", description: "Показ изображения 5 секунд, затем вопросы. Первое впечатление." },
+    ],
+  },
+  {
+    title: "UX‑исследования",
+    blocks: [
+      { type: "prototype", label: "Протестируйте прототип Figma", description: "Респондент выполняет задание в прототипе. Оцените юзабилити." },
+      { type: "first_click", label: "Тест первого клика", description: "Выясните, насколько легко найти функцию. Клик по изображению + время." },
+      { type: "tree_testing", label: "Тестирование дерева", description: "Поиск пунктов в иерархии. Проверьте навигацию и структуру." },
+    ],
+  },
+  {
+    title: "Другое",
+    blocks: [
+      { type: "context", label: "Контекст", description: "Текст или описание перед блоками. Даёт респонденту контекст." },
+    ],
+  },
 ];
 
 export default function StudyDetail() {
@@ -299,6 +337,10 @@ export default function StudyDetail() {
   const [fiveSecondsInstruction, setFiveSecondsInstruction] = useState("");
   const [fiveSecondsDuration, setFiveSecondsDuration] = useState(5);
   const [fiveSecondsImage, setFiveSecondsImage] = useState<{ file: File | null; url: string; uploading: boolean }>({ file: null, url: "", uploading: false });
+
+  // First click form
+  const [firstClickInstruction, setFirstClickInstruction] = useState("");
+  const [firstClickImage, setFirstClickImage] = useState<{ file: File | null; url: string; uploading: boolean }>({ file: null, url: "", uploading: false });
   
   // Card sorting form
   const [cardSortingTask, setCardSortingTask] = useState("");
@@ -368,6 +410,8 @@ export default function StudyDetail() {
     setFiveSecondsInstruction("");
     setFiveSecondsDuration(5);
     setFiveSecondsImage({ file: null, url: "", uploading: false });
+    setFirstClickInstruction("");
+    setFirstClickImage({ file: null, url: "", uploading: false });
     // Card Sorting
     setCardSortingTask("");
     setCardSortingType("open");
@@ -454,6 +498,11 @@ export default function StudyDetail() {
         setFiveSecondsInstruction(block.config?.instruction || "");
         setFiveSecondsDuration(block.config?.duration || 5);
         setFiveSecondsImage({ file: null, url: block.config?.imageUrl || "", uploading: false });
+        break;
+
+      case "first_click":
+        setFirstClickInstruction(block.config?.instruction || "");
+        setFirstClickImage({ file: null, url: block.config?.imageUrl || "", uploading: false });
         break;
 
       case "card_sorting":
@@ -918,6 +967,27 @@ export default function StudyDetail() {
         } as FiveSecondsConfig;
         break;
 
+      case "first_click":
+        if (!firstClickInstruction.trim()) {
+          setError("Введите инструкцию");
+          return;
+        }
+        if (!firstClickImage.file && !firstClickImage.url) {
+          setError("Добавьте изображение");
+          return;
+        }
+        let firstClickImageUrl = firstClickImage.url;
+        if (firstClickImage.file) {
+          const uploadedUrl = await uploadImage(firstClickImage.file);
+          if (!uploadedUrl) return;
+          firstClickImageUrl = uploadedUrl;
+        }
+        blockData.config = {
+          instruction: firstClickInstruction.trim(),
+          imageUrl: firstClickImageUrl
+        } as FirstClickConfig;
+        break;
+
       case "card_sorting":
         if (!cardSortingTask.trim()) {
           setError("Введите текст задания");
@@ -1134,6 +1204,7 @@ export default function StudyDetail() {
         shuffle: false 
       },
       five_seconds: { instruction: "Посмотрите на изображение", duration: 5, imageUrl: "" },
+      first_click: { instruction: "Введите задание для респондента", imageUrl: "" },
       card_sorting: { 
         task: "Разложите карточки по категориям", 
         sortingType: "open", 
@@ -1269,6 +1340,10 @@ export default function StudyDetail() {
         return `${block.config?.question || "Вопрос"} (${compTypes[block.config?.comparisonType as keyof typeof compTypes] || ""})`;
       case "five_seconds":
         return `${block.config?.instruction || "Инструкция"} (${block.config?.duration || 5} сек)`;
+      case "first_click": {
+        const instr = String(block.config?.instruction ?? "Инструкция");
+        return instr.length > 40 ? `${instr.substring(0, 40)}…` : instr;
+      }
       case "card_sorting":
         const sortTypes = { open: "Открытая", closed: "Закрытая" };
         return `${block.config?.task?.substring(0, 30) || "Задание"} (${sortTypes[block.config?.sortingType as keyof typeof sortTypes] || "Сортировка"}, ${block.config?.cards?.length || 0} карточек)`;
@@ -1282,6 +1357,82 @@ export default function StudyDetail() {
         return `${block.config?.task?.substring(0, 30) || "Задание"} (${nodeCount} категорий, ${correctCount} верных)`;
       default:
         return "";
+    }
+  };
+
+  const countValidTreeNodes = (nodes: any[]): number => {
+    if (!Array.isArray(nodes)) return 0;
+    return nodes.reduce((acc, node) => {
+      const self = (node?.name && String(node.name).trim()) ? 1 : 0;
+      return acc + self + countValidTreeNodes(node?.children || []);
+    }, 0);
+  };
+
+  const isBlockInvalid = (block: StudyBlock): boolean => {
+    const c = block.config || {};
+    switch (block.type) {
+      case "open_question":
+        return !String(c.question ?? "").trim();
+      case "choice":
+        const opts = (c.options as string[]) || [];
+        return !String(c.question ?? "").trim() || opts.filter((o: string) => String(o ?? "").trim()).length < 2;
+      case "scale":
+        return !String(c.question ?? "").trim();
+      case "preference":
+        const imgs = (c.images as string[]) || [];
+        return !String(c.question ?? "").trim() || imgs.length < 2;
+      case "context":
+        return !String(c.title ?? "").trim();
+      case "five_seconds":
+        return !String(c.instruction ?? "").trim() || !c.imageUrl;
+      case "first_click":
+        return !String(c.instruction ?? "").trim() || !c.imageUrl;
+      case "card_sorting":
+        const cards = (c.cards as any[]) || [];
+        const cats = (c.categories as any[]) || [];
+        const validCards = cards.filter((x: any) => String(x?.title ?? "").trim()).length;
+        const validCats = cats.filter((x: any) => String(x?.name ?? "").trim()).length;
+        if (!String(c.task ?? "").trim()) return true;
+        if (validCards < 1) return true;
+        if (c.sortingType === "closed" && validCats < 2) return true;
+        return false;
+      case "tree_testing":
+        const tree = c.tree || [];
+        const correct = (c.correctAnswers as string[]) || [];
+        return !String(c.task ?? "").trim() || countValidTreeNodes(tree) < 1 || correct.length < 1;
+      case "prototype":
+        return !block.prototype_id || !String(block.instructions ?? "").trim();
+      case "umux_lite":
+        return false;
+      default:
+        return false;
+    }
+  };
+
+  const getBlockValidationMessage = (block: StudyBlock): string => {
+    switch (block.type) {
+      case "open_question":
+        return "Текст вопроса не может быть пустым.";
+      case "choice":
+        return "Пожалуйста, введите вопрос и заполните значения ответов.";
+      case "scale":
+        return "Пожалуйста, введите вопрос.";
+      case "preference":
+        return "Пожалуйста, введите вопрос. У всех ответов должна быть картинка.";
+      case "context":
+        return "Пожалуйста, введите заголовок.";
+      case "five_seconds":
+        return "Пожалуйста, добавьте картинку и введите текст инструкции.";
+      case "first_click":
+        return "Пожалуйста, добавьте картинку и введите текст инструкции.";
+      case "card_sorting":
+        return "Пожалуйста, введите задание и добавьте хотя бы 1 карточку, а также хотя бы 2 категории.";
+      case "tree_testing":
+        return "Пожалуйста, укажите хотя бы один пункт дерева, хотя бы один верный путь и заполните задание.";
+      case "prototype":
+        return "Пожалуйста, выберите прототип и введите текст задания.";
+      default:
+        return "Заполните обязательные поля.";
     }
   };
 
@@ -1368,6 +1519,8 @@ export default function StudyDetail() {
         return block.config?.question?.substring(0, 30) || "Предпочтение";
       case "five_seconds":
         return block.config?.instruction?.substring(0, 30) || "5 секунд";
+      case "first_click":
+        return block.config?.instruction?.substring(0, 30) || "Тест первого клика";
       case "card_sorting":
         return block.config?.task?.substring(0, 30) || "Сортировка карточек";
       case "tree_testing":
@@ -1495,13 +1648,16 @@ export default function StudyDetail() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Block List */}
-        <div className="w-80 border-r border-border bg-[#F6F6F6] flex flex-col">
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Left Sidebar - Block List (only on builder tab when there are blocks) */}
+        {activeTab === "builder" && blocks.length > 0 && (
+          <div className="w-80 border-r border-border bg-[#F6F6F6] flex flex-col">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {blocks.map((block, index) => {
               const typeInfo = getBlockTypeInfo(block.type);
               const IconComponent = typeInfo.Icon;
               const fullBlockName = getBlockShortName(block, index);
+              const invalid = isBlockInvalid(block);
+              const validationMsg = getBlockValidationMessage(block);
               
               return (
                 <div
@@ -1512,7 +1668,9 @@ export default function StudyDetail() {
                   onDrop={() => handleDrop(block.id)}
                   className={cn(
                     "flex items-center gap-2 p-2 rounded-xl transition-all group",
-                    "bg-white border border-border shadow-[0px_2px_3px_rgba(0,0,0,0.1)] hover:border-primary/30",
+                    "bg-white border shadow-[0px_2px_3px_rgba(0,0,0,0.1)] hover:border-primary/30",
+                    invalid && "border-red-200 bg-red-50/80 hover:border-red-300",
+                    !invalid && "border-border",
                     draggedBlockId === block.id && "opacity-50 border-dashed border-primary"
                   )}
                 >
@@ -1548,6 +1706,20 @@ export default function StudyDetail() {
                   </TooltipProvider>
                   {isEditable && (
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {invalid && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex text-destructive/80 hover:text-destructive cursor-help">
+                                <CircleAlert className="h-4 w-4" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="max-w-[240px]">
+                              <p className="text-sm">{validationMsg}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -1604,22 +1776,55 @@ export default function StudyDetail() {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            
-            {blocks.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                Нет блоков
-              </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col overflow-hidden bg-[#F6F6F6]">
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-6 bg-[#F6F6F6]">
+          <div className="flex-1 overflow-y-auto bg-[#F6F6F6]">
             {/* Builder Tab */}
-            {activeTab === "builder" && (
-              <div className="max-w-3xl mx-auto space-y-4">
+            {activeTab === "builder" && blocks.length === 0 && (
+              <div className="flex flex-col items-center pt-12 pb-16 px-6">
+                <h2 className="text-xl font-semibold text-center mb-8">Начать с нуля</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl">
+                  {START_FROM_SCRATCH_COLUMNS.map((col) => (
+                    <div key={col.title} className="space-y-3">
+                      <h3 className="text-[15px] font-semibold text-foreground">{col.title}</h3>
+                      <div className="space-y-2">
+                        {col.blocks.map((b) => {
+                          const typeInfo = BLOCK_TYPES.find((t) => t.value === b.type) ?? BLOCK_TYPES[0];
+                          const IconComponent = typeInfo.Icon;
+                          return (
+                            <button
+                              key={b.type}
+                              type="button"
+                              onClick={() => isEditable && handleQuickAddBlock(b.type)}
+                              disabled={!isEditable}
+                              className="w-full text-left rounded-[12px] border border-border bg-white p-4 transition-all hover:border-primary/40 hover:shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                  <IconComponent className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[15px] font-medium text-foreground mb-1">{b.label}</div>
+                                  <div className="text-[13px] text-muted-foreground leading-snug">{b.description}</div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "builder" && blocks.length > 0 && (
+              <div className="max-w-3xl mx-auto pt-6 space-y-4">
                 {!isEditable && (
                   <Card className="mb-4 border-warning/30 bg-warning/5">
                     <CardContent className="p-4 text-sm text-warning">
@@ -1628,7 +1833,6 @@ export default function StudyDetail() {
                   </Card>
                 )}
 
-                {/* Все блоки с инлайн редактированием */}
                 {blocks.map((block, index) => (
                   <div key={block.id} id={`block-${block.id}`}>
                     <InlineBlockEditor
@@ -1645,45 +1849,15 @@ export default function StudyDetail() {
                     />
                   </div>
                 ))}
-
-                {/* Пустое состояние */}
-                {blocks.length === 0 && (
-                  <Card className="p-10 text-center border-dashed">
-                    <div className="text-muted-foreground mb-4">
-                      В этом тесте пока нет блоков
-                    </div>
-                    {isEditable && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Добавить первый блок
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="center" className="w-56">
-                          {BLOCK_TYPES.map(type => {
-                            const IconComponent = type.Icon;
-                            return (
-                              <DropdownMenuItem 
-                                key={type.value}
-                                onClick={() => handleQuickAddBlock(type.value)}
-                                className="gap-2 cursor-pointer"
-                              >
-                                <IconComponent size={16} className="text-muted-foreground" />
-                                <span>{type.label}</span>
-                              </DropdownMenuItem>
-                            );
-                          })}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </Card>
-                )}
               </div>
             )}
 
             {activeTab === "results" && studyId && <StudyResultsTab studyId={studyId} blocks={blocks} />}
-            {activeTab === "share" && <StudyShareTab studyId={studyId || ""} studyStatus={study.status} shareToken={study.share_token} />}
+            {activeTab === "share" && (
+              <div className="max-w-3xl mx-auto pt-6">
+                <StudyShareTab studyId={studyId || ""} studyStatus={study.status} shareToken={study.share_token} />
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2017,6 +2191,40 @@ export default function StudyDetail() {
                       <span>5 сек</span>
                       <span>60 сек</span>
                     </div>
+                  </div>
+                </>
+              )}
+
+              {/* Тест первого клика */}
+              {newBlockType === "first_click" && (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Инструкция:</label>
+                    <textarea value={firstClickInstruction} onChange={e => setFirstClickInstruction(e.target.value)} placeholder="Введите задание для респондента" rows={2} style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Изображение:</label>
+                    {firstClickImage.url || firstClickImage.file ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <img src={firstClickImage.file ? URL.createObjectURL(firstClickImage.file) : firstClickImage.url} alt="Preview" style={{ width: 120, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid #ddd" }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>{firstClickImage.file?.name || "Загружено"}</div>
+                          <button onClick={() => setFirstClickImage({ file: null, url: "", uploading: false })} style={{ padding: "6px 12px", background: "#ffebee", color: "#c62828", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>Удалить</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px", border: "2px dashed #ddd", borderRadius: 8, cursor: "pointer", background: "#fafafa" }}>
+                        <span style={{ fontSize: 32, marginBottom: 8 }}>📷</span>
+                        <span style={{ fontSize: 14, color: "#666" }}>Выберите изображение</span>
+                        <span style={{ fontSize: 12, color: "#999", marginTop: 4 }}>JPEG, PNG, GIF, WebP (до 5MB)</span>
+                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setFirstClickImage({ file, url: "", uploading: false });
+                          }
+                        }} />
+                      </label>
+                    )}
                   </div>
                 </>
               )}
@@ -3264,6 +3472,76 @@ function InlineBlockEditor({
                   />
                   <span className="text-sm font-medium">{block.config.duration || 5} сек</span>
                 </div>
+              </div>
+            </>
+          )}
+
+          {/* Тест первого клика */}
+          {block.type === "first_click" && (
+            <>
+              <div>
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleImageChange(null)}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-start cursor-pointer group">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && isEditable) {
+                                handleImageChange(file);
+                              }
+                            }}
+                            disabled={!isEditable || uploadingImage}
+                          />
+                          {uploadingImage ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : (
+                            <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <FloatingTextarea 
+                  label="Инструкция"
+                  value={getTextValue("instruction")} 
+                  onChange={e => updateConfigText("instruction", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите задание для респондента"
+                  rows={2}
+                />
               </div>
             </>
           )}

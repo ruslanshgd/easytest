@@ -120,4 +120,5 @@ export type BlockType =
   | "preference" 
   | "five_seconds" 
   | "card_sorting" 
-  | "tree_testing";
+  | "tree_testing"
+  | "first_click";

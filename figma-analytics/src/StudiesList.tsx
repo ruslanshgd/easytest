@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { useAppStore } from "./store";
@@ -53,7 +53,9 @@ import {
   FileText,
   Timer,
   ClipboardList,
-  Users
+  Users,
+  Check,
+  MousePointerClick
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +69,7 @@ const BLOCK_ICONS: Record<string, React.ElementType> = {
   context: FileText,
   five_seconds: Timer,
   umux_lite: ClipboardList,
+  first_click: MousePointerClick,
 };
 
 const BLOCK_COLORS: Record<string, string> = {
@@ -78,6 +81,7 @@ const BLOCK_COLORS: Record<string, string> = {
   context: "bg-gray-100 text-gray-600",
   five_seconds: "bg-red-100 text-red-600",
   umux_lite: "bg-purple-100 text-purple-600",
+  first_click: "bg-teal-100 text-teal-600",
 };
 
 interface Study {
@@ -130,7 +134,6 @@ export default function StudiesList() {
     studyStats,
     // UI state
     error,
-    showCreateStudyModal,
     showCreateFolderModal,
     showRenameModal,
     showRenameFolderModal,
@@ -140,7 +143,6 @@ export default function StudiesList() {
     showDeleteFolderDialog,
     showBulkMoveModal,
     showBulkDeleteDialog,
-    newStudyTitle,
     newFolderName,
     renameTitle,
     renameFolderName,
@@ -155,8 +157,6 @@ export default function StudiesList() {
     getUserTeamId,
     buildBreadcrumbs,
     // Modal actions
-    openCreateStudyModal,
-    closeCreateStudyModal,
     openCreateFolderModal,
     closeCreateFolderModal,
     openRenameModal,
@@ -176,7 +176,6 @@ export default function StudiesList() {
     openBulkDeleteDialog,
     closeBulkDeleteDialog,
     // Form actions
-    setNewStudyTitle,
     setNewFolderName,
     setRenameTitle,
     setRenameFolderName,
@@ -194,6 +193,9 @@ export default function StudiesList() {
   // Ref для предотвращения повторных вызовов
   const loadingRef = useRef(false);
   const lastFolderIdRef = useRef<string | null | undefined>(undefined);
+
+  // Template modal (e.g. "prototype_testing")
+  const [templateModalId, setTemplateModalId] = useState<string | null>(null);
   
   useEffect(() => {
     // Пропускаем, если folderId не изменился (кроме первого рендера)
@@ -270,26 +272,60 @@ export default function StudiesList() {
     }
   };
 
-  // Create study
-  const handleCreateStudy = async () => {
-    if (!newStudyTitle.trim()) {
-      setError("Название не может быть пустым");
-      return;
-    }
-
+  // Create study with default title "Новый тест" (no modal)
+  const handleCreateStudyNoModal = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setError("Требуется авторизация");
         return;
       }
-
       const teamId = await getUserTeamId(user.id);
-      
       const { data, error: createError } = await supabase
         .from("studies")
         .insert([{
-          title: newStudyTitle.trim(),
+          title: "Новый тест",
+          user_id: teamId ? null : user.id,
+          team_id: teamId || null,
+          folder_id: currentFolderId || null,
+          status: "draft"
+        }])
+        .select()
+        .single();
+      if (createError) {
+        setError(createError.message);
+        return;
+      }
+      if (data) navigate(`/studies/${data.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const PLACEHOLDER_IMAGE_DATA_URI = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23e5e7eb' width='400' height='300'/%3E%3Ctext fill='%239ca3af' x='50%25' y='50%25' text-anchor='middle' dy='.3em' font-size='14'%3EДобавьте своё изображение%3C/text%3E%3C/svg%3E";
+
+  // Create study from template "Тестирование прототипа"
+  const handleUseTemplatePrototypeTesting = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация");
+        return;
+      }
+      const teamId = await getUserTeamId(user.id);
+
+      const { data: prototypesData } = await supabase
+        .from("prototypes")
+        .select("id")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const firstPrototypeId = prototypesData?.[0]?.id ?? null;
+
+      const { data: studyData, error: createError } = await supabase
+        .from("studies")
+        .insert([{
+          title: "Тестирование прототипа",
           user_id: teamId ? null : user.id,
           team_id: teamId || null,
           folder_id: currentFolderId || null,
@@ -298,19 +334,249 @@ export default function StudiesList() {
         .select()
         .single();
 
-      if (createError) {
-        console.error("Error creating study:", createError);
-        setError(createError.message);
+      if (createError || !studyData) {
+        setError(createError?.message ?? "Ошибка создания теста");
         return;
       }
 
-      closeCreateStudyModal();
-      
-      if (data) {
-        navigate(`/studies/${data.id}`);
+      const contextText = "Привет 👋 Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
+      const prototypeInstructions = "Найдите в прототипе нужный раздел и выполните предложенное задание. Опишите своими словами, как вы это сделали.";
+      const blocks: Array<{ study_id: string; type: string; order_index: number; prototype_id?: string | null; instructions?: string | null; config: object }> = [
+        { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextText } },
+        { study_id: studyData.id, type: "prototype", order_index: 1, prototype_id: firstPrototypeId, instructions: prototypeInstructions, config: {} },
+        { study_id: studyData.id, type: "scale", order_index: 2, config: { question: "Насколько сложно было выполнить это задание?", scaleType: "numeric", min: 1, max: 5, minValue: 1, maxValue: 5 } },
+        { study_id: studyData.id, type: "open_question", order_index: 3, config: { question: "Поделитесь, что было сложным при выполнении задания?", optional: false } }
+      ];
+
+      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
+      if (blocksError) {
+        setError(blocksError.message);
+        return;
       }
+
+      setTemplateModalId(null);
+      navigate(`/studies/${studyData.id}`);
     } catch (err) {
-      console.error("Unexpected error creating study:", err);
+      console.error("Unexpected error using template:", err);
+      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Create study from template "Тест первого клика"
+  const handleUseTemplateFirstClick = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация");
+        return;
+      }
+      const teamId = await getUserTeamId(user.id);
+
+      const { data: studyData, error: createError } = await supabase
+        .from("studies")
+        .insert([{
+          title: "Тест первого клика",
+          user_id: teamId ? null : user.id,
+          team_id: teamId || null,
+          folder_id: currentFolderId || null,
+          status: "draft"
+        }])
+        .select()
+        .single();
+
+      if (createError || !studyData) {
+        setError(createError?.message ?? "Ошибка создания теста");
+        return;
+      }
+
+      const contextDescription = "Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
+      const firstClickInstruction = "Найдите на изображении нужный элемент и нажмите на него. Ваш первый клик будет зафиксирован.";
+      const blocks: Array<{ study_id: string; type: string; order_index: number; config: object }> = [
+        { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextDescription } },
+        { study_id: studyData.id, type: "first_click", order_index: 1, config: { instruction: firstClickInstruction, imageUrl: PLACEHOLDER_IMAGE_DATA_URI } },
+        { study_id: studyData.id, type: "scale", order_index: 2, config: { question: "Насколько сложно было найти, где посмотреть последние транзакции?", scaleType: "numeric", min: 1, max: 5, minValue: 1, maxValue: 5 } },
+        { study_id: studyData.id, type: "open_question", order_index: 3, config: { question: "Что именно было сложным или показалось непонятным?", optional: false } }
+      ];
+
+      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
+      if (blocksError) {
+        setError(blocksError.message);
+        return;
+      }
+
+      setTemplateModalId(null);
+      navigate(`/studies/${studyData.id}`);
+    } catch (err) {
+      console.error("Unexpected error using template:", err);
+      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Create study from template "Улучшение навигации"
+  const handleUseTemplateNavigationImprovement = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация");
+        return;
+      }
+      const teamId = await getUserTeamId(user.id);
+
+      const { data: studyData, error: createError } = await supabase
+        .from("studies")
+        .insert([{
+          title: "Улучшение навигации",
+          user_id: teamId ? null : user.id,
+          team_id: teamId || null,
+          folder_id: currentFolderId || null,
+          status: "draft"
+        }])
+        .select()
+        .single();
+
+      if (createError || !studyData) {
+        setError(createError?.message ?? "Ошибка создания теста");
+        return;
+      }
+
+      const contextDescription = "Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
+      const cardSortingTask = "Представьте, что вы совершаете покупки в интернет-магазине и вам нужно найти какую-то информацию. В этом задании приведён список разделов сайта. Ваша задача — разбить их по категориям так, как вам кажется логичным.\n\nЕсли нужной категории нет — можно создать свою.";
+      const cardTitles = ["главная", "Все товары", "новинки", "хиты продаж", "одежда", "обувь", "аксессуары", "служба поддержки", "часто задаваемые вопросы", "возвраты и обмены", "отслеживание заказа", "поиск магазинов", "о нас", "связаться с нами"];
+      const categoryNames = ["Каталог", "помощь и поддержка", "информация о компании", "скидки акций"];
+      const cards = cardTitles.map((title) => ({ id: crypto.randomUUID(), title }));
+      const categories = categoryNames.map((name) => ({ id: crypto.randomUUID(), name }));
+
+      const blocks: Array<{ study_id: string; type: string; order_index: number; config: object }> = [
+        { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextDescription } },
+        {
+          study_id: studyData.id,
+          type: "card_sorting",
+          order_index: 1,
+          config: {
+            task: cardSortingTask,
+            sortingType: "open",
+            cards,
+            categories,
+            shuffleCards: true,
+            shuffleCategories: true,
+            allowPartialSort: false,
+            showImages: false,
+            showDescriptions: false
+          }
+        }
+      ];
+
+      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
+      if (blocksError) {
+        setError(blocksError.message);
+        return;
+      }
+
+      setTemplateModalId(null);
+      navigate(`/studies/${studyData.id}`);
+    } catch (err) {
+      console.error("Unexpected error using template:", err);
+      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Create study from template "Проверка маркетинговых текстов"
+  const handleUseTemplateMarketingCopy = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация");
+        return;
+      }
+      const teamId = await getUserTeamId(user.id);
+
+      const { data: studyData, error: createError } = await supabase
+        .from("studies")
+        .insert([{
+          title: "Проверка маркетинговых текстов",
+          user_id: teamId ? null : user.id,
+          team_id: teamId || null,
+          folder_id: currentFolderId || null,
+          status: "draft"
+        }])
+        .select()
+        .single();
+
+      if (createError || !studyData) {
+        setError(createError?.message ?? "Ошибка создания теста");
+        return;
+      }
+
+      const contextDescription = "Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
+      const fiveSecondsInstruction = "Сейчас мы покажем фрагмент лендинга банка на короткое время. Постарайтесь запомнить как можно больше деталей.";
+      const blocks: Array<{ study_id: string; type: string; order_index: number; config: object }> = [
+        { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextDescription } },
+        { study_id: studyData.id, type: "five_seconds", order_index: 1, config: { instruction: fiveSecondsInstruction, duration: 5, imageUrl: PLACEHOLDER_IMAGE_DATA_URI } },
+        { study_id: studyData.id, type: "open_question", order_index: 2, config: { question: "Какое у вас первое впечатление об этой странице банковского приложения?", optional: false } }
+      ];
+
+      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
+      if (blocksError) {
+        setError(blocksError.message);
+        return;
+      }
+
+      setTemplateModalId(null);
+      navigate(`/studies/${studyData.id}`);
+    } catch (err) {
+      console.error("Unexpected error using template:", err);
+      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Create study from template "Продуктовый опрос"
+  const handleUseTemplateProductSurvey = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация");
+        return;
+      }
+      const teamId = await getUserTeamId(user.id);
+
+      const { data: studyData, error: createError } = await supabase
+        .from("studies")
+        .insert([{
+          title: "Продуктовый опрос",
+          user_id: teamId ? null : user.id,
+          team_id: teamId || null,
+          folder_id: currentFolderId || null,
+          status: "draft"
+        }])
+        .select()
+        .single();
+
+      if (createError || !studyData) {
+        setError(createError?.message ?? "Ошибка создания теста");
+        return;
+      }
+
+      const contextDescription = "Спасибо, что хотите поделиться с нами своими мыслями о нашем фитнес приложении. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
+      const blocks: Array<{ study_id: string; type: string; order_index: number; config: object }> = [
+        { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextDescription } },
+        { study_id: studyData.id, type: "choice", order_index: 1, config: { question: "Как часто вы пользуетесь приложением?", options: ["Ежедневно", "Несколько раз в неделю", "Раз в неделю", "Реже"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
+        { study_id: studyData.id, type: "open_question", order_index: 2, config: { question: "Можете рассказать, почему вы не пользуетесь приложением чаще?", optional: false } },
+        { study_id: studyData.id, type: "choice", order_index: 3, config: { question: "Для чего вы пользуетесь приложением чаще всего?", options: ["Тренировки", "Отслеживание прогресса", "Питание", "Сообщество"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
+        { study_id: studyData.id, type: "choice", order_index: 4, config: { question: "Какая функция для вас наиболее полезна?", options: ["Планы тренировок", "Статистика", "Напоминания", "Другое"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
+        { study_id: studyData.id, type: "scale", order_index: 5, config: { question: "Насколько легко пользоваться приложением?", scaleType: "stars", min: 1, max: 5, optional: false } },
+        { study_id: studyData.id, type: "open_question", order_index: 6, config: { question: "Расскажите, как мы можем сделать приложение удобнее для вас? Поделитесь своими идеями", optional: false } }
+      ];
+
+      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
+      if (blocksError) {
+        setError(blocksError.message);
+        return;
+      }
+
+      setTemplateModalId(null);
+      navigate(`/studies/${studyData.id}`);
+    } catch (err) {
+      console.error("Unexpected error using template:", err);
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
@@ -930,24 +1196,22 @@ export default function StudiesList() {
         </div>
       )}
 
-      {/* Studies header with select all */}
-      {(studies.length > 0 || currentFolderName) && (
+      {/* Studies header with select all (only when there are studies) */}
+      {studies.length > 0 && (
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-[15px] font-extrabold leading-6 text-foreground">
             Тесты {currentFolderName && `в папке "${currentFolderName}"`}
           </h2>
           <div className="flex items-center gap-3">
-            {studies.length > 0 && (
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
-                <Checkbox
-                  checked={selectedStudies.size === studies.length && studies.length > 0}
-                  onCheckedChange={handleToggleSelectAll}
-                />
-                Выбрать все
-              </label>
-            )}
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
+              <Checkbox
+                checked={selectedStudies.size === studies.length && studies.length > 0}
+                onCheckedChange={handleToggleSelectAll}
+              />
+              Выбрать все
+            </label>
             {currentFolderName && (
-              <Button onClick={openCreateStudyModal} size="sm">
+              <Button onClick={handleCreateStudyNoModal} size="sm">
                 <Plus className="h-4 w-4 mr-2" />
                 Тест
               </Button>
@@ -958,43 +1222,133 @@ export default function StudiesList() {
 
       {/* Studies list */}
       {studies.length === 0 && currentFolderFolders.length === 0 ? (
-        <Card className="p-12 text-center">
-          <div className="flex flex-col items-center gap-4">
-            <div className="p-4 rounded-full bg-muted">
-              <Folder className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <div>
-              <h3 className="font-semibold mb-1">
-                {currentFolderId ? "Папка пуста" : "Нет тестов"}
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                {currentFolderId 
-                  ? "В этой папке пока нет тестов и папок"
-                  : "Создайте первый тест или папку для организации"}
-              </p>
-        </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={openCreateFolderModal}>
-                <FolderPlus className="h-4 w-4 mr-2" />
-                Папка
-              </Button>
-              <Button onClick={openCreateStudyModal}>
-                <Plus className="h-4 w-4 mr-2" />
-                Тест
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ) : studies.length === 0 ? (
-        <>
-          <div className="flex justify-between items-center mb-3">
+        <div className="space-y-6" id="onboarding-empty">
+          <div className="flex justify-between items-center">
             <h2 className="text-[15px] font-extrabold leading-6 text-foreground">Тесты</h2>
-            <Button onClick={openCreateStudyModal} size="sm">
+            <Button onClick={handleCreateStudyNoModal} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               Тест
             </Button>
           </div>
-        </>
+          <div className="flex flex-col items-center text-center pt-6">
+            <h3 className="text-2xl font-bold mb-2">Создайте ваш первый тест</h3>
+            <p className="text-base text-muted-foreground mb-6">
+              Выберите один из шаблонов ниже, просмотрите все шаблоны или начните с нуля
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-3xl">
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("prototype_testing")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Тестирование прототипа</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Протестируйте и улучшите прототипы приложения или сайта на основе обратной связи от пользователей
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("first_click")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Тест первого клика</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Выясните, насколько легко пользователям найти определённую функцию в вашем приложении или на сайте
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("navigation_improvement")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Улучшение навигации</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Узнайте, как пользователи естественным образом группируют и категоризируют пункты меню
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("marketing_copy")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Проверка маркетинговых текстов</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Проверьте эффективность маркетинговых текстов во взаимодействии с целевой аудиторией
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("product_survey")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Продуктовый опрос</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Изучите, как пользователи работают с продуктом — сценарии использования и ценные функции
+                </p>
+              </Card>
+            </div>
+          </div>
+        </div>
+      ) : studies.length === 0 ? (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-[15px] font-extrabold leading-6 text-foreground">
+              Тесты {currentFolderName && `в папке "${currentFolderName}"`}
+            </h2>
+            <Button onClick={handleCreateStudyNoModal} size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              Тест
+            </Button>
+          </div>
+          <div className="flex flex-col items-center text-center pt-6">
+            <h3 className="text-2xl font-bold mb-2">Создайте ваш первый тест</h3>
+            <p className="text-base text-muted-foreground mb-6">
+              Выберите один из шаблонов ниже, просмотрите все шаблоны или начните с нуля
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-3xl">
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("prototype_testing")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Тестирование прототипа</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Протестируйте и улучшите прототипы приложения или сайта на основе обратной связи от пользователей
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("first_click")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Тест первого клика</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Выясните, насколько легко пользователям найти определённую функцию в вашем приложении или на сайте
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("navigation_improvement")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Улучшение навигации</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Узнайте, как пользователи естественным образом группируют и категоризируют пункты меню
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("marketing_copy")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Проверка маркетинговых текстов</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Проверьте эффективность маркетинговых текстов во взаимодействии с целевой аудиторией
+                </p>
+              </Card>
+              <Card
+                className="cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-5 text-left"
+                onClick={() => setTemplateModalId("product_survey")}
+              >
+                <h4 className="text-[15px] font-bold text-foreground mb-2">Продуктовый опрос</h4>
+                <p className="text-[13px] font-normal text-muted-foreground">
+                  Изучите, как пользователи работают с продуктом — сценарии использования и ценные функции
+                </p>
+              </Card>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="space-y-2">
           {studies.map(study => {
@@ -1110,38 +1464,178 @@ export default function StudiesList() {
         </div>
       )}
 
-      {/* Create Study Modal */}
-      <Dialog open={showCreateStudyModal} onOpenChange={(open) => open ? openCreateStudyModal() : closeCreateStudyModal()}>
-        <DialogContent>
+      {/* Template "Тестирование прототипа" Modal */}
+      <Dialog open={templateModalId === "prototype_testing"} onOpenChange={(open) => !open && setTemplateModalId(null)}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Создать тест</DialogTitle>
-            {currentFolderName && (
-              <DialogDescription>
-                Тест будет создан в папке "{currentFolderName}"
-              </DialogDescription>
-            )}
+            <DialogTitle className="text-xl font-bold">Тестирование прототипа</DialogTitle>
+            <DialogDescription className="text-base">
+              Протестируйте и улучшите прототипы приложения или сайта на основе обратной связи от пользователей
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="study-name">Название</Label>
-              <Input
-                id="study-name"
-                placeholder="Введите название теста"
-                value={newStudyTitle}
-                onChange={(e) => setNewStudyTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleCreateStudy();
-                }}
-                autoFocus
-              />
-            </div>
+          <div className="space-y-4 py-2">
+            <h4 className="text-[15px] font-bold">Что вы узнаете?</h4>
+            <ul className="space-y-2 text-[15px] font-normal text-muted-foreground list-none pl-0">
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Узнайте, могут ли ваши пользователи выполнить задание (или несколько заданий) и получите оценку удобства использования вашего сценария</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Соберите качественную обратную связь о том, чего не хватает в функционале — дайте пользователям возможность помочь выявить дополнительные детали</span>
+              </li>
+            </ul>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeCreateStudyModal}>
-                Отмена
+            <Button variant="outline" onClick={() => setTemplateModalId(null)}>
+              Отмена
             </Button>
-            <Button onClick={handleCreateStudy} disabled={!newStudyTitle.trim()}>
-                Создать
+            <Button onClick={handleUseTemplatePrototypeTesting}>
+              Использовать этот шаблон
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template "Тест первого клика" Modal */}
+      <Dialog open={templateModalId === "first_click"} onOpenChange={(open) => !open && setTemplateModalId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Тест первого клика</DialogTitle>
+            <DialogDescription className="text-base">
+              Выясните, насколько легко пользователям найти определённую функцию в вашем приложении или на сайте
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <h4 className="text-[15px] font-bold">Что вы узнаете?</h4>
+            <ul className="space-y-2 text-[15px] font-normal text-muted-foreground list-none pl-0">
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Узнайте, могут ли ваши пользователи выполнить задание (или несколько заданий) и получите оценку удобства использования вашего сценария</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Соберите качественную обратную связь о том, чего не хватает в функционале — дайте пользователям возможность помочь выявить дополнительные детали</span>
+              </li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateModalId(null)}>
+              Отмена
+            </Button>
+            <Button onClick={handleUseTemplateFirstClick}>
+              Использовать этот шаблон
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template "Улучшение навигации" Modal */}
+      <Dialog open={templateModalId === "navigation_improvement"} onOpenChange={(open) => !open && setTemplateModalId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Улучшение навигации</DialogTitle>
+            <DialogDescription className="text-base">
+              Узнайте, как пользователи естественным образом группируют и категоризируют пункты меню
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <h4 className="text-[15px] font-bold">Что вы узнаете?</h4>
+            <ul className="space-y-2 text-[15px] font-normal text-muted-foreground list-none pl-0">
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Определите проблемные места в навигации сайта</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Поймите ожидания пользователей от структуры навигации</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Соберите фидбек об общем восприятии удобства использования, находят ли пользователи навигацию интуитивно понятной или она нуждается в улучшении</span>
+              </li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateModalId(null)}>
+              Отмена
+            </Button>
+            <Button onClick={handleUseTemplateNavigationImprovement}>
+              Использовать этот шаблон
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template "Проверка маркетинговых текстов" Modal */}
+      <Dialog open={templateModalId === "marketing_copy"} onOpenChange={(open) => !open && setTemplateModalId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Проверка маркетинговых текстов</DialogTitle>
+            <DialogDescription className="text-base">
+              Проверьте эффективность маркетинговых текстов во взаимодействии с целевой аудиторией и определите факторы их успеха или неудачи
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <h4 className="text-[15px] font-bold">Что вы узнаете?</h4>
+            <ul className="space-y-2 text-[15px] font-normal text-muted-foreground list-none pl-0">
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Получите непосредственную реакцию аудитории на ваши маркетинговые материалы</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Соберите комплексные данные через опросы: как количественные метрики, так и качественную обратную связь</span>
+              </li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateModalId(null)}>
+              Отмена
+            </Button>
+            <Button onClick={handleUseTemplateMarketingCopy}>
+              Использовать этот шаблон
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template "Продуктовый опрос" Modal */}
+      <Dialog open={templateModalId === "product_survey"} onOpenChange={(open) => !open && setTemplateModalId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Продуктовый опрос</DialogTitle>
+            <DialogDescription className="text-base">
+              Изучите, как пользователи работают с продуктом — их типичные сценарии использования и предпочитаемые функции. Выясните причины низкой вовлеченности или трудностей в использовании
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <h4 className="text-[15px] font-bold">Что вы узнаете?</h4>
+            <ul className="space-y-2 text-[15px] font-normal text-muted-foreground list-none pl-0">
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Выясните причины потери интереса пользователей</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Определите самые ценные для пользователей функции</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Найдите проблемы в удобстве использования и поймите, с какими сложностями сталкиваются пользователи</span>
+              </li>
+              <li className="flex gap-2">
+                <Check className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span>Соберите предложения по улучшению удобства и полезности приложения</span>
+              </li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemplateModalId(null)}>
+              Отмена
+            </Button>
+            <Button onClick={handleUseTemplateProductSurvey}>
+              Использовать этот шаблон
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1330,9 +1824,9 @@ export default function StudiesList() {
       <AlertDialog open={!!showDeleteDialog} onOpenChange={(open) => open ? null : closeDeleteDialog()}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить тест?</AlertDialogTitle>
+            <AlertDialogTitle>Удалить {showDeleteDialog?.title ?? "тест"}</AlertDialogTitle>
             <AlertDialogDescription>
-              Тест "{showDeleteDialog?.title}" будет удалён. Это действие нельзя отменить.
+              Вы уверены? Все содержимое теста и результаты будут удалены.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1341,7 +1835,7 @@ export default function StudiesList() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => showDeleteDialog && handleDelete(showDeleteDialog)}
             >
-              Удалить
+              Да, удалить этот тест
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

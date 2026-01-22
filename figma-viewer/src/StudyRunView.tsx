@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { v4 as uuidv4 } from "uuid";
@@ -163,7 +163,7 @@ function ImageModal({ imageUrl, onClose, onNext, onPrev, showNavigation = false,
 }
 
 // Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click";
 
 interface StudyData {
   study: {
@@ -785,6 +785,108 @@ function FiveSecondsBlock({ config, onComplete }: FiveSecondsBlockProps) {
   }
 
   return null;
+}
+
+// ============= Тест первого клика =============
+interface FirstClickBlockProps {
+  config: { instruction: string; imageUrl: string };
+  onSubmit: (answer: { x: number; y: number }, durationMs: number) => Promise<void>;
+}
+
+function FirstClickBlock({ config, onSubmit }: FirstClickBlockProps) {
+  const [phase, setPhase] = useState<"instruction" | "clicking">("instruction");
+  const [showImageAt, setShowImageAt] = useState<number | null>(null);
+  const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleShowImage = () => {
+    setPhase("clicking");
+    setShowImageAt(Date.now());
+  };
+
+  const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
+    if (submitting || phase !== "clicking") return;
+    const img = e.currentTarget;
+    const rect = img.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    setPending({ x, y });
+  };
+
+  const handleConfirm = async () => {
+    if (!pending || !showImageAt || submitting) return;
+    setSubmitting(true);
+    const durationMs = Date.now() - showImageAt;
+    try {
+      await onSubmit(pending, durationMs);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setPending(null);
+  };
+
+  if (phase === "instruction") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+        <div style={{ maxWidth: "600px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", textAlign: "center" }}>
+          <h2 style={{ margin: "0 0 16px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>Тест первого клика</h2>
+          <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "16px", lineHeight: 1.6 }}>{config.instruction}</p>
+          <button onClick={handleShowImage} style={{ padding: "14px 32px", background: "#007AFF", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: "pointer" }}>Показать изображение</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+      <div style={{ position: "relative", display: "inline-block", maxWidth: "100%" }}>
+        <img
+          src={config.imageUrl}
+          alt=""
+          onClick={handleImageClick}
+          style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", cursor: "crosshair", borderRadius: "8px", border: "1px solid #e0e0e0", display: "block" }}
+          onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23ddd' width='400' height='300'/%3E%3Ctext fill='%23666' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНе удалось загрузить%3C/text%3E%3C/svg%3E"; }}
+        />
+        {pending && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                left: `${pending.x * 100}%`,
+                top: `${pending.y * 100}%`,
+                transform: "translate(-50%, -50%)",
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                background: "#22c55e",
+                border: "2px solid white",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: `${pending.x * 100}%`,
+                top: `${pending.y * 100}%`,
+                transform: "translate(-50%, -100%)",
+                display: "flex",
+                gap: 8,
+                marginTop: -8,
+                pointerEvents: "auto",
+              }}
+            >
+              <button onClick={(e) => { e.stopPropagation(); handleConfirm(); }} disabled={submitting} style={{ padding: "8px 16px", background: "#22c55e", color: "white", border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer" }}>Подтвердить клик</button>
+              <button onClick={(e) => { e.stopPropagation(); handleCancel(); }} disabled={submitting} style={{ padding: "8px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer" }}>Отменить клик</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ============= Типы для Tree Testing =============
@@ -1747,17 +1849,44 @@ export default function StudyRunView() {
   };
 
   const submitBlockResponse = async (blockId: string, answer: any, durationMs: number) => {
-    if (!runId) return;
-    const { error: submitError } = await supabase.rpc("rpc_submit_block_response", {
+    if (!runId) {
+      console.error("StudyRunView: Cannot submit response - runId is missing");
+      return;
+    }
+    
+    // Логирование перед отправкой
+    console.log("StudyRunView: Submitting block response:", {
+      run_id: runId,
+      block_id: blockId,
+      answer_type: typeof answer,
+      answer_keys: typeof answer === "object" ? Object.keys(answer) : null,
+      duration_ms: durationMs
+    });
+
+    const { data, error: submitError } = await supabase.rpc("rpc_submit_block_response", {
       p_run_id: runId,
       p_block_id: blockId,
       p_answer: answer,
       p_duration_ms: durationMs
     });
+    
     if (submitError) {
-      console.error("Error submitting response:", submitError);
+      console.error("StudyRunView: Error submitting response:", {
+        error: submitError,
+        run_id: runId,
+        block_id: blockId,
+        answer: answer
+      });
       throw submitError;
     }
+
+    // Логирование успешного сохранения
+    console.log("StudyRunView: Successfully submitted block response:", {
+      run_id: runId,
+      block_id: blockId,
+      duration_ms: durationMs,
+      rpc_result: data
+    });
   };
 
   const handleOpenQuestionSubmit = async (answer: string, durationMs: number) => {
@@ -1811,6 +1940,14 @@ export default function StudyRunView() {
   };
 
   const handleTreeTestingSubmit = async (answer: any, durationMs: number) => {
+    if (!studyData) return;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
+    await submitBlockResponse(currentBlock.id, answer, durationMs);
+    await handleNextBlock();
+  };
+
+  const handleFirstClickSubmit = async (answer: { x: number; y: number }, durationMs: number) => {
     if (!studyData) return;
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
@@ -1926,6 +2063,11 @@ export default function StudyRunView() {
           config={currentBlock.config}
           onSubmit={handleTreeTestingSubmit}
           onSkip={handleNextBlock}
+        />
+      ) : currentBlock.type === "first_click" ? (
+        <FirstClickBlock
+          config={currentBlock.config}
+          onSubmit={handleFirstClickSubmit}
         />
       ) : null}
     </div>

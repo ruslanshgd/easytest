@@ -1,4 +1,9 @@
 import { useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Link, Lightbulb } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface StudyShareTabProps {
   studyId: string;
@@ -13,7 +18,6 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
 
   const getShareUrl = (): string => {
     if (!shareToken) return "";
-    // Viewer находится на другом порту
     const currentPort = window.location.port;
     const viewerPort = currentPort === "5174" ? "5173" : currentPort === "5173" ? "5174" : currentPort;
     const baseUrl = `${window.location.protocol}//${window.location.hostname}:${viewerPort}`;
@@ -23,7 +27,6 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
   const handleCopy = async () => {
     const url = getShareUrl();
     if (!url) return;
-    
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -33,176 +36,96 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
     }
   };
 
-  const getStatusInfo = () => {
+  const getStatusLabel = (): string => {
     switch (studyStatus) {
       case "draft":
-        return {
-          title: "Режим предпросмотра",
-          description: "Тест в режиме черновика. Ссылка работает для предпросмотра и тестирования с командой. После публикации ссылка станет рабочей для респондентов.",
-          color: "#ff9800",
-          icon: "🔧"
-        };
+        return "Не опубликован";
       case "published":
-        return {
-          title: "Тест опубликован",
-          description: "Ссылка активна и доступна для прохождения респондентами. Редактирование блоков заблокировано.",
-          color: "#4caf50",
-          icon: "✅"
-        };
+        return "Опубликован";
       case "stopped":
-        return {
-          title: "Тестирование остановлено",
-          description: "Ссылка больше не работает. Новые прохождения невозможны. Результаты доступны для просмотра.",
-          color: "#f44336",
-          icon: "⛔"
-        };
+        return "Остановлен";
     }
   };
 
-  const statusInfo = getStatusInfo();
   const shareUrl = getShareUrl();
 
   if (loading) {
     return (
-      <div style={{ padding: "20px 0" }}>
-        <div style={{
-          padding: 20,
-          background: "#f5f5f5",
-          borderRadius: 8,
-          textAlign: "center"
-        }}>
-          Загрузка токена...
-        </div>
+      <div className="py-6">
+        <Card className="p-6">
+          <p className="text-muted-foreground text-center">Загрузка токена...</p>
+        </Card>
       </div>
     );
   }
 
   if (!shareToken) {
     return (
-      <div style={{ padding: "20px 0" }}>
-        <div style={{
-          padding: 20,
-          background: "#fff3e0",
-          color: "#e65100",
-          borderRadius: 8,
-          textAlign: "center"
-        }}>
-          <div style={{ marginBottom: 12 }}>Ошибка: токен для ссылки не найден.</div>
+      <div className="py-6">
+        <Card className="p-6 border-destructive/30 bg-destructive/5">
+          <p className="text-destructive mb-4">Ошибка: токен для ссылки не найден.</p>
           {onRetry && (
-            <button
-              onClick={onRetry}
-              style={{
-                padding: "8px 16px",
-                background: "#ff9800",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: "bold"
-              }}
-            >
+            <Button onClick={onRetry} variant="default">
               Попробовать снова
-            </button>
+            </Button>
           )}
-        </div>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "20px 0" }}>
-      {/* Статус */}
-      <div style={{
-        padding: 20,
-        background: `${statusInfo.color}15`,
-        borderLeft: `4px solid ${statusInfo.color}`,
-        borderRadius: "0 8px 8px 0",
-        marginBottom: 24
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-          <span style={{ fontSize: 24 }}>{statusInfo.icon}</span>
-          <h3 style={{ margin: 0, fontSize: 18, color: statusInfo.color }}>{statusInfo.title}</h3>
-        </div>
-        <p style={{ margin: 0, fontSize: 14, color: "#666" }}>{statusInfo.description}</p>
-      </div>
+    <div className="space-y-6">
+      {/* Статус: 32px жирно */}
+      <h1 className="text-[32px] font-semibold leading-tight text-foreground text-center">
+        {getStatusLabel()}
+      </h1>
 
-      {/* Ссылка */}
-      <div style={{
-        padding: 20,
-        background: "#f5f5f5",
-        borderRadius: 8,
-        marginBottom: 24
-      }}>
-        <h3 style={{ margin: "0 0 16px 0", fontSize: 18 }}>Ссылка для прохождения</h3>
-        
-        <div style={{
-          display: "flex",
-          gap: 12,
-          alignItems: "stretch"
-        }}>
-          <div style={{
-            flex: 1,
-            padding: "12px 16px",
-            background: studyStatus === "stopped" ? "#eee" : "#fff",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            fontFamily: "monospace",
-            fontSize: 14,
-            wordBreak: "break-all",
-            color: studyStatus === "stopped" ? "#999" : "#333",
-            textDecoration: studyStatus === "stopped" ? "line-through" : "none"
-          }}>
-            {shareUrl}
-          </div>
-          
-          {studyStatus !== "stopped" && (
-            <button
-              onClick={handleCopy}
-              style={{
-                padding: "12px 24px",
-                background: copied ? "#4caf50" : "#2196f3",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: "bold",
-                whiteSpace: "nowrap",
-                transition: "background 0.2s"
-              }}
-            >
-              {copied ? "✓ Скопировано" : "Копировать"}
-            </button>
-          )}
+      {/* Подзаголовок: 20px обычное */}
+      <p className="text-xl font-normal text-foreground text-center">
+        Давайте пригласим респондентов
+      </p>
+
+      {/* Карточка по стилю отчёт/тест */}
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold mb-2">Поделиться по ссылке</h2>
+        <p className="text-[15px] text-muted-foreground mb-4">
+          Используйте ссылку, чтобы пригласить своих пользователей:
+        </p>
+        <div className="flex gap-3 items-stretch">
+          <Input
+            readOnly
+            value={shareUrl}
+            className={cn(
+              "flex-1 font-mono text-sm",
+              studyStatus === "stopped" && "opacity-60 bg-muted line-through"
+            )}
+          />
+          <Button
+            onClick={handleCopy}
+            disabled={studyStatus === "stopped"}
+            className="h-11 shrink-0 gap-2"
+          >
+            <Link className="h-4 w-4" />
+            {copied ? "Скопировано" : "Копировать ссылку"}
+          </Button>
         </div>
 
         {studyStatus === "draft" && (
-          <p style={{ margin: "12px 0 0 0", fontSize: 13, color: "#666" }}>
-            💡 Отправьте эту ссылку коллегам для проверки теста перед публикацией.
-          </p>
+          <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/50 p-3 text-[15px] text-muted-foreground">
+            <Lightbulb className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+            <span>Отправьте эту ссылку коллегам для проверки теста перед публикацией.</span>
+          </div>
         )}
+      </Card>
 
-        {studyStatus === "published" && (
-          <p style={{ margin: "12px 0 0 0", fontSize: 13, color: "#666" }}>
-            📤 Отправьте эту ссылку респондентам для прохождения теста.
-          </p>
-        )}
-      </div>
-
-      {/* Подсказки по статусам */}
-      <div style={{
-        padding: 16,
-        background: "#e3f2fd",
-        borderRadius: 8,
-        fontSize: 13,
-        color: "#1565c0"
-      }}>
-        <strong style={{ display: "block", marginBottom: 8 }}>Как это работает:</strong>
-        <ul style={{ margin: 0, paddingLeft: 20 }}>
-          <li><strong>Черновик</strong> — редактируйте блоки, тестируйте с командой</li>
-          <li><strong>Опубликован</strong> — респонденты проходят тест, блоки нельзя менять</li>
-          <li><strong>Остановлен</strong> — тестирование завершено, только просмотр результатов</li>
+      {/* Как это работает */}
+      <div>
+        <p className="font-semibold text-sm mb-2">Как это работает:</p>
+        <ul className="space-y-1 text-sm text-muted-foreground list-none pl-0 m-0">
+          <li><strong className="text-foreground">Черновик</strong> — редактируйте блоки, тестируйте с командой</li>
+          <li><strong className="text-foreground">Опубликован</strong> — респонденты проходят тест, блоки нельзя менять</li>
+          <li><strong className="text-foreground">Остановлен</strong> — тестирование завершено, только просмотр результатов</li>
         </ul>
       </div>
     </div>
