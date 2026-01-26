@@ -121,4 +121,6 @@ export type BlockType =
   | "five_seconds" 
   | "card_sorting" 
   | "tree_testing"
-  | "first_click";
+  | "first_click"
+  | "matrix"
+  | "agreement";

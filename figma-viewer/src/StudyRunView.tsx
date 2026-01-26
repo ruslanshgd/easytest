@@ -163,7 +163,7 @@ function ImageModal({ imageUrl, onClose, onNext, onPrev, showNavigation = false,
 }
 
 // Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click" | "matrix" | "agreement";
 
 interface StudyData {
   study: {
@@ -778,7 +778,6 @@ function FiveSecondsBlock({ config, onComplete }: FiveSecondsBlockProps) {
   if (phase === "viewing") {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 0, background: "#f5f5f7" }}>
-        <div style={{ position: "fixed", top: 20, right: 20, padding: "12px 24px", background: "rgba(0,0,0,0.7)", color: "white", borderRadius: 30, fontSize: 24, fontWeight: 700, fontFamily: "monospace", zIndex: 100 }}>{timeLeft}</div>
         <img src={config.imageUrl} alt="Test image" style={{ width: "100%", height: "100vh", objectFit: "contain" }} onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23ddd' width='400' height='300'/%3E%3Ctext fill='%23666' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНе удалось загрузить изображение%3C/text%3E%3C/svg%3E"; }} />
       </div>
     );
@@ -971,6 +970,30 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
     }
   };
 
+  // Вычислить isDirect: путь должен быть минимальным (без лишних шагов) до правильного ответа
+  const calculateIsDirect = (path: string[]): boolean => {
+    if (path.length === 0) return false;
+    
+    const selectedNodeId = path[path.length - 1];
+    if (!config.correctAnswers.includes(selectedNodeId)) return false;
+    
+    // Найти минимальный путь к правильному узлу
+    const correctPath = findPathToNode(config.tree, selectedNodeId);
+    if (!correctPath) return false;
+    
+    // isDirect = true, если выбранный путь совпадает с минимальным путем или является его подмножеством
+    // (т.е. пользователь не делал лишних шагов)
+    if (path.length <= correctPath.length) {
+      // Проверяем, что путь совпадает с началом правильного пути
+      for (let i = 0; i < path.length; i++) {
+        if (path[i] !== correctPath[i]) return false;
+      }
+      return true;
+    }
+    
+    return false;
+  };
+
   // Отправить ответ
   const handleSubmit = async () => {
     if (selectedPath.length === 0) return;
@@ -979,16 +1002,39 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
     const durationMs = Date.now() - startTime;
     const selectedNodeId = selectedPath[selectedPath.length - 1];
     const isCorrect = config.correctAnswers.includes(selectedNodeId);
+    const isDirect = calculateIsDirect(selectedPath);
     
     try {
       await onSubmit({
         selectedNodeId,
         selectedPath,
         pathNames: getPathNames(selectedPath),
-        isCorrect
+        isCorrect,
+        isDirect
       }, durationMs);
     } catch (err) {
       console.error("Error submitting tree testing:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Обработка "Не знаю"
+  const handleDontKnow = async () => {
+    setSubmitting(true);
+    const durationMs = Date.now() - startTime;
+    
+    try {
+      await onSubmit({
+        selectedNodeId: null,
+        selectedPath: [],
+        pathNames: [],
+        isCorrect: false,
+        dontKnow: true,
+        isUnsuccessful: true
+      }, durationMs);
+    } catch (err) {
+      console.error("Error submitting 'don't know':", err);
     } finally {
       setSubmitting(false);
     }
@@ -1166,41 +1212,59 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
         )}
 
         {/* Кнопки */}
-        <div style={{ display: "flex", gap: 12 }}>
-          {config.allowSkip && (
+        <div style={{ display: "flex", gap: 12, flexDirection: "column" }}>
+          <div style={{ display: "flex", gap: 12 }}>
+            {config.allowSkip && (
+              <button
+                onClick={handleSkip}
+                disabled={submitting}
+                style={{
+                  flex: 1,
+                  padding: "14px 24px",
+                  background: "#f5f5f5",
+                  color: "#666",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "16px",
+                  cursor: submitting ? "not-allowed" : "pointer"
+                }}
+              >
+                Пропустить
+              </button>
+            )}
             <button
-              onClick={handleSkip}
-              disabled={submitting}
+              onClick={handleSubmit}
+              disabled={!hasSelection || submitting}
               style={{
                 flex: 1,
                 padding: "14px 24px",
-                background: "#f5f5f5",
-                color: "#666",
+                background: hasSelection && !submitting ? "#007AFF" : "#ccc",
+                color: "white",
                 border: "none",
                 borderRadius: "8px",
                 fontSize: "16px",
-                cursor: submitting ? "not-allowed" : "pointer"
+                fontWeight: 600,
+                cursor: hasSelection && !submitting ? "pointer" : "not-allowed"
               }}
             >
-              Пропустить
+              {submitting ? "Сохранение..." : "Подтвердить выбор"}
             </button>
-          )}
+          </div>
           <button
-            onClick={handleSubmit}
-            disabled={!hasSelection || submitting}
+            onClick={handleDontKnow}
+            disabled={submitting}
             style={{
-              flex: 1,
+              width: "100%",
               padding: "14px 24px",
-              background: hasSelection && !submitting ? "#007AFF" : "#ccc",
-              color: "white",
-              border: "none",
+              background: submitting ? "#ccc" : "#f5f5f5",
+              color: "#666",
+              border: "1px solid #e0e0e0",
               borderRadius: "8px",
               fontSize: "16px",
-              fontWeight: 600,
-              cursor: hasSelection && !submitting ? "pointer" : "not-allowed"
+              cursor: submitting ? "not-allowed" : "pointer"
             }}
           >
-            {submitting ? "Сохранение..." : "Подтвердить выбор"}
+            {submitting ? "Сохранение..." : "Не знаю"}
           </button>
         </div>
       </div>
@@ -1625,7 +1689,7 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
               onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; }}
             >
               <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                {config.showImages && card.imageUrl && (
+                {config.showImages && card.imageUrl && card.imageUrl.trim() !== "" && (
                   <img src={card.imageUrl} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
                 )}
                 <div>
@@ -1719,7 +1783,7 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
                         }}
                       >
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, minWidth: 0 }}>
-                          {config.showImages && card.imageUrl && (
+                          {config.showImages && card.imageUrl && card.imageUrl.trim() !== "" && (
                             <img src={card.imageUrl} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
                           )}
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.title}</span>
@@ -1771,6 +1835,475 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
   );
 }
 
+// ============= Компонент "Матрица" =============
+interface MatrixRow {
+  id: string;
+  title: string;
+}
+
+interface MatrixColumn {
+  id: string;
+  title: string;
+}
+
+interface MatrixBlockProps {
+  config: {
+    question: string;
+    description?: string;
+    imageUrl?: string;
+    rows: MatrixRow[];
+    columns: MatrixColumn[];
+    shuffleRows: boolean;
+    shuffleColumns: boolean;
+    allowMultiple: boolean;
+    optional: boolean;
+  };
+  onSubmit: (answer: any, durationMs: number) => Promise<void>;
+  onSkip?: () => Promise<void>;
+}
+
+function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
+  const [submitting, setSubmitting] = useState(false);
+  const [startTime] = useState(Date.now());
+  const [showImageModal, setShowImageModal] = useState(false);
+  
+  // Перемешиваем строки и столбцы
+  const [shuffledRows] = useState(() => {
+    const rows = [...config.rows];
+    if (config.shuffleRows) {
+      for (let i = rows.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [rows[i], rows[j]] = [rows[j], rows[i]];
+      }
+    }
+    return rows;
+  });
+  
+  const [shuffledColumns] = useState(() => {
+    const cols = [...config.columns];
+    if (config.shuffleColumns) {
+      for (let i = cols.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cols[i], cols[j]] = [cols[j], cols[i]];
+      }
+    }
+    return cols;
+  });
+  
+  // Состояние выбранных значений: { rowId: [columnId1, columnId2, ...] }
+  const [selections, setSelections] = useState<Record<string, string[]>>({});
+  
+  const handleCellClick = (rowId: string, columnId: string) => {
+    setSelections(prev => {
+      const rowSelections = prev[rowId] || [];
+      
+      if (config.allowMultiple) {
+        // Множественный выбор - toggle
+        if (rowSelections.includes(columnId)) {
+          return {
+            ...prev,
+            [rowId]: rowSelections.filter(id => id !== columnId)
+          };
+        } else {
+          return {
+            ...prev,
+            [rowId]: [...rowSelections, columnId]
+          };
+        }
+      } else {
+        // Одиночный выбор - замена
+        return {
+          ...prev,
+          [rowId]: [columnId]
+        };
+      }
+    });
+  };
+  
+  const hasAnswer = Object.keys(selections).some(rowId => selections[rowId].length > 0);
+  
+  const handleSubmit = async () => {
+    if (!hasAnswer && !config.optional) return;
+    
+    setSubmitting(true);
+    const durationMs = Date.now() - startTime;
+    
+    try {
+      await onSubmit({ selections }, durationMs);
+    } catch (err) {
+      console.error("Error submitting matrix:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  
+  const handleSkip = async () => {
+    if (!config.optional || !onSkip) return;
+    setSubmitting(true);
+    try {
+      await onSkip();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  
+  return (
+    <>
+      {showImageModal && config.imageUrl && (
+        <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
+      )}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+        <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+          {config.imageUrl && (
+            <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
+              <img src={config.imageUrl} alt="" style={{ width: "100%", maxHeight: 500, objectFit: "contain", background: "#f5f5f5" }} />
+              <div style={{ textAlign: "center", marginTop: 8, color: "#666", fontSize: 13 }}>Нажмите для увеличения</div>
+            </div>
+          )}
+          <h2 style={{ margin: "0 0 12px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>{config.question}</h2>
+          {config.description && <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "14px" }}>{config.description}</p>}
+          
+          {/* Матрица */}
+          <div style={{ marginBottom: 24, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #e0e0e0", borderRadius: 8, overflow: "hidden" }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: "12px 16px", textAlign: "left", border: "1px solid #e0e0e0", background: "#f7f7f5", fontWeight: 600, fontSize: 14, color: "#333" }}></th>
+                  {shuffledColumns.map(column => (
+                    <th key={column.id} style={{ padding: "12px 16px", textAlign: "center", border: "1px solid #e0e0e0", background: "#f7f7f5", fontWeight: 600, fontSize: 14, color: "#333", minWidth: 120 }}>
+                      {column.title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {shuffledRows.map(row => (
+                  <tr key={row.id}>
+                    <td style={{ padding: "12px 16px", border: "1px solid #e0e0e0", background: "#fafafa", fontWeight: 500, fontSize: 14, color: "#333" }}>
+                      {row.title}
+                    </td>
+                    {shuffledColumns.map(column => {
+                      const isSelected = selections[row.id]?.includes(column.id) || false;
+                      return (
+                        <td 
+                          key={column.id} 
+                          style={{ 
+                            padding: "12px 16px", 
+                            border: "1px solid #e0e0e0", 
+                            textAlign: "center",
+                            cursor: "pointer",
+                            background: isSelected ? "#e3f2fd" : "white",
+                            transition: "background 0.2s"
+                          }}
+                          onClick={() => handleCellClick(row.id, column.id)}
+                        >
+                          <div style={{ 
+                            display: "inline-flex", 
+                            alignItems: "center", 
+                            justifyContent: "center",
+                            width: config.allowMultiple ? 20 : 24,
+                            height: config.allowMultiple ? 20 : 24,
+                            borderRadius: config.allowMultiple ? 4 : 12,
+                            border: isSelected ? "2px solid #007AFF" : "2px solid #ccc",
+                            background: isSelected ? "#007AFF" : "white",
+                            transition: "all 0.2s"
+                          }}>
+                            {isSelected && (
+                              <span style={{ color: "white", fontSize: 12 }}>✓</span>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          <div style={{ display: "flex", gap: 12 }}>
+            {config.optional && (
+              <button onClick={handleSkip} disabled={submitting} style={{ flex: 1, padding: "12px 24px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: "8px", fontSize: "16px", cursor: submitting ? "not-allowed" : "pointer" }}>
+                Пропустить
+              </button>
+            )}
+            <button onClick={handleSubmit} disabled={(!hasAnswer && !config.optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed" }}>
+              {submitting ? "Сохранение..." : "Далее →"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ============= Компонент "Соглашение" =============
+interface AgreementBlockProps {
+  config: {
+    title: string;
+    agreementType: "standard" | "custom";
+    customPdfUrl?: string;
+  };
+  onSubmit: (answer: any, durationMs: number) => Promise<void>;
+  onSkip?: () => Promise<void>;
+}
+
+function AgreementBlock({ config, onSubmit, onSkip }: AgreementBlockProps) {
+  const [accepted, setAccepted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [startTime] = useState(Date.now());
+  const [showAgreementModal, setShowAgreementModal] = useState(false);
+
+  // Генерация стандартного текста соглашения (упрощенная версия для респондента)
+  const getStandardAgreementText = (): string => {
+    return `СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ
+
+Настоящим я даю свое согласие на обработку моих персональных данных в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ "О персональных данных".
+
+1. ОПЕРАТОР ПЕРСОНАЛЬНЫХ ДАННЫХ
+Оператором персональных данных является организация, проводящая исследование.
+
+2. ЦЕЛИ ОБРАБОТКИ ПЕРСОНАЛЬНЫХ ДАННЫХ
+Персональные данные обрабатываются в следующих целях:
+- Проведение исследования и анализ результатов
+- Улучшение качества продуктов и услуг
+- Коммуникация с участниками исследования (при необходимости)
+
+3. СОСТАВ ПЕРСОНАЛЬНЫХ ДАННЫХ
+В рамках исследования могут собираться следующие данные:
+- Ответы на вопросы исследования
+- Данные о взаимодействии с интерфейсом (клики, время прохождения)
+- Аудио- и видеозаписи (если применимо)
+- Электронная почта и другие контактные данные (если предоставлены)
+
+4. СПОСОБЫ ОБРАБОТКИ ПЕРСОНАЛЬНЫХ ДАННЫХ
+Обработка персональных данных осуществляется с использованием средств автоматизации и без использования таких средств, включая сбор, запись, систематизацию, накопление, хранение, уточнение (обновление, изменение), извлечение, использование, передачу (распространение, предоставление, доступ), обезличивание, блокирование, удаление, уничтожение персональных данных.
+
+5. СРОК ДЕЙСТВИЯ СОГЛАСИЯ
+Согласие действует до достижения целей обработки персональных данных или до отзыва согласия субъектом персональных данных.
+
+6. ПРАВА СУБЪЕКТА ПЕРСОНАЛЬНЫХ ДАННЫХ
+Я понимаю, что в соответствии с Федеральным законом № 152-ФЗ "О персональных данных" имею право:
+- Получать информацию, касающуюся обработки моих персональных данных
+- Требовать уточнения, блокирования или уничтожения персональных данных
+- Отозвать согласие на обработку персональных данных
+- Обжаловать действия или бездействие оператора в уполномоченный орган по защите прав субъектов персональных данных или в судебном порядке
+
+7. ОТЗЫВ СОГЛАСИЯ
+Я понимаю, что могу отозвать свое согласие на обработку персональных данных, направив письменное уведомление оператору по адресу, указанному в контактной информации.
+
+Настоящее согласие предоставляется мной добровольно и подтверждает, что я ознакомлен(а) с условиями обработки персональных данных.`;
+  };
+
+  const handleSubmit = async (acceptedValue: boolean) => {
+    setSubmitting(true);
+    setError(null);
+    const durationMs = Date.now() - startTime;
+    
+    try {
+      await onSubmit({ 
+        accepted: acceptedValue, 
+        acceptedAt: acceptedValue ? new Date().toISOString() : null
+      }, durationMs);
+    } catch (err) {
+      // Правильно извлекаем сообщение об ошибке
+      let errorMessage: string;
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'object' && err !== null) {
+        // Если ошибка от Supabase, она может быть объектом с полем message
+        const errorObj = err as any;
+        errorMessage = errorObj.message || errorObj.error?.message || String(err);
+      } else {
+        errorMessage = String(err);
+      }
+      
+      console.error("Error submitting agreement:", {
+        error: err,
+        errorMessage,
+        errorStack: err instanceof Error ? err.stack : undefined,
+        errorString: JSON.stringify(err, Object.getOwnPropertyNames(err))
+      });
+      // Отображаем ошибку пользователю
+      setError(errorMessage || "Ошибка сохранения согласия. Пожалуйста, попробуйте еще раз.");
+      setSubmitting(false);
+    }
+  };
+
+  const handleDecline = async () => {
+    await handleSubmit(false);
+  };
+
+  return (
+    <>
+      {showAgreementModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.95)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            overflowY: "auto"
+          }}
+          onClick={() => setShowAgreementModal(false)}
+        >
+          <div
+            style={{
+              position: "relative",
+              maxWidth: "800px",
+              width: "100%",
+              maxHeight: "90vh",
+              background: "white",
+              borderRadius: 12,
+              padding: 32,
+              overflowY: "auto"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowAgreementModal(false)}
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "transparent",
+                border: "none",
+                fontSize: 24,
+                cursor: "pointer",
+                color: "#666"
+              }}
+            >
+              ×
+            </button>
+            <div style={{ whiteSpace: "pre-line", lineHeight: 1.6, color: "#333" }}>
+              {config.agreementType === "standard" ? getStandardAgreementText() : (
+                <div style={{ textAlign: "center", padding: 40 }}>
+                  <p style={{ marginBottom: 20 }}>Для просмотра соглашения откройте PDF файл:</p>
+                  <a
+                    href={config.customPdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "inline-block",
+                      padding: "12px 24px",
+                      background: "#007AFF",
+                      color: "white",
+                      textDecoration: "none",
+                      borderRadius: 8,
+                      fontWeight: 600
+                    }}
+                  >
+                    Открыть соглашение (PDF)
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+        <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+          <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>
+            {config.title || "Пожалуйста, ознакомьтесь и примите условия участия в исследовании"}
+          </h2>
+          
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+                style={{ marginTop: 4, width: 20, height: 20, cursor: "pointer" }}
+              />
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: "16px", lineHeight: 1.5, color: "#333" }}>
+                  Я соглашаюсь на сбор персональных данных и принимаю{" "}
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setShowAgreementModal(true);
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#007AFF",
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                      fontSize: "16px",
+                      padding: 0,
+                      fontWeight: 600
+                    }}
+                  >
+                    Соглашение о сборе и обработке персональных данных
+                  </button>
+                </span>
+              </div>
+            </label>
+          </div>
+          
+          {error && (
+            <div style={{
+              marginBottom: 16,
+              padding: "12px 16px",
+              background: "#ffebee",
+              color: "#c62828",
+              borderRadius: "8px",
+              fontSize: "14px"
+            }}>
+              {error}
+            </div>
+          )}
+          
+          <div style={{ display: "flex", gap: 12 }}>
+            <button
+              onClick={() => handleSubmit(true)}
+              disabled={!accepted || submitting}
+              style={{
+                flex: 1,
+                padding: "12px 24px",
+                background: accepted && !submitting ? "#007AFF" : "#ccc",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                fontSize: "16px",
+                fontWeight: 600,
+                cursor: accepted && !submitting ? "pointer" : "not-allowed"
+              }}
+            >
+              {submitting ? "Сохранение..." : "Принять"}
+            </button>
+            <button
+              onClick={handleDecline}
+              disabled={submitting}
+              style={{
+                flex: 1,
+                padding: "12px 24px",
+                background: submitting ? "#ccc" : "#f5f5f5",
+                color: submitting ? "#999" : "#333",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+                fontSize: "16px",
+                fontWeight: 600,
+                cursor: submitting ? "not-allowed" : "pointer"
+              }}
+            >
+              {submitting ? "Сохранение..." : "Отказаться"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ============= Компонент "Спасибо за участие" =============
 function ThankYouPage() {
   return (
@@ -1810,6 +2343,9 @@ export default function StudyRunView() {
     createSessionForBlock,
   } = useViewerStore();
 
+  // Состояние для хранения всех ответов респондента
+  const [allResponses, setAllResponses] = useState<Record<string, any>>({});
+
   useEffect(() => {
     if (!token) {
       setStudyRunError("Токен не указан в URL");
@@ -1820,12 +2356,181 @@ export default function StudyRunView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]); // Functions from store are stable
 
-  const handleNextBlock = useCallback(async () => {
+  // Загрузка всех ответов для проверки логики
+  useEffect(() => {
+    if (!runId) return;
+    
+    const loadResponses = async () => {
+      const { data, error } = await supabase
+        .from("study_block_responses")
+        .select("block_id, answer")
+        .eq("run_id", runId);
+      
+      if (!error && data) {
+        const responsesMap: Record<string, any> = {};
+        data.forEach(r => {
+          responsesMap[r.block_id] = r.answer;
+        });
+        setAllResponses(responsesMap);
+      }
+    };
+    
+    loadResponses();
+  }, [runId]);
+
+  // Функция проверки условия логики
+  const checkLogicCondition = useCallback((condition: any, blockId: string): boolean => {
+    const answer = allResponses[blockId];
+    if (!answer) return false;
+
+    // Для прототипов проверяем финальный экран
+    if (condition.operator === "completed_on" || condition.operator === "not_completed_on") {
+      const finalScreen = answer.finalScreen || answer.screenName;
+      if (condition.operator === "completed_on") {
+        return finalScreen === condition.screenName;
+      } else {
+        return finalScreen !== condition.screenName;
+      }
+    }
+
+    // Для остальных операторов извлекаем текст ответа
+    let answerText = "";
+    if (typeof answer === "string") {
+      answerText = answer;
+    } else if (answer.text) {
+      answerText = answer.text;
+    } else if (Array.isArray(answer.selected)) {
+      // Для choice блока с множественным выбором
+      answerText = answer.selected.join(", ");
+    } else if (answer.selected) {
+      // Для choice блока с одиночным выбором
+      answerText = String(answer.selected);
+    } else if (answer.selections) {
+      // Для matrix блока
+      answerText = JSON.stringify(answer.selections);
+    } else {
+      answerText = JSON.stringify(answer);
+    }
+
+    const value = (condition.value || "").toLowerCase();
+    switch (condition.operator) {
+      case "contains":
+        return answerText.toLowerCase().includes(value);
+      case "not_contains":
+        return !answerText.toLowerCase().includes(value);
+      case "equals":
+        return answerText === condition.value;
+      case "not_equals":
+        return answerText !== condition.value;
+      default:
+        return false;
+    }
+  }, [allResponses]);
+
+  // Функция проверки "Показать при условии"
+  const shouldShowBlock = useCallback((block: any): boolean => {
+    const logic = block.config?.logic;
+    if (!logic?.showOnCondition?.enabled) return true;
+
+    const { conditions, action } = logic.showOnCondition;
+    if (conditions.length === 0) return true;
+
+    // Проверяем все условия (связаны через AND)
+    const allConditionsMet = conditions.every(cond => 
+      checkLogicCondition(cond, cond.blockId)
+    );
+
+    return action === "show" ? allConditionsMet : !allConditionsMet;
+  }, [checkLogicCondition]);
+
+  // Функция получения следующего блока с учетом логики
+  const getNextBlockWithLogic = useCallback((currentBlock: any, currentAnswer: any): number | "end" => {
+    if (!studyData) return currentBlockIndex + 1;
+    
+    const logic = currentBlock.config?.logic;
+    if (!logic?.conditionalLogic) {
+      // Нет логики - переходим к следующему блоку
+      return currentBlockIndex + 1;
+    }
+
+    const { rules, elseGoToBlockId } = logic.conditionalLogic;
+
+    // Обновляем ответ для текущего блока перед проверкой
+    const updatedResponses = { ...allResponses, [currentBlock.id]: currentAnswer };
+
+    // Проверяем каждое правило
+    for (const rule of rules) {
+      // Условия в правиле связаны через OR
+      const anyConditionMet = rule.conditions.some(cond => {
+        // Для логического перехода проверяем ответ на текущий блок
+        if (cond.blockId === currentBlock.id) {
+          const tempAnswer = updatedResponses[currentBlock.id];
+          if (!tempAnswer) return false;
+          const answerText = typeof tempAnswer === "string" 
+            ? tempAnswer 
+            : tempAnswer.text || JSON.stringify(tempAnswer);
+          const value = (cond.value || "").toLowerCase();
+          switch (cond.operator) {
+            case "contains":
+              return answerText.toLowerCase().includes(value);
+            case "not_contains":
+              return !answerText.toLowerCase().includes(value);
+            case "equals":
+              return answerText === cond.value;
+            case "not_equals":
+              return answerText !== cond.value;
+            default:
+              return false;
+          }
+        }
+        // Или проверяем ответ на другой блок
+        return checkLogicCondition(cond, cond.blockId);
+      });
+
+      if (anyConditionMet) {
+        if (rule.goToBlockId === "__end__") {
+          return "end";
+        }
+        const targetIndex = studyData.blocks.findIndex(b => b.id === rule.goToBlockId);
+        if (targetIndex !== undefined && targetIndex >= 0) {
+          return targetIndex;
+        }
+      }
+    }
+
+    // Если ничего не подошло, используем else
+    if (elseGoToBlockId) {
+      if (elseGoToBlockId === "__end__") {
+        return "end";
+      }
+      const targetIndex = studyData.blocks.findIndex(b => b.id === elseGoToBlockId);
+      if (targetIndex !== undefined && targetIndex >= 0) {
+        return targetIndex;
+      }
+    }
+
+    // По умолчанию - следующий блок
+    return currentBlockIndex + 1;
+  }, [studyData, currentBlockIndex, allResponses, checkLogicCondition]);
+
+  const handleNextBlock = useCallback(async (submittedAnswer?: any) => {
     if (!studyData || !runId) return;
 
-    const nextIndex = currentBlockIndex + 1;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
 
-    if (nextIndex >= studyData.blocks.length) {
+    // Обновляем ответы после сохранения
+    if (submittedAnswer) {
+      setAllResponses(prev => ({
+        ...prev,
+        [currentBlock.id]: submittedAnswer
+      }));
+    }
+
+    // Получаем следующий блок с учетом логики
+    const nextBlockIndex = getNextBlockWithLogic(currentBlock, submittedAnswer);
+
+    if (nextBlockIndex === "end" || (typeof nextBlockIndex === "number" && nextBlockIndex >= studyData.blocks.length)) {
       try {
         await supabase.rpc("rpc_finish_run", { p_run_id: runId });
       } catch (err) {
@@ -1835,23 +2540,51 @@ export default function StudyRunView() {
       return;
     }
 
-    setCurrentBlockIndex(nextIndex);
-    const nextBlock = studyData.blocks[nextIndex];
+    if (typeof nextBlockIndex === "number") {
+      // Пропускаем блоки, которые должны быть скрыты
+      let actualNextIndex = nextBlockIndex;
+      while (actualNextIndex < studyData.blocks.length) {
+        const nextBlock = studyData.blocks[actualNextIndex];
+        if (shouldShowBlock(nextBlock)) {
+          break;
+        }
+        actualNextIndex++;
+      }
 
-    if (nextBlock.type === "prototype" && nextBlock.prototype_id) {
-      await createSessionForBlock(nextBlock.prototype_id, nextBlock.id, studyData.study.id, runId);
+      if (actualNextIndex >= studyData.blocks.length) {
+        try {
+          await supabase.rpc("rpc_finish_run", { p_run_id: runId });
+        } catch (err) {
+          console.error("Error finishing run:", err);
+        }
+        setFinished(true);
+        return;
+      }
+
+      setCurrentBlockIndex(actualNextIndex);
+      const nextBlock = studyData.blocks[actualNextIndex];
+
+      if (nextBlock.type === "prototype" && nextBlock.prototype_id) {
+        await createSessionForBlock(nextBlock.prototype_id, nextBlock.id, studyData.study.id, runId);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studyData, runId, currentBlockIndex, createSessionForBlock]); // createSessionForBlock from store
+  }, [studyData, runId, currentBlockIndex, createSessionForBlock, allResponses, getNextBlockWithLogic, shouldShowBlock]); // createSessionForBlock from store
 
   const handlePrototypeComplete = async () => {
-    await handleNextBlock();
+    // Для прототипов ответ уже сохранен в TestView, просто переходим
+    await handleNextBlock({});
   };
 
   const submitBlockResponse = async (blockId: string, answer: any, durationMs: number) => {
     if (!runId) {
-      console.error("StudyRunView: Cannot submit response - runId is missing");
-      return;
+      const error = new Error("Не удалось сохранить ответ: отсутствует идентификатор сессии");
+      console.error("StudyRunView: Cannot submit response - runId is missing", {
+        block_id: blockId,
+        answer,
+        duration_ms: durationMs
+      });
+      throw error;
     }
     
     // Логирование перед отправкой
@@ -1873,9 +2606,14 @@ export default function StudyRunView() {
     if (submitError) {
       console.error("StudyRunView: Error submitting response:", {
         error: submitError,
+        errorMessage: submitError.message,
+        errorDetails: submitError.details,
+        errorHint: submitError.hint,
+        errorCode: submitError.code,
         run_id: runId,
         block_id: blockId,
-        answer: answer
+        answer: answer,
+        answerStringified: JSON.stringify(answer)
       });
       throw submitError;
     }
@@ -1893,8 +2631,9 @@ export default function StudyRunView() {
     if (!studyData) return;
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
-    await submitBlockResponse(currentBlock.id, { text: answer }, durationMs);
-    await handleNextBlock();
+    const answerObj = { text: answer };
+    await submitBlockResponse(currentBlock.id, answerObj, durationMs);
+    await handleNextBlock(answerObj);
   };
 
   const handleChoiceSubmit = async (answer: any, durationMs: number) => {
@@ -1902,7 +2641,7 @@ export default function StudyRunView() {
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
     await submitBlockResponse(currentBlock.id, answer, durationMs);
-    await handleNextBlock();
+    await handleNextBlock(answer);
   };
 
   const handleScaleSubmit = async (answer: any, durationMs: number) => {
@@ -1910,7 +2649,7 @@ export default function StudyRunView() {
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
     await submitBlockResponse(currentBlock.id, answer, durationMs);
-    await handleNextBlock();
+    await handleNextBlock(answer);
   };
 
   const handlePreferenceSubmit = async (answer: any, durationMs: number) => {
@@ -1918,7 +2657,7 @@ export default function StudyRunView() {
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
     await submitBlockResponse(currentBlock.id, answer, durationMs);
-    await handleNextBlock();
+    await handleNextBlock(answer);
   };
 
   const handleUmuxLiteSubmit = async (item1: number, item2: number, feedback: string, durationMs: number) => {
@@ -1929,14 +2668,15 @@ export default function StudyRunView() {
     const umuxLiteScore = ((item1 - 1 + item2 - 1) / 12) * 100;
     const susScore = 0.65 * ((item1 + item2 - 2) * (100 / 12)) + 22.9;
     
-    await submitBlockResponse(currentBlock.id, {
+    const answerObj = {
       item1,
       item2,
       feedback,
       umux_lite_score: Math.round(umuxLiteScore * 100) / 100,
       sus_score: Math.round(susScore * 100) / 100
-    }, durationMs);
-    await handleNextBlock();
+    };
+    await submitBlockResponse(currentBlock.id, answerObj, durationMs);
+    await handleNextBlock(answerObj);
   };
 
   const handleTreeTestingSubmit = async (answer: any, durationMs: number) => {
@@ -1944,7 +2684,7 @@ export default function StudyRunView() {
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
     await submitBlockResponse(currentBlock.id, answer, durationMs);
-    await handleNextBlock();
+    await handleNextBlock(answer);
   };
 
   const handleFirstClickSubmit = async (answer: { x: number; y: number }, durationMs: number) => {
@@ -1952,7 +2692,7 @@ export default function StudyRunView() {
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
     await submitBlockResponse(currentBlock.id, answer, durationMs);
-    await handleNextBlock();
+    await handleNextBlock(answer);
   };
 
   const handleCardSortingSubmit = async (answer: any, durationMs: number) => {
@@ -1960,7 +2700,23 @@ export default function StudyRunView() {
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
     await submitBlockResponse(currentBlock.id, answer, durationMs);
-    await handleNextBlock();
+    await handleNextBlock(answer);
+  };
+
+  const handleMatrixSubmit = async (answer: any, durationMs: number) => {
+    if (!studyData) return;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
+    await submitBlockResponse(currentBlock.id, answer, durationMs);
+    await handleNextBlock(answer);
+  };
+
+  const handleAgreementSubmit = async (answer: any, durationMs: number) => {
+    if (!studyData) return;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
+    await submitBlockResponse(currentBlock.id, answer, durationMs);
+    await handleNextBlock(answer);
   };
 
   // Рендеринг
@@ -2057,6 +2813,18 @@ export default function StudyRunView() {
         <CardSortingBlock
           config={currentBlock.config}
           onSubmit={handleCardSortingSubmit}
+        />
+      ) : currentBlock.type === "matrix" ? (
+        <MatrixBlock
+          config={currentBlock.config}
+          onSubmit={handleMatrixSubmit}
+          onSkip={currentBlock.config?.optional ? handleNextBlock : undefined}
+        />
+      ) : currentBlock.type === "agreement" ? (
+        <AgreementBlock
+          config={currentBlock.config}
+          onSubmit={handleAgreementSubmit}
+          onSkip={handleNextBlock}
         />
       ) : currentBlock.type === "tree_testing" ? (
         <TreeTestingBlock

@@ -73,11 +73,17 @@ import {
   ImagePlus,
   CircleAlert,
   MousePointerClick,
+  Table,
+  Workflow,
+  Link2,
+  Eye,
+  EyeOff,
+  ShieldCheck,
   type LucideIcon
 } from "lucide-react";
 
 // Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click";
+type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click" | "matrix" | "agreement";
 
 interface Study {
   id: string;
@@ -199,6 +205,65 @@ interface TreeTestingConfig {
   allowSkip: boolean; // разрешить пропуск
 }
 
+// Конфиг для типа "Матрица"
+interface MatrixRow {
+  id: string;
+  title: string;
+}
+
+interface MatrixColumn {
+  id: string;
+  title: string;
+}
+
+interface MatrixConfig {
+  question: string;
+  description?: string;
+  imageUrl?: string;
+  rows: MatrixRow[];
+  columns: MatrixColumn[];
+  shuffleRows: boolean;
+  shuffleColumns: boolean;
+  allowMultiple: boolean; // Разрешить выбор нескольких вариантов в строке
+  optional: boolean;
+}
+
+// Конфиг для типа "Соглашение"
+interface AgreementConfig {
+  title: string; // Заголовок соглашения
+  agreementType: "standard" | "custom"; // Тип соглашения
+  customPdfUrl?: string; // URL загруженного PDF (если agreementType === "custom")
+}
+
+// Конфиг для логики блока
+interface LogicCondition {
+  blockId: string; // ID блока, ответ на который проверяется
+  operator: "contains" | "not_contains" | "equals" | "not_equals" | "completed_on" | "not_completed_on";
+  value?: string; // Значение для сравнения (для contains, equals и т.д.)
+  screenName?: string; // Для прототипов: название финального экрана
+}
+
+interface ConditionalLogicRule {
+  conditions: LogicCondition[]; // Массив условий, связанных через OR
+  goToBlockId: string; // ID блока, к которому перейти
+}
+
+interface ConditionalLogic {
+  rules: ConditionalLogicRule[]; // Массив правил (IF... THEN...)
+  elseGoToBlockId?: string; // ID блока для "Если ничего не подошло"
+}
+
+interface ShowOnCondition {
+  enabled: boolean;
+  action: "show" | "hide"; // Показать или скрыть блок
+  conditions: LogicCondition[]; // Условия на основе предыдущих ответов
+}
+
+interface BlockLogic {
+  conditionalLogic?: ConditionalLogic; // Логический переход
+  showOnCondition?: ShowOnCondition; // Показать при условии
+}
+
 const BLOCK_TYPES: { value: BlockType; label: string; Icon: LucideIcon }[] = [
   { value: "prototype", label: "Прототип", Icon: Layers },
   { value: "open_question", label: "Открытый вопрос", Icon: MessageSquare },
@@ -208,6 +273,8 @@ const BLOCK_TYPES: { value: BlockType; label: string; Icon: LucideIcon }[] = [
   { value: "context", label: "Контекст", Icon: FileText },
   { value: "five_seconds", label: "5 секунд", Icon: Timer },
   { value: "card_sorting", label: "Сортировка карточек", Icon: LayoutGrid },
+  { value: "matrix", label: "Матрица", Icon: Table },
+  { value: "agreement", label: "Соглашение", Icon: ShieldCheck },
   { value: "tree_testing", label: "Тестирование дерева", Icon: GitBranch },
   { value: "umux_lite", label: "UMUX Lite", Icon: ClipboardList },
   { value: "first_click", label: "Тест первого клика", Icon: MousePointerClick },
@@ -223,6 +290,7 @@ const START_FROM_SCRATCH_COLUMNS: { title: string; blocks: { type: BlockType; la
       { type: "scale", label: "Шкала", description: "Оценка по шкале (числа, эмодзи или звёзды). Согласие, удобство, NPS." },
       { type: "preference", label: "Предпочтение", description: "Сравнение вариантов. Узнайте, какой вариант нравится больше." },
       { type: "card_sorting", label: "Сортировка карточек", description: "Раскладка карточек по категориям. Изучайте ментальные модели." },
+      { type: "matrix", label: "Матрица", description: "Выбор столбцов для каждой строки. Оценка нескольких критериев одновременно." },
       { type: "five_seconds", label: "5 секунд", description: "Показ изображения 5 секунд, затем вопросы. Первое впечатление." },
     ],
   },
@@ -238,6 +306,7 @@ const START_FROM_SCRATCH_COLUMNS: { title: string; blocks: { type: BlockType; la
     title: "Другое",
     blocks: [
       { type: "context", label: "Контекст", description: "Текст или описание перед блоками. Даёт респонденту контекст." },
+      { type: "agreement", label: "Соглашение", description: "Попросите респондентов принять условия перед участием в исследовании." },
     ],
   },
 ];
@@ -368,6 +437,26 @@ export default function StudyDetail() {
   const [treeTestingCorrectAnswers, setTreeTestingCorrectAnswers] = useState<string[]>([]);
   const [treeTestingAllowSkip, setTreeTestingAllowSkip] = useState(false);
   const [expandedTreeNodes, setExpandedTreeNodes] = useState<Set<string>>(new Set());
+  
+  // Matrix form
+  const [matrixQuestion, setMatrixQuestion] = useState("");
+  const [matrixDescription, setMatrixDescription] = useState("");
+  const [matrixImage, setMatrixImage] = useState<{ file: File | null; url: string }>({ file: null, url: "" });
+  const [matrixRows, setMatrixRows] = useState<Array<{ id: string; title: string }>>([
+    { id: crypto.randomUUID(), title: "" }
+  ]);
+  const [matrixColumns, setMatrixColumns] = useState<Array<{ id: string; title: string }>>([
+    { id: crypto.randomUUID(), title: "" }
+  ]);
+  const [matrixShuffleRows, setMatrixShuffleRows] = useState(false);
+  const [matrixShuffleColumns, setMatrixShuffleColumns] = useState(false);
+  const [matrixAllowMultiple, setMatrixAllowMultiple] = useState(false);
+  const [matrixOptional, setMatrixOptional] = useState(false);
+  
+  // Agreement form
+  const [agreementTitle, setAgreementTitle] = useState("Пожалуйста, ознакомьтесь и примите условия участия в исследовании");
+  const [agreementType, setAgreementType] = useState<"standard" | "custom">("standard");
+  const [agreementPdfFile, setAgreementPdfFile] = useState<{ file: File | null; url: string }>({ file: null, url: "" });
 
 
   const resetAllBlockForms = () => {
@@ -429,6 +518,20 @@ export default function StudyDetail() {
     setTreeTestingCorrectAnswers([]);
     setTreeTestingAllowSkip(false);
     setExpandedTreeNodes(new Set());
+    // Matrix
+    setMatrixQuestion("");
+    setMatrixDescription("");
+    setMatrixImage({ file: null, url: "" });
+    setMatrixRows([{ id: crypto.randomUUID(), title: "" }]);
+    setMatrixColumns([{ id: crypto.randomUUID(), title: "" }]);
+    setMatrixShuffleRows(false);
+    setMatrixShuffleColumns(false);
+    setMatrixAllowMultiple(false);
+    setMatrixOptional(false);
+    // Agreement
+    setAgreementTitle("Пожалуйста, ознакомьтесь и примите условия участия в исследовании");
+    setAgreementType("standard");
+    setAgreementPdfFile({ file: null, url: "" });
     setEditingBlockId(null);
   };
 
@@ -548,6 +651,32 @@ export default function StudyDetail() {
         collectIds(block.config?.tree || []);
         setExpandedTreeNodes(allNodeIds);
         break;
+
+      case "matrix":
+        setMatrixQuestion(block.config?.question || "");
+        setMatrixDescription(block.config?.description || "");
+        setMatrixImage({ file: null, url: block.config?.imageUrl || "" });
+        setMatrixRows(
+          block.config?.rows?.length > 0
+            ? block.config.rows
+            : [{ id: crypto.randomUUID(), title: "" }]
+        );
+        setMatrixColumns(
+          block.config?.columns?.length > 0
+            ? block.config.columns
+            : [{ id: crypto.randomUUID(), title: "" }]
+        );
+        setMatrixShuffleRows(block.config?.shuffleRows || false);
+        setMatrixShuffleColumns(block.config?.shuffleColumns || false);
+        setMatrixAllowMultiple(block.config?.allowMultiple || false);
+        setMatrixOptional(block.config?.optional || false);
+        break;
+
+      case "agreement":
+        setAgreementTitle(block.config?.title || "Пожалуйста, ознакомьтесь и примите условия участия в исследовании");
+        setAgreementType(block.config?.agreementType || "standard");
+        setAgreementPdfFile({ file: null, url: block.config?.customPdfUrl || "" });
+        break;
     }
   };
 
@@ -566,6 +695,46 @@ export default function StudyDetail() {
       const { error: uploadError } = await supabase.storage
         .from("study-images")
         .upload(fileName, file);
+
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        setError(`Ошибка загрузки файла: ${uploadError.message}`);
+        return null;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("study-images")
+        .getPublicUrl(fileName);
+
+      return publicUrl;
+    } catch (err) {
+      console.error("Upload error:", err);
+      setError(`Ошибка загрузки: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  };
+
+  // Функция загрузки PDF файла в Supabase Storage
+  const uploadPdf = async (file: File): Promise<string | null> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация для загрузки файлов");
+        return null;
+      }
+
+      if (file.type !== "application/pdf") {
+        setError("Файл должен быть в формате PDF");
+        return null;
+      }
+
+      const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.pdf`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("study-images")
+        .upload(fileName, file, {
+          contentType: "application/pdf"
+        });
 
       if (uploadError) {
         console.error("Upload error:", uploadError);
@@ -1040,6 +1209,68 @@ export default function StudyDetail() {
         } as CardSortingConfig;
         break;
 
+      case "matrix":
+        if (!matrixQuestion.trim()) {
+          setError("Введите текст вопроса");
+          return;
+        }
+        const validRows = matrixRows.filter(r => r.title.trim());
+        if (validRows.length < 1) {
+          setError("Добавьте минимум 1 строку с названием");
+          return;
+        }
+        const validColumns = matrixColumns.filter(c => c.title.trim());
+        if (validColumns.length < 1) {
+          setError("Добавьте минимум 1 столбец с названием");
+          return;
+        }
+        let matrixImageUrl: string | undefined;
+        if (matrixImage.file) {
+          const uploaded = await uploadImage(matrixImage.file);
+          if (!uploaded) return;
+          matrixImageUrl = uploaded;
+        } else if (matrixImage.url) {
+          matrixImageUrl = matrixImage.url;
+        }
+        blockData.config = {
+          question: matrixQuestion.trim(),
+          description: matrixDescription.trim() || undefined,
+          imageUrl: matrixImageUrl,
+          rows: validRows.map(r => ({ id: r.id, title: r.title.trim() })),
+          columns: validColumns.map(c => ({ id: c.id, title: c.title.trim() })),
+          shuffleRows: matrixShuffleRows,
+          shuffleColumns: matrixShuffleColumns,
+          allowMultiple: matrixAllowMultiple,
+          optional: matrixOptional
+        } as MatrixConfig;
+        break;
+
+      case "agreement":
+        if (!agreementTitle.trim()) {
+          setError("Введите заголовок соглашения");
+          return;
+        }
+        let agreementPdfUrl: string | undefined;
+        if (agreementType === "custom") {
+          if (!agreementPdfFile.file && !agreementPdfFile.url) {
+            setError("Загрузите файл соглашения");
+            return;
+          }
+          if (agreementPdfFile.file) {
+            const uploaded = await uploadPdf(agreementPdfFile.file);
+            if (!uploaded) return;
+            agreementPdfUrl = uploaded;
+          } else if (agreementPdfFile.url) {
+            agreementPdfUrl = agreementPdfFile.url;
+          }
+        }
+        blockData.config = {
+          title: agreementTitle.trim(),
+          agreementType: agreementType,
+          customPdfUrl: agreementPdfUrl
+        } as AgreementConfig;
+        break;
+
       case "tree_testing":
         if (!treeTestingTask.trim()) {
           setError("Введите текст задания");
@@ -1074,6 +1305,21 @@ export default function StudyDetail() {
           allowSkip: treeTestingAllowSkip
         } as TreeTestingConfig;
         break;
+
+      default:
+        // Если тип блока не обработан, устанавливаем пустой config
+        // чтобы избежать ошибки NOT NULL constraint
+        if (!blockData.config) {
+          blockData.config = {};
+        }
+        break;
+    }
+
+    // Защита: убеждаемся, что config всегда установлен перед вставкой/обновлением
+    if (!blockData.config) {
+      console.error("Block config is missing for type:", newBlockType);
+      setError("Ошибка: конфигурация блока не установлена");
+      return;
     }
 
     if (isEditing) {
@@ -1221,14 +1467,38 @@ export default function StudyDetail() {
         tree: [{ id: crypto.randomUUID(), name: "Категория 1", children: [] }], 
         correctAnswers: [], 
         allowSkip: false 
+      },
+      matrix: {
+        question: "Введите вопрос",
+        description: "",
+        imageUrl: undefined,
+        rows: [{ id: crypto.randomUUID(), title: "" }],
+        columns: [{ id: crypto.randomUUID(), title: "" }],
+        shuffleRows: false,
+        shuffleColumns: false,
+        allowMultiple: false,
+        optional: false
+      },
+      agreement: {
+        title: "Соглашение",
+        agreementType: "standard" as const,
+        customPdfUrl: undefined
       }
     };
+
+    // Защита: убеждаемся, что config всегда установлен
+    const config = defaultConfigs[blockType];
+    if (!config) {
+      console.error("Block config is missing for type:", blockType);
+      setError("Ошибка: конфигурация блока не установлена");
+      return;
+    }
 
     const blockData: any = {
       study_id: studyId,
       type: blockType,
       order_index: maxOrderIndex + 1,
-      config: defaultConfigs[blockType]
+      config: config
     };
 
     incrementSaving();
@@ -1400,6 +1670,8 @@ export default function StudyDetail() {
         const tree = c.tree || [];
         const correct = (c.correctAnswers as string[]) || [];
         return !String(c.task ?? "").trim() || countValidTreeNodes(tree) < 1 || correct.length < 1;
+      case "agreement":
+        return !String(c.title ?? "").trim() || (c.agreementType === "custom" && !c.customPdfUrl);
       case "prototype":
         return !block.prototype_id || !String(block.instructions ?? "").trim();
       case "umux_lite":
@@ -1427,6 +1699,10 @@ export default function StudyDetail() {
         return "Пожалуйста, добавьте картинку и введите текст инструкции.";
       case "card_sorting":
         return "Пожалуйста, введите задание и добавьте хотя бы 1 карточку, а также хотя бы 2 категории.";
+      case "matrix":
+        return "Пожалуйста, введите вопрос, добавьте строки и столбцы.";
+      case "agreement":
+        return "Пожалуйста, введите заголовок" + (block.config?.agreementType === "custom" ? " и загрузите PDF файл" : ".");
       case "tree_testing":
         return "Пожалуйста, укажите хотя бы один пункт дерева, хотя бы один верный путь и заполните задание.";
       case "prototype":
@@ -1523,6 +1799,10 @@ export default function StudyDetail() {
         return block.config?.instruction?.substring(0, 30) || "Тест первого клика";
       case "card_sorting":
         return block.config?.task?.substring(0, 30) || "Сортировка карточек";
+      case "matrix":
+        return block.config?.question?.substring(0, 30) || "Матрица";
+      case "agreement":
+        return block.config?.title?.substring(0, 30) || "Соглашение";
       case "tree_testing":
         return block.config?.task?.substring(0, 30) || "Тестирование дерева";
       default:
@@ -1840,6 +2120,7 @@ export default function StudyDetail() {
                       index={index}
                       isEditable={isEditable}
                       prototypes={prototypes}
+                      allBlocks={blocks}
                       onDelete={() => handleDeleteBlock(block.id)}
                       onUpdateBlock={updateBlockInState}
                       onDragStart={() => handleDragStart(block.id)}
@@ -2342,6 +2623,249 @@ export default function StudyDetail() {
                 </>
               )}
 
+              {/* Матрица */}
+              {newBlockType === "matrix" && (
+                <>
+                  <ImageUploader
+                    label="Изображение (опционально)"
+                    image={matrixImage}
+                    onImageChange={setMatrixImage}
+                  />
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Вопрос:</label>
+                    <input 
+                      type="text" 
+                      value={matrixQuestion} 
+                      onChange={e => setMatrixQuestion(e.target.value)} 
+                      placeholder="Введите текст вопроса" 
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14, boxSizing: "border-box" }} 
+                    />
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Описание (опционально):</label>
+                    <textarea 
+                      value={matrixDescription} 
+                      onChange={e => setMatrixDescription(e.target.value)} 
+                      placeholder="Введите описание" 
+                      rows={2} 
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} 
+                    />
+                  </div>
+
+                  {/* Строки */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Строки</label>
+                    <div style={{ maxHeight: "300px", overflowY: "auto", marginBottom: 12 }}>
+                      {matrixRows.map((row, i) => (
+                        <div key={row.id} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
+                          <input 
+                            type="text" 
+                            value={row.title} 
+                            onChange={e => {
+                              const newRows = [...matrixRows];
+                              newRows[i] = { ...newRows[i], title: e.target.value };
+                              setMatrixRows(newRows);
+                            }} 
+                            placeholder="Название строки" 
+                            style={{ flex: 1, padding: "10px 12px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14, background: "#f7f7f5" }} 
+                          />
+                          <button 
+                            onClick={() => {
+                              if (matrixRows.length > 1) {
+                                setMatrixRows(matrixRows.filter((_, j) => j !== i));
+                              }
+                            }} 
+                            style={{ padding: 8, background: "transparent", border: "none", cursor: matrixRows.length > 1 ? "pointer" : "not-allowed", opacity: matrixRows.length > 1 ? 1 : 0.3 }}
+                          >
+                            <Trash2 size={18} color="#999" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setMatrixRows([...matrixRows, { id: crypto.randomUUID(), title: "" }])}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Добавить строку
+                    </Button>
+                    <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8, marginTop: 12 }}>
+                      <ToggleSwitch label="Перемешивать строки" checked={matrixShuffleRows} onChange={setMatrixShuffleRows} />
+                    </div>
+                  </div>
+
+                  {/* Столбцы */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Столбцы</label>
+                    <div style={{ maxHeight: "300px", overflowY: "auto", marginBottom: 12 }}>
+                      {matrixColumns.map((column, i) => (
+                        <div key={column.id} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
+                          <input 
+                            type="text" 
+                            value={column.title} 
+                            onChange={e => {
+                              const newColumns = [...matrixColumns];
+                              newColumns[i] = { ...newColumns[i], title: e.target.value };
+                              setMatrixColumns(newColumns);
+                            }} 
+                            placeholder="Название столбца" 
+                            style={{ flex: 1, padding: "10px 12px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14, background: "#f7f7f5" }} 
+                          />
+                          <button 
+                            onClick={() => {
+                              if (matrixColumns.length > 1) {
+                                setMatrixColumns(matrixColumns.filter((_, j) => j !== i));
+                              }
+                            }} 
+                            style={{ padding: 8, background: "transparent", border: "none", cursor: matrixColumns.length > 1 ? "pointer" : "not-allowed", opacity: matrixColumns.length > 1 ? 1 : 0.3 }}
+                          >
+                            <Trash2 size={18} color="#999" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setMatrixColumns([...matrixColumns, { id: crypto.randomUUID(), title: "" }])}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Добавить столбец
+                    </Button>
+                    <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8, marginTop: 12 }}>
+                      <ToggleSwitch label="Перемешивать колонки" checked={matrixShuffleColumns} onChange={setMatrixShuffleColumns} />
+                    </div>
+                  </div>
+
+                  {/* Настройки */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8 }}>
+                      <ToggleSwitch 
+                        label="Разрешить выбор нескольких вариантов" 
+                        checked={matrixAllowMultiple} 
+                        onChange={setMatrixAllowMultiple} 
+                      />
+                      {matrixAllowMultiple && (
+                        <div style={{ marginLeft: 56, fontSize: 13, color: "#666", marginTop: -4, marginBottom: 8 }}>
+                          Если вы хотите разрешить респондентам выбирать несколько вариантов в строке, включите эту настройку.
+                        </div>
+                      )}
+                      <ToggleSwitch 
+                        label="Необязательный вопрос" 
+                        checked={matrixOptional} 
+                        onChange={setMatrixOptional} 
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Соглашение */}
+              {newBlockType === "agreement" && (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Заголовок:</label>
+                    <input 
+                      type="text" 
+                      value={agreementTitle} 
+                      onChange={e => setAgreementTitle(e.target.value)} 
+                      placeholder="Пожалуйста, ознакомьтесь и примите условия участия в исследовании" 
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14, boxSizing: "border-box" }} 
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", marginBottom: 12, fontSize: 14, fontWeight: 500 }}>Тип соглашения:</label>
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <label style={{ flex: 1, padding: 16, border: agreementType === "standard" ? "2px solid #007AFF" : "1px solid #ddd", borderRadius: 8, cursor: "pointer", background: agreementType === "standard" ? "#e3f2fd" : "white" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <input 
+                            type="radio" 
+                            name="agreementType" 
+                            value="standard" 
+                            checked={agreementType === "standard"} 
+                            onChange={() => setAgreementType("standard")}
+                            style={{ margin: 0 }}
+                          />
+                          <span style={{ fontWeight: 500, fontSize: 14 }}>Сбор персональных данных</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#666", marginLeft: 24 }}>
+                          Стандартное соглашение для сбора и обработки персональных данных
+                        </div>
+                      </label>
+                      <label style={{ flex: 1, padding: 16, border: agreementType === "custom" ? "2px solid #007AFF" : "1px solid #ddd", borderRadius: 8, cursor: "pointer", background: agreementType === "custom" ? "#e3f2fd" : "white" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <input 
+                            type="radio" 
+                            name="agreementType" 
+                            value="custom" 
+                            checked={agreementType === "custom"} 
+                            onChange={() => setAgreementType("custom")}
+                            style={{ margin: 0 }}
+                          />
+                          <span style={{ fontWeight: 500, fontSize: 14 }}>Загрузить свое соглашение</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#666", marginLeft: 24 }}>
+                          Загрузите свой собственный файл .pdf с текстом соглашения
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {agreementType === "custom" && (
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Файл соглашения (.pdf):</label>
+                      {agreementPdfFile.file || agreementPdfFile.url ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "#f9f9f9", borderRadius: 8, border: "1px solid #e0e0e0" }}>
+                          <FileText size={24} color="#666" />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
+                              {agreementPdfFile.file?.name || "Загружено"}
+                            </div>
+                            {agreementPdfFile.url && (
+                              <a 
+                                href={agreementPdfFile.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                style={{ fontSize: 12, color: "#007AFF", textDecoration: "none" }}
+                              >
+                                Открыть PDF
+                              </a>
+                            )}
+                          </div>
+                          <button 
+                            onClick={() => setAgreementPdfFile({ file: null, url: "" })} 
+                            style={{ padding: "4px 10px", background: "#ffebee", color: "#c62828", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      ) : (
+                        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", border: "2px dashed #ddd", borderRadius: 8, cursor: "pointer", background: "#fafafa", transition: "all 0.2s" }}>
+                          <input 
+                            type="file" 
+                            accept=".pdf" 
+                            style={{ display: "none" }} 
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file && file.type === "application/pdf") {
+                                setAgreementPdfFile({ file, url: "" });
+                              } else {
+                                setError("Пожалуйста, выберите файл в формате PDF");
+                              }
+                            }}
+                          />
+                          <div style={{ textAlign: "center" }}>
+                            <FileText size={32} color="#999" style={{ marginBottom: 8 }} />
+                            <div style={{ fontSize: 14, color: "#666" }}>Нажмите для загрузки PDF</div>
+                            <div style={{ fontSize: 12, color: "#999", marginTop: 4 }}>Только файлы .pdf</div>
+                          </div>
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
               {/* Тестирование дерева */}
               {newBlockType === "tree_testing" && (
                 <TreeTestingEditor
@@ -2546,6 +3070,7 @@ interface InlineBlockEditorProps {
   index: number;
   isEditable: boolean;
   prototypes: Prototype[];
+  allBlocks: StudyBlock[]; // Все блоки для выбора в логике
   onDelete: () => void;
   onUpdateBlock: (blockId: string, updates: Partial<StudyBlock>) => void;
   onDragStart: () => void;
@@ -2559,6 +3084,7 @@ function InlineBlockEditor({
   index,
   isEditable,
   prototypes,
+  allBlocks,
   onDelete,
   onUpdateBlock,
   onDragStart,
@@ -2586,6 +3112,23 @@ function InlineBlockEditor({
   const [localTree, setLocalTree] = useState<TreeTestingNode[]>([]);
   const [localTreeCorrectAnswers, setLocalTreeCorrectAnswers] = useState<string[]>([]);
   const [localTreeExpandedNodes, setLocalTreeExpandedNodes] = useState<Set<string>>(new Set());
+  
+  // Локальные состояния для matrix
+  const [localMatrixRows, setLocalMatrixRows] = useState<Array<{ id: string; title: string }>>([]);
+  const [localMatrixColumns, setLocalMatrixColumns] = useState<Array<{ id: string; title: string }>>([]);
+  const [showMatrixRowsModal, setShowMatrixRowsModal] = useState(false);
+  const [showMatrixColumnsModal, setShowMatrixColumnsModal] = useState(false);
+  
+  // Состояние для показа секции логики (inline)
+  const [showLogicSection, setShowLogicSection] = useState(false);
+  
+  // Показываем секцию логики если она уже есть в config
+  useEffect(() => {
+    if (block.config?.logic) {
+      setShowLogicSection(true);
+    }
+    // При удалении логики секция скрывается через setShowLogicSection(false) в onClick
+  }, [block.config?.logic]);
   
   // Состояние для drag-and-drop изображений в блоке предпочтение
   const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(null);
@@ -2619,7 +3162,13 @@ function InlineBlockEditor({
       collectIds(tree);
       setLocalTreeExpandedNodes(allIds);
     }
-  }, [block.id, block.config?.cards, block.config?.categories, block.config?.tree, block.config?.correctAnswers]);
+    if (block.type === "matrix") {
+      const rows = block.config?.rows || [];
+      const columns = block.config?.columns || [];
+      setLocalMatrixRows(rows.length > 0 ? rows : [{ id: crypto.randomUUID(), title: "" }]);
+      setLocalMatrixColumns(columns.length > 0 ? columns : [{ id: crypto.randomUUID(), title: "" }]);
+    }
+  }, [block.id, block.config?.cards, block.config?.categories, block.config?.tree, block.config?.correctAnswers, block.config?.rows, block.config?.columns]);
 
   // Функция загрузки изображения
   const uploadImage = async (file: File): Promise<string | null> => {
@@ -2636,6 +3185,45 @@ function InlineBlockEditor({
       const { error: uploadError } = await supabase.storage
         .from("study-images")
         .upload(fileName, file);
+
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        return null;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("study-images")
+        .getPublicUrl(fileName);
+
+      return publicUrl;
+    } catch (err) {
+      console.error("Upload error:", err);
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Функция загрузки PDF файла
+  const uploadPdf = async (file: File): Promise<string | null> => {
+    try {
+      setUploadingImage(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return null;
+      }
+
+      if (file.type !== "application/pdf") {
+        return null;
+      }
+
+      const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.pdf`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("study-images")
+        .upload(fileName, file, {
+          contentType: "application/pdf"
+        });
 
       if (uploadError) {
         console.error("Upload error:", uploadError);
@@ -2736,19 +3324,32 @@ function InlineBlockEditor({
   }, [block.id]);
 
   return (
-    <Card 
-      draggable={isEditable}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      className={cn(
-        "transition-all border border-border shadow-[0px_2px_3px_rgba(0,0,0,0.1)] rounded-[20px] group",
-        isDragging && "opacity-50 border-dashed border-primary"
+    <div className="flex items-start gap-2 group/block">
+      {/* Drag handle */}
+      {isEditable && (
+        <div
+          draggable={isEditable}
+          onDragStart={onDragStart}
+          className={cn(
+            "flex items-center justify-center pt-3 pb-3 px-1 cursor-grab active:cursor-grabbing opacity-0 group-hover/block:opacity-100 transition-opacity hover:opacity-100",
+            isDragging && "opacity-100"
+          )}
+          style={{ minHeight: '60px' }}
+        >
+          <GripVertical className="h-5 w-5 text-muted-foreground" />
+        </div>
       )}
-    >
-      <CardContent className="p-0">
-        {/* Заголовок блока */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <Card 
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        className={cn(
+          "flex-1 transition-all border border-border shadow-[0px_2px_3px_rgba(0,0,0,0.1)] rounded-[20px] group",
+          isDragging && "opacity-50 border-dashed border-primary"
+        )}
+      >
+        <CardContent className="p-0">
+          {/* Заголовок блока */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <span className="text-[15px] font-medium leading-6">{index + 1}.</span>
             <div className="w-5 h-5 rounded bg-[#EDEDED] flex items-center justify-center flex-shrink-0">
@@ -2758,14 +3359,35 @@ function InlineBlockEditor({
           </div>
 
           {isEditable && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="text-destructive hover:text-destructive h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {!showLogicSection && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-8 px-2 text-xs text-muted-foreground hover:text-primary"
+                  onClick={() => {
+                    setShowLogicSection(true);
+                    // Инициализируем пустую логику если её еще нет
+                    if (!block.config?.logic) {
+                      onUpdateBlock(block.id, { 
+                        config: { ...block.config, logic: {} } 
+                      });
+                    }
+                  }}
+                >
+                  <Workflow className="h-4 w-4 mr-1" />
+                  Добавить логику
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-destructive hover:text-destructive h-8 w-8 p-0"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </div>
 
@@ -3859,6 +4481,450 @@ function InlineBlockEditor({
             </>
           )}
 
+          {/* Матрица */}
+          {block.type === "matrix" && (
+            <>
+              <div>
+                <FloatingTextarea 
+                  label="Вопрос"
+                  value={getTextValue("question")} 
+                  onChange={e => updateConfigText("question", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите вопрос"
+                  rows={2}
+                />
+              </div>
+              <div>
+                <FloatingTextarea 
+                  label="Описание (опционально)"
+                  value={getTextValue("description")} 
+                  onChange={e => updateConfigText("description", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Введите описание"
+                  rows={2}
+                />
+              </div>
+              
+              {/* Изображение */}
+              <div>
+                {(() => {
+                  const image = getImageValue();
+                  const hasImage = image.file || image.url;
+                  return (
+                    <div>
+                      {hasImage ? (
+                        <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30 mb-4">
+                          <img 
+                            src={image.file ? URL.createObjectURL(image.file) : image.url} 
+                            alt="Preview" 
+                            className="w-20 h-16 object-cover rounded-md border border-border"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm text-muted-foreground mb-2">{image.file?.name || "Загружено"}</div>
+                            {isEditable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  await handleImageChange(null);
+                                }}
+                                disabled={uploadingImage}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Удалить
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        isEditable && (
+                          <label className="flex items-center justify-start cursor-pointer group mb-4">
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file && isEditable) {
+                                  await handleImageChange(file, "");
+                                }
+                              }}
+                              disabled={!isEditable || uploadingImage}
+                            />
+                            {uploadingImage ? (
+                              <span className="text-xs text-muted-foreground">...</span>
+                            ) : (
+                              <ImagePlus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                            )}
+                          </label>
+                        )
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Строки */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[15px] font-medium leading-6">Строки</h3>
+                  {isEditable && (
+                    <button
+                      onClick={() => setShowMatrixRowsModal(true)}
+                      className="flex items-center gap-1 text-primary hover:text-[var(--color-primary-hover)] transition-colors text-[13px] font-medium"
+                    >
+                      {localMatrixRows.filter(r => r.title.trim()).length === 0 ? (
+                        <>
+                          <Plus className="h-4 w-4" />
+                          Добавить
+                        </>
+                      ) : (
+                        <>
+                          <Pencil className="h-4 w-4" />
+                          Редактировать
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                {localMatrixRows.filter(r => r.title.trim()).length === 0 ? (
+                  <div className="text-sm text-muted-foreground mb-2">Строки не добавлены</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {localMatrixRows.filter(r => r.title.trim()).length} строк
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox 
+                      checked={block.config?.shuffleRows || false}
+                      onCheckedChange={(checked) => updateConfig("shuffleRows", checked === true)}
+                      disabled={!isEditable}
+                    />
+                    <span>Перемешивать строки</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Столбцы */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[15px] font-medium leading-6">Столбцы</h3>
+                  {isEditable && (
+                    <button
+                      onClick={() => setShowMatrixColumnsModal(true)}
+                      className="flex items-center gap-1 text-primary hover:text-[var(--color-primary-hover)] transition-colors text-[13px] font-medium"
+                    >
+                      {localMatrixColumns.filter(c => c.title.trim()).length === 0 ? (
+                        <>
+                          <Plus className="h-4 w-4" />
+                          Добавить
+                        </>
+                      ) : (
+                        <>
+                          <Pencil className="h-4 w-4" />
+                          Редактировать
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                {localMatrixColumns.filter(c => c.title.trim()).length === 0 ? (
+                  <div className="text-sm text-muted-foreground mb-2">Столбцы не добавлены</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {localMatrixColumns.filter(c => c.title.trim()).length} столбцов
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox 
+                      checked={block.config?.shuffleColumns || false}
+                      onCheckedChange={(checked) => updateConfig("shuffleColumns", checked === true)}
+                      disabled={!isEditable}
+                    />
+                    <span>Перемешивать колонки</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Настройки */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox 
+                    checked={block.config?.allowMultiple || false}
+                    onCheckedChange={(checked) => updateConfig("allowMultiple", checked === true)}
+                    disabled={!isEditable}
+                  />
+                  <span>Разрешить выбор нескольких вариантов</span>
+                </label>
+                {block.config?.allowMultiple && (
+                  <div className="ml-6 text-xs text-muted-foreground">
+                    Если вы хотите разрешить респондентам выбирать несколько вариантов в строке, включите эту настройку.
+                  </div>
+                )}
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox 
+                    checked={block.config?.optional || false}
+                    onCheckedChange={(checked) => updateConfig("optional", checked === true)}
+                    disabled={!isEditable}
+                  />
+                  <span>Необязательный вопрос</span>
+                </label>
+              </div>
+
+              {/* Модальное окно для строк */}
+              <Dialog open={showMatrixRowsModal} onOpenChange={setShowMatrixRowsModal}>
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Строки ({localMatrixRows.filter(r => r.title.trim()).length})</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                      {localMatrixRows.map((row, i) => (
+                        <div key={row.id} className="flex gap-2 items-center">
+                          <FloatingInput
+                            label="Название строки"
+                            value={row.title}
+                            onChange={e => {
+                              const newRows = [...localMatrixRows];
+                              newRows[i] = { ...newRows[i], title: e.target.value };
+                              setLocalMatrixRows(newRows);
+                            }}
+                            placeholder="Введите название строки"
+                            className="flex-1"
+                          />
+                          {localMatrixRows.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setLocalMatrixRows(localMatrixRows.filter((_, j) => j !== i));
+                              }}
+                              className="text-destructive hover:text-destructive flex-shrink-0"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setLocalMatrixRows([...localMatrixRows, { id: crypto.randomUUID(), title: "" }])}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Добавить строку
+                    </Button>
+                  </div>
+                  <DialogFooter>
+                    <Button 
+                      onClick={() => {
+                        const validRows = localMatrixRows.filter(r => r.title.trim()).map(r => ({
+                          id: r.id,
+                          title: r.title.trim()
+                        }));
+                        updateConfig("rows", validRows);
+                        setShowMatrixRowsModal(false);
+                      }}
+                    >
+                      Готово
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* Модальное окно для столбцов */}
+              <Dialog open={showMatrixColumnsModal} onOpenChange={setShowMatrixColumnsModal}>
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Столбцы ({localMatrixColumns.filter(c => c.title.trim()).length})</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                      {localMatrixColumns.map((column, i) => (
+                        <div key={column.id} className="flex gap-2 items-center">
+                          <FloatingInput
+                            label="Название столбца"
+                            value={column.title}
+                            onChange={e => {
+                              const newColumns = [...localMatrixColumns];
+                              newColumns[i] = { ...newColumns[i], title: e.target.value };
+                              setLocalMatrixColumns(newColumns);
+                            }}
+                            placeholder="Введите название столбца"
+                            className="flex-1"
+                          />
+                          {localMatrixColumns.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setLocalMatrixColumns(localMatrixColumns.filter((_, j) => j !== i));
+                              }}
+                              className="text-destructive hover:text-destructive flex-shrink-0"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setLocalMatrixColumns([...localMatrixColumns, { id: crypto.randomUUID(), title: "" }])}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Добавить столбец
+                    </Button>
+                  </div>
+                  <DialogFooter>
+                    <Button 
+                      onClick={() => {
+                        const validColumns = localMatrixColumns.filter(c => c.title.trim()).map(c => ({
+                          id: c.id,
+                          title: c.title.trim()
+                        }));
+                        updateConfig("columns", validColumns);
+                        setShowMatrixColumnsModal(false);
+                      }}
+                    >
+                      Готово
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </>
+          )}
+
+          {/* Соглашение */}
+          {block.type === "agreement" && (
+            <>
+              <div>
+                <FloatingInput
+                  label="Заголовок"
+                  value={getTextValue("title")}
+                  onChange={e => updateConfigText("title", e.target.value)}
+                  disabled={!isEditable}
+                  placeholder="Пожалуйста, ознакомьтесь и примите условия участия в исследовании"
+                />
+              </div>
+
+              <div>
+                <Label className="text-[15px] font-medium leading-6 mb-2 block">Тип соглашения</Label>
+                <div className="flex gap-3">
+                  <label className={cn(
+                    "flex-1 p-4 border rounded-lg cursor-pointer transition-colors",
+                    block.config?.agreementType === "standard"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-primary/50"
+                  )}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <input
+                        type="radio"
+                        name={`agreement-type-${block.id}`}
+                        value="standard"
+                        checked={block.config?.agreementType === "standard" || block.config?.agreementType === undefined}
+                        onChange={() => updateConfig("agreementType", "standard")}
+                        disabled={!isEditable}
+                        className="cursor-pointer"
+                      />
+                      <span className="font-medium text-sm">Сбор персональных данных</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground ml-6">
+                      Стандартное соглашение для сбора и обработки персональных данных
+                    </div>
+                  </label>
+                  <label className={cn(
+                    "flex-1 p-4 border rounded-lg cursor-pointer transition-colors",
+                    block.config?.agreementType === "custom"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-primary/50"
+                  )}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <input
+                        type="radio"
+                        name={`agreement-type-${block.id}`}
+                        value="custom"
+                        checked={block.config?.agreementType === "custom"}
+                        onChange={() => updateConfig("agreementType", "custom")}
+                        disabled={!isEditable}
+                        className="cursor-pointer"
+                      />
+                      <span className="font-medium text-sm">Загрузить свое соглашение</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground ml-6">
+                      Загрузите свой собственный файл .pdf с текстом соглашения
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {block.config?.agreementType === "custom" && (
+                <div>
+                  <Label className="text-[15px] font-medium leading-6 mb-2 block">Файл соглашения (.pdf)</Label>
+                  {block.config?.customPdfUrl ? (
+                    <div className="flex items-center gap-3 p-3 border border-border rounded-xl bg-muted/30">
+                      <FileText className="h-6 w-6 text-muted-foreground" />
+                      <div className="flex-1">
+                        <div className="text-sm text-muted-foreground mb-1">PDF файл загружен</div>
+                        <a
+                          href={block.config.customPdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline"
+                        >
+                          Открыть PDF
+                        </a>
+                      </div>
+                      {isEditable && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            updateConfig("customPdfUrl", undefined);
+                          }}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          Удалить
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    isEditable && (
+                      <label className="flex items-center justify-center cursor-pointer group p-6 border-2 border-dashed border-border rounded-lg hover:border-primary/50 transition-colors bg-muted/30">
+                        <input
+                          type="file"
+                          accept=".pdf"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file && file.type === "application/pdf") {
+                              const uploadedUrl = await uploadPdf(file);
+                              if (uploadedUrl) {
+                                updateConfig("customPdfUrl", uploadedUrl);
+                              }
+                            } else {
+                              setError("Пожалуйста, выберите файл в формате PDF");
+                            }
+                          }}
+                          disabled={!isEditable}
+                        />
+                        <div className="text-center">
+                          <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2 group-hover:text-primary transition-colors" />
+                          <div className="text-sm text-muted-foreground">Нажмите для загрузки PDF</div>
+                          <div className="text-xs text-muted-foreground mt-1">Только файлы .pdf</div>
+                        </div>
+                      </label>
+                    )
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
           {/* Тестирование дерева */}
           {block.type === "tree_testing" && (
             <TreeTestingEditorInline
@@ -3884,9 +4950,502 @@ function InlineBlockEditor({
             />
           )}
         </div>
+
+        {/* Логика блока (inline) */}
+        {isEditable && showLogicSection && (
+          <div className="border-t border-border pt-5 px-5 pb-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Логика</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => {
+                  const newConfig = { ...block.config };
+                  delete newConfig.logic;
+                  onUpdateBlock(block.id, { config: newConfig });
+                  setShowLogicSection(false);
+                }}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Удалить логику
+              </Button>
+            </div>
+            <LogicEditor
+              block={block}
+              allBlocks={allBlocks}
+              onSave={(logic) => {
+                onUpdateBlock(block.id, { 
+                  config: { ...block.config, logic } 
+                });
+              }}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
+    </div>
   );
+}
+
+// ============= Компонент LogicEditor =============
+interface LogicEditorProps {
+  block: StudyBlock;
+  allBlocks: StudyBlock[];
+  onSave: (logic: BlockLogic) => void;
+  onCancel?: () => void; // Опционально для inline режима
+}
+
+function LogicEditor({ block, allBlocks, onSave }: LogicEditorProps) {
+  const currentLogic = block.config?.logic as BlockLogic | undefined;
+  
+  // Состояние для логического перехода
+  const [conditionalLogic, setConditionalLogic] = useState<ConditionalLogic>(
+    currentLogic?.conditionalLogic || { rules: [] }
+  );
+  
+  // Состояние для показа при условии
+  const [showOnCondition, setShowOnCondition] = useState<ShowOnCondition>(
+    currentLogic?.showOnCondition || { enabled: false, action: "show", conditions: [] }
+  );
+
+  // Автосохранение при изменении логики (с debounce для избежания лишних вызовов)
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    // Пропускаем первый рендер (инициализация из currentLogic)
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      const logic: BlockLogic = {};
+      if (conditionalLogic.rules.length > 0 || conditionalLogic.elseGoToBlockId) {
+        logic.conditionalLogic = conditionalLogic;
+      }
+      if (showOnCondition.enabled) {
+        logic.showOnCondition = showOnCondition;
+      }
+      onSave(logic);
+    }, 300); // Debounce 300ms
+
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conditionalLogic, showOnCondition]);
+
+  const getBlockTitle = (blockId: string): string => {
+    const targetBlock = allBlocks.find(b => b.id === blockId);
+    if (!targetBlock) return "Блок не найден";
+    
+    const getTitle = (b: StudyBlock): string => {
+      switch (b.type) {
+        case "open_question":
+          return b.config?.question?.substring(0, 50) || "Открытый вопрос";
+        case "choice":
+          return b.config?.question?.substring(0, 50) || "Выбор";
+        case "scale":
+          return b.config?.question?.substring(0, 50) || "Шкала";
+        case "preference":
+          return b.config?.question?.substring(0, 50) || "Предпочтение";
+        case "card_sorting":
+          return b.config?.task?.substring(0, 50) || "Сортировка карточек";
+        case "matrix":
+          return b.config?.question?.substring(0, 50) || "Матрица";
+        case "tree_testing":
+          return b.config?.task?.substring(0, 50) || "Тестирование дерева";
+        case "prototype":
+          return "Прототип";
+        default:
+          return `Блок ${b.type}`;
+      }
+    };
+    
+    return `${allBlocks.indexOf(targetBlock) + 1}. ${getTitle(targetBlock)}`;
+  };
+
+  // handleSave больше не нужен - используется автосохранение через useEffect
+
+  return (
+    <div className="space-y-6">
+      {/* Логический переход */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Link2 className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold">Логический переход</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Добавьте условия, чтобы настроить переходы между блоками
+        </p>
+
+        {/* Правила */}
+        <div className="space-y-4">
+          {conditionalLogic.rules.map((rule, ruleIndex) => (
+            <div key={ruleIndex} className="border border-border rounded-lg p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">Если...</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const newRules = conditionalLogic.rules.filter((_, i) => i !== ruleIndex);
+                    setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Условия в правиле */}
+              <div className="space-y-2">
+                {rule.conditions.map((condition, condIndex) => (
+                  <div key={condIndex} className="flex items-center gap-2">
+                    <select
+                      value={condition.blockId}
+                      onChange={(e) => {
+                        const newRules = [...conditionalLogic.rules];
+                        newRules[ruleIndex].conditions[condIndex].blockId = e.target.value;
+                        setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                      }}
+                      className="flex-1 p-2 border border-border rounded-md text-sm"
+                    >
+                      <option value="">Выберите блок</option>
+                      {allBlocks.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {getBlockTitle(b.id)}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={condition.operator}
+                      onChange={(e) => {
+                        const newRules = [...conditionalLogic.rules];
+                        newRules[ruleIndex].conditions[condIndex].operator = e.target.value as any;
+                        setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                      }}
+                      className="p-2 border border-border rounded-md text-sm"
+                    >
+                      <option value="contains">содержит</option>
+                      <option value="not_contains">не содержит</option>
+                      <option value="equals">равно</option>
+                      <option value="not_equals">не равно</option>
+                      <option value="completed_on">завершен на...</option>
+                      <option value="not_completed_on">не завершен на...</option>
+                    </select>
+                    {(condition.operator === "contains" || condition.operator === "not_contains" || 
+                      condition.operator === "equals" || condition.operator === "not_equals") && (
+                      <input
+                        type="text"
+                        value={condition.value || ""}
+                        onChange={(e) => {
+                          const newRules = [...conditionalLogic.rules];
+                          newRules[ruleIndex].conditions[condIndex].value = e.target.value;
+                          setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                        }}
+                        placeholder="Значение"
+                        className="flex-1 p-2 border border-border rounded-md text-sm"
+                      />
+                    )}
+                    {(condition.operator === "completed_on" || condition.operator === "not_completed_on") && (
+                      <input
+                        type="text"
+                        value={condition.screenName || ""}
+                        onChange={(e) => {
+                          const newRules = [...conditionalLogic.rules];
+                          newRules[ruleIndex].conditions[condIndex].screenName = e.target.value;
+                          setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                        }}
+                        placeholder="Название экрана"
+                        className="flex-1 p-2 border border-border rounded-md text-sm"
+                      />
+                    )}
+                    {rule.conditions.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const newRules = [...conditionalLogic.rules];
+                          newRules[ruleIndex].conditions = newRules[ruleIndex].conditions.filter((_, i) => i !== condIndex);
+                          setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const newRules = [...conditionalLogic.rules];
+                    newRules[ruleIndex].conditions.push({
+                      blockId: "",
+                      operator: "contains",
+                      value: ""
+                    });
+                    setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Добавить условие
+                </Button>
+              </div>
+
+              {/* Перейти к */}
+              <div className="space-y-2">
+                <span className="font-medium">Перейти к</span>
+                <select
+                  value={rule.goToBlockId}
+                  onChange={(e) => {
+                    const newRules = [...conditionalLogic.rules];
+                    newRules[ruleIndex].goToBlockId = e.target.value;
+                    setConditionalLogic({ ...conditionalLogic, rules: newRules });
+                  }}
+                  className="w-full p-2 border border-border rounded-md text-sm"
+                >
+                  <option value="">Выберите блок</option>
+                  {allBlocks.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {getBlockTitle(b.id)}
+                    </option>
+                  ))}
+                  <option value="__end__">Завершение теста</option>
+                </select>
+              </div>
+            </div>
+          ))}
+
+          <Button
+            variant="outline"
+            onClick={() => {
+              setConditionalLogic({
+                ...conditionalLogic,
+                rules: [
+                  ...conditionalLogic.rules,
+                  {
+                    conditions: [{ blockId: "", operator: "contains", value: "" }],
+                    goToBlockId: ""
+                  }
+                ]
+              });
+            }}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Добавить правило
+          </Button>
+        </div>
+
+        {/* Если ничего не подошло */}
+        <div className="space-y-2">
+          <span className="font-medium">Если ничего не подошло, перейти к</span>
+          <select
+            value={conditionalLogic.elseGoToBlockId || ""}
+            onChange={(e) => {
+              setConditionalLogic({
+                ...conditionalLogic,
+                elseGoToBlockId: e.target.value || undefined
+              });
+            }}
+            className="w-full p-2 border border-border rounded-md text-sm"
+          >
+            <option value="">Выберите блок</option>
+            {allBlocks.map(b => (
+              <option key={b.id} value={b.id}>
+                {getBlockTitle(b.id)}
+              </option>
+            ))}
+            <option value="__end__">Завершение теста</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Показать при условии */}
+      <div className="border-t border-border pt-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {showOnCondition.action === "show" ? (
+              <Eye className="h-5 w-5 text-primary" />
+            ) : (
+              <EyeOff className="h-5 w-5 text-primary" />
+            )}
+            <h3 className="text-lg font-semibold">Показать при условии</h3>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <Checkbox
+              checked={showOnCondition.enabled}
+              onCheckedChange={(checked) => {
+                setShowOnCondition({ ...showOnCondition, enabled: checked === true });
+              }}
+            />
+            <span className="text-sm">Включить</span>
+          </label>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Показать или скрыть блок в зависимости от условий
+        </p>
+
+        {showOnCondition.enabled && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <select
+                value={showOnCondition.action}
+                onChange={(e) => {
+                  setShowOnCondition({
+                    ...showOnCondition,
+                    action: e.target.value as "show" | "hide"
+                  });
+                }}
+                className="p-2 border border-border rounded-md text-sm"
+              >
+                <option value="show">Показать</option>
+                <option value="hide">Скрыть</option>
+              </select>
+              <span className="text-sm">этот блок, если...</span>
+            </div>
+
+            <div className="space-y-2">
+              {showOnCondition.conditions.map((condition, condIndex) => (
+                <div key={condIndex} className="flex items-center gap-2">
+                  <select
+                    value={condition.blockId}
+                    onChange={(e) => {
+                      const newConditions = [...showOnCondition.conditions];
+                      newConditions[condIndex].blockId = e.target.value;
+                      setShowOnCondition({ ...showOnCondition, conditions: newConditions });
+                    }}
+                    className="flex-1 p-2 border border-border rounded-md text-sm"
+                  >
+                    <option value="">Выберите блок</option>
+                    {allBlocks.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {getBlockTitle(b.id)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={condition.operator}
+                    onChange={(e) => {
+                      const newConditions = [...showOnCondition.conditions];
+                      newConditions[condIndex].operator = e.target.value as any;
+                      setShowOnCondition({ ...showOnCondition, conditions: newConditions });
+                    }}
+                    className="p-2 border border-border rounded-md text-sm"
+                  >
+                    <option value="contains">содержит</option>
+                    <option value="not_contains">не содержит</option>
+                    <option value="equals">равно</option>
+                    <option value="not_equals">не равно</option>
+                    <option value="completed_on">завершен на...</option>
+                    <option value="not_completed_on">не завершен на...</option>
+                  </select>
+                  {(condition.operator === "contains" || condition.operator === "not_contains" || 
+                    condition.operator === "equals" || condition.operator === "not_equals") && (
+                    <input
+                      type="text"
+                      value={condition.value || ""}
+                      onChange={(e) => {
+                        const newConditions = [...showOnCondition.conditions];
+                        newConditions[condIndex].value = e.target.value;
+                        setShowOnCondition({ ...showOnCondition, conditions: newConditions });
+                      }}
+                      placeholder="Значение"
+                      className="flex-1 p-2 border border-border rounded-md text-sm"
+                    />
+                  )}
+                  {(condition.operator === "completed_on" || condition.operator === "not_completed_on") && (
+                    <input
+                      type="text"
+                      value={condition.screenName || ""}
+                      onChange={(e) => {
+                        const newConditions = [...showOnCondition.conditions];
+                        newConditions[condIndex].screenName = e.target.value;
+                        setShowOnCondition({ ...showOnCondition, conditions: newConditions });
+                      }}
+                      placeholder="Название экрана"
+                      className="flex-1 p-2 border border-border rounded-md text-sm"
+                    />
+                  )}
+                  {showOnCondition.conditions.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowOnCondition({
+                          ...showOnCondition,
+                          conditions: showOnCondition.conditions.filter((_, i) => i !== condIndex)
+                        });
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowOnCondition({
+                    ...showOnCondition,
+                    conditions: [
+                      ...showOnCondition.conditions,
+                      { blockId: "", operator: "contains", value: "" }
+                    ]
+                  });
+                }}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Добавить условие
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Кнопки Сохранить/Отмена убраны - используется автосохранение */}
+    </div>
+  );
+}
+
+// Функция генерации стандартного текста соглашения (152-ФЗ)
+export function generateStandardAgreementText(): string {
+  return `СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ
+
+Настоящим я даю свое согласие на обработку моих персональных данных в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ "О персональных данных".
+
+1. ОПЕРАТОР ПЕРСОНАЛЬНЫХ ДАННЫХ
+Оператором персональных данных является организация, проводящая исследование.
+
+2. ЦЕЛИ ОБРАБОТКИ ПЕРСОНАЛЬНЫХ ДАННЫХ
+Персональные данные обрабатываются в следующих целях:
+- Проведение исследования и анализ результатов
+- Улучшение качества продуктов и услуг
+- Коммуникация с участниками исследования (при необходимости)
+
+3. СОСТАВ ПЕРСОНАЛЬНЫХ ДАННЫХ
+В рамках исследования могут собираться следующие данные:
+- Ответы на вопросы исследования
+- Данные о взаимодействии с интерфейсом (клики, время прохождения)
+- Аудио- и видеозаписи (если применимо)
+- Электронная почта и другие контактные данные (если предоставлены)
+
+4. СПОСОБЫ ОБРАБОТКИ ПЕРСОНАЛЬНЫХ ДАННЫХ
+Обработка персональных данных осуществляется с использованием средств автоматизации и без использования таких средств, включая сбор, запись, систематизацию, накопление, хранение, уточнение (обновление, изменение), извлечение, использование, передачу (распространение, предоставление, доступ), обезличивание, блокирование, удаление, уничтожение персональных данных.
+
+5. СРОК ДЕЙСТВИЯ СОГЛАСИЯ
+Согласие действует до достижения целей обработки персональных данных или до отзыва согласия субъектом персональных данных.
+
+6. ПРАВА СУБЪЕКТА ПЕРСОНАЛЬНЫХ ДАННЫХ
+Я понимаю, что в соответствии с Федеральным законом № 152-ФЗ "О персональных данных" имею право:
+- Получать информацию, касающуюся обработки моих персональных данных
+- Требовать уточнения, блокирования или уничтожения персональных данных
+- Отозвать согласие на обработку персональных данных
+- Обжаловать действия или бездействие оператора в уполномоченный орган по защите прав субъектов персональных данных или в судебном порядке
+
+7. ОТЗЫВ СОГЛАСИЯ
+Я понимаю, что могу отозвать свое согласие на обработку персональных данных, направив письменное уведомление оператору по адресу, указанному в контактной информации.
+
+Настоящее согласие предоставляется мной добровольно и подтверждает, что я ознакомлен(а) с условиями обработки персональных данных.`;
 }
 
 // Debounce утилита
