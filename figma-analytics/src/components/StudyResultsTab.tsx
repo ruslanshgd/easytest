@@ -16,6 +16,7 @@ import {
   Clock, 
   CircleCheck, 
   CircleMinus,
+  Check,
   X,
   ChevronDown,
   ChevronUp,
@@ -1552,35 +1553,79 @@ function ScaleView({ block, blockIndex, responses, viewMode, onDeleteResponses }
 
           {/* Results Section */}
           <div className="border-t border-border pt-6">
-            <h3 className="text-lg font-semibold mb-4">Результаты</h3>
-            <div className="space-y-4">
-              {Array.from({ length: maxValue - minValue + 1 }, (_, i) => minValue + i).map(value => {
-                const count = scaleValues[value] || 0;
-                const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
-                
-                return (
-                  <div key={value} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{value}</span>
-                      <span className="text-muted-foreground">
-                        ответы {count}
-                      </span>
-                    </div>
-                    <div className="w-full bg-[var(--color-progress-bg)] rounded-full h-6 overflow-hidden">
-                      <div
-                        className="bg-primary h-full transition-all"
-                        style={{ width: `${percentage}%` }}
-                      />
+            {viewMode === "responses" ? (
+              <>
+                {totalResponses === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">Нет ответов</div>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    {responses.map((r, idx) => {
+                      const value = typeof r.answer === "object" ? r.answer?.value : r.answer;
+                      const num = typeof value === "number" && value >= minValue && value <= maxValue ? value : null;
+                      return (
+                        <div key={r.id || idx}>
+                          {num != null ? (
+                            <span className="inline-flex items-center justify-center min-w-[48px] h-12 px-4 rounded-lg bg-primary/10 text-primary font-semibold text-lg border border-primary/20">
+                              {num}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold mb-4">Результаты</h3>
+                {totalResponses === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">Нет ответов</div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Средняя оценка */}
+                    {(() => {
+                      let sum = 0;
+                      let cnt = 0;
+                      Object.entries(scaleValues).forEach(([v, c]) => {
+                        sum += Number(v) * c;
+                        cnt += c;
+                      });
+                      const avg = cnt > 0 ? sum / cnt : 0;
+                      return (
+                        <div className="mb-6">
+                          <div className="text-sm text-muted-foreground mb-1">Средняя оценка</div>
+                          <div className="text-3xl font-bold tabular-nums">{avg.toFixed(1)}</div>
+                        </div>
+                      );
+                    })()}
+                    {/* Вертикальные бары: бар, под ним шкала, под ним процент (количество) */}
+                    <div className="flex gap-4 items-end justify-start flex-wrap" style={{ minHeight: 160 }}>
+                      {Array.from({ length: maxValue - minValue + 1 }, (_, i) => minValue + i).map(value => {
+                        const count = scaleValues[value] || 0;
+                        const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                        const barHeightPercent = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                        return (
+                          <div key={value} className="flex flex-col items-center gap-2" style={{ flex: "1 1 0", minWidth: 48 }}>
+                            <div className="w-full flex flex-col justify-end rounded-t-md overflow-hidden bg-[var(--color-progress-bg)]" style={{ height: 120 }}>
+                              <div
+                                className="w-full bg-primary transition-all rounded-t-md"
+                                style={{ height: `${barHeightPercent}%`, minHeight: count > 0 ? 4 : 0 }}
+                              />
+                            </div>
+                            <span className="text-sm font-medium">{value}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {percentage.toFixed(0)}% ({count})
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                );
-              })}
-              {totalResponses === 0 && (
-                <div className="text-center text-muted-foreground py-8">
-                  Нет ответов
-                </div>
-              )}
-            </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       </Card>
@@ -1997,12 +2042,18 @@ function MatrixView({ block, blockIndex, responses, viewMode, onDeleteResponses 
                             return (
                               <td key={`cell-${block.id}-${rowIdx}-${colIdx}-${row.id}-${column.id}`} className="border border-border p-2 text-center">
                                 {count > 0 ? (
-                                  <div className="inline-flex items-center justify-center px-2 py-1 rounded text-sm font-medium" style={{ 
-                                    background: `color-mix(in srgb, ${chartColors.accent} 10%, transparent)`, 
-                                    color: chartColors.accent 
-                                  }}>
-                                    {percentage.toFixed(0)}% ({count})
-                                  </div>
+                                  viewMode === "responses" ? (
+                                    <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-green-100 text-green-800">
+                                      <Check className="h-4 w-4" />
+                                    </div>
+                                  ) : (
+                                    <div className="inline-flex items-center justify-center px-2 py-1 rounded text-sm font-medium" style={{ 
+                                      background: `color-mix(in srgb, ${chartColors.accent} 10%, transparent)`, 
+                                      color: chartColors.accent 
+                                    }}>
+                                      {percentage.toFixed(0)}% ({count})
+                                    </div>
+                                  )
                                 ) : (
                                   <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-muted"></div>
                                 )}
@@ -2023,76 +2074,6 @@ function MatrixView({ block, blockIndex, responses, viewMode, onDeleteResponses 
               {totalResponses === 0 && (
                 <div className="text-center text-muted-foreground py-8">
                   Нет ответов
-                </div>
-              )}
-
-              {/* Таблица индивидуальных ответов в режиме "ответы" */}
-              {viewMode === "responses" && totalResponses > 0 && rows.length > 0 && columns.length > 0 && (
-                <div className="mt-6">
-                  <h4 className="text-sm font-semibold mb-4">Ответы по респондентам</h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr>
-                          <th className="border border-border p-2 text-left font-medium">Дата</th>
-                          {rows.map((row: any) => (
-                            <th key={`response-row-${row.id}`} className="border border-border p-2 text-left font-medium text-sm">
-                              {row.title}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {responses.map((response, idx) => {
-                          const answer = response.answer;
-                          const selections = typeof answer === "object" && answer.selections ? answer.selections : {};
-                          const date = new Date(response.created_at);
-                          const formattedDate = formatResponseDate(date);
-                          
-                          return (
-                            <tr key={response.id || idx}>
-                              <td className="border border-border p-2 text-sm text-muted-foreground">
-                                {formattedDate}
-                              </td>
-                              {rows.map((row: any) => {
-                                const selectedColumns = Array.isArray(selections[row.id]) 
-                                  ? selections[row.id] as string[]
-                                  : selections[row.id] 
-                                    ? [selections[row.id] as string]
-                                    : [];
-                                
-                                const columnTitles = selectedColumns
-                                  .map((colId: string) => {
-                                    const column = columns.find((c: any) => c.id === colId);
-                                    return column ? column.title : colId;
-                                  })
-                                  .filter(Boolean);
-                                
-                                return (
-                                  <td key={`response-cell-${row.id}-${idx}`} className="border border-border p-2">
-                                    {columnTitles.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {columnTitles.map((title: string, i: number) => (
-                                          <span 
-                                            key={`tag-${i}`}
-                                            className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800"
-                                          >
-                                            {title}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-xs text-muted-foreground">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
               )}
             </div>
@@ -2397,10 +2378,21 @@ function CardSortingViewComponent({
 
   // Matrix view
   const renderMatrixView = () => {
-    const categoryNames = Object.keys(categoryCardMap).length > 0 
-      ? Object.keys(categoryCardMap) 
-      : categories.map((c: any) => c.name || c);
-    
+    const configCategoryNames = categories.map((c: any) =>
+      typeof c === "string" ? c : (c.name || c)
+    );
+    const responseCategoryNames = Object.keys(categoryCardMap);
+    // В режиме "ответы" всегда показываем все категории из конфига (включая пустые колонки)
+    const categoryNames =
+      viewMode === "responses"
+        ? [
+            ...configCategoryNames,
+            ...responseCategoryNames.filter((c: string) => !configCategoryNames.includes(c))
+          ]
+        : responseCategoryNames.length > 0
+          ? responseCategoryNames
+          : configCategoryNames;
+
     return (
       <div className="space-y-4">
         <div className="overflow-x-auto">
@@ -2433,9 +2425,15 @@ function CardSortingViewComponent({
                       return (
                         <td key={`cell-${block.id}-${cardIdx}-${catIdx}-${cat}`} className="border border-border p-2 text-center">
                           {count > 0 ? (
-                            <div className="inline-flex items-center justify-center px-2 py-1 rounded bg-green-100 text-green-800 text-sm font-medium">
-                              {percentage.toFixed(0)}%
-                            </div>
+                            viewMode === "responses" ? (
+                              <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-green-100 text-green-800">
+                                <Check className="h-4 w-4" />
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center justify-center px-2 py-1 rounded bg-green-100 text-green-800 text-sm font-medium">
+                                {percentage.toFixed(0)}%
+                              </div>
+                            )
                           ) : (
                             <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-muted"></div>
                           )}
@@ -2448,9 +2446,15 @@ function CardSortingViewComponent({
                           const unsortedCount = unsortedCardMap[cardTitle] || 0;
                           const unsortedPercentage = totalResponses > 0 ? (unsortedCount / totalResponses) * 100 : 0;
                           return unsortedCount > 0 ? (
-                            <div className="inline-flex items-center justify-center px-2 py-1 rounded bg-green-100 text-green-800 text-sm font-medium">
-                              {unsortedPercentage.toFixed(0)}%
-                            </div>
+                            viewMode === "responses" ? (
+                              <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-green-100 text-green-800">
+                                <Check className="h-4 w-4" />
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center justify-center px-2 py-1 rounded bg-green-100 text-green-800 text-sm font-medium">
+                                {unsortedPercentage.toFixed(0)}%
+                              </div>
+                            )
                           ) : (
                             <div className="inline-flex items-center justify-center w-8 h-8 rounded bg-muted"></div>
                           );
@@ -2611,11 +2615,22 @@ function CardSortingViewComponent({
             const sortedCategories = Object.entries(categoriesForCard)
               .sort((a, b) => (b[1] as number) - (a[1] as number));
             
+            const categoryCount = sortedCategories.length;
+            const categoryLabel = categoryCount === 0
+              ? "нет категорий"
+              : categoryCount === 1
+                ? "1 категория"
+                : categoryCount >= 2 && categoryCount <= 4
+                  ? `${categoryCount} категории`
+                  : `${categoryCount} категорий`;
+
             return (
               <div key={`card-view-${block.id}-${idx}-${card.title}`} className="border border-border rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-lg font-semibold">{card.name}</span>
-                  <button
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground font-normal">{categoryLabel}</span>
+                    <button
                     onClick={() => {
                       const newSet = new Set(expandedCards);
                       if (isExpanded) {
@@ -2632,6 +2647,7 @@ function CardSortingViewComponent({
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     )}
                   </button>
+                  </span>
                 </div>
                 
                 {isExpanded && (
@@ -3347,50 +3363,89 @@ function FirstClickView({ block, blockIndex, responses, viewMode, onDeleteRespon
                 </div>
               )}
             </div>
-            <div className="px-4 py-3">
-              <p className="text-base mb-4">{instruction}</p>
-            </div>
-          </div>
-          <div className="px-4 pb-4">
-          {imageUrl && (
-            <div className="flex flex-wrap items-start gap-4">
-              <div className="w-32 h-24 rounded-lg border border-border overflow-hidden bg-muted/30 flex-shrink-0">
-                <img
-                  src={imageUrl}
-                  alt=""
-                  className="w-full h-full object-cover blur-md"
-                />
+            {viewMode !== "responses" && (
+              <div className="px-4 py-3">
+                <p className="text-base mb-4">{instruction}</p>
               </div>
-              <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-start">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Среднее время:</span>
-                  <span className="font-medium">{avgTime.toFixed(2)} с</span>
+            )}
+          </div>
+          <div className="px-0 pb-4">
+          {viewMode === "responses" ? (
+            <div className="space-y-6 px-4">
+              {responses.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8">Нет ответов</div>
+              ) : (
+                responses.map((r, idx) => {
+                  const durationSec = r.duration_ms != null ? r.duration_ms / 1000 : null;
+                  const a = r.answer;
+                  const x = a && typeof a === "object" && typeof (a as { x?: number }).x === "number" ? (a as { x: number }).x : null;
+                  const y = a && typeof a === "object" && typeof (a as { y?: number }).y === "number" ? (a as { y: number }).y : null;
+                  return (
+                    <div key={r.id || idx} className="space-y-2">
+                      {durationSec != null && (
+                        <div className="text-sm font-medium">
+                          Время до клика: {durationSec.toFixed(2)} с
+                        </div>
+                      )}
+                      {imageUrl && (
+                        <div className="relative rounded-lg border border-border overflow-hidden bg-muted/30 inline-block max-w-full">
+                          <img src={imageUrl} alt="" className="block max-w-full h-auto" />
+                          {x != null && y != null && (
+                            <div
+                              className="absolute w-3 h-3 rounded-full bg-primary border-2 border-white shadow"
+                              style={{
+                                left: `${x <= 1 ? x * 100 : 0}%`,
+                                top: `${y <= 1 ? y * 100 : 0}%`,
+                                transform: "translate(-50%, -50%)",
+                              }}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : imageUrl ? (
+            <div className="relative w-full overflow-hidden rounded-b-lg" style={{ aspectRatio: "16/10", minHeight: 200 }}>
+              <img
+                src={imageUrl}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover blur-md"
+              />
+              <div className="absolute inset-0 bg-black/40" />
+              <div className="absolute inset-0 flex flex-col sm:flex-row flex-wrap items-center justify-center gap-6 sm:gap-8 p-6 text-white">
+                <div className="flex flex-col items-center sm:items-start">
+                  <span className="text-sm opacity-90">Среднее время</span>
+                  <span className="text-2xl font-bold tabular-nums">{avgTime.toFixed(2)} с</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Медианное время:</span>
-                  <span className="font-medium">{medianTime.toFixed(2)} с</span>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
-                          <Info className="h-4 w-4" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-[240px]">
-                        <p className="text-sm whitespace-pre-line">{MEDIAN_TOOLTIP}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                <div className="flex flex-col items-center sm:items-start">
+                  <span className="text-sm opacity-90 flex items-center gap-1">
+                    Медианное время
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex text-white/80 hover:text-white cursor-help">
+                            <Info className="h-3.5 w-3.5" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[240px]">
+                          <p className="text-sm whitespace-pre-line">{MEDIAN_TOOLTIP}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </span>
+                  <span className="text-2xl font-bold tabular-nums">{medianTime.toFixed(2)} с</span>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => setClickMapOpen(true)}>
+                <Button size="sm" variant="secondary" className="bg-white text-black hover:bg-white/90" onClick={() => setClickMapOpen(true)}>
                   <MapIcon className="h-4 w-4 mr-2" />
                   Открыть карту кликов
                 </Button>
               </div>
             </div>
-          )}
-          {!imageUrl && (
-            <div className="flex flex-wrap gap-3 items-center">
+          ) : (
+            <div className="px-4 flex flex-wrap gap-3 items-center">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Среднее время:</span>
                 <span className="font-medium">{avgTime.toFixed(2)} с</span>

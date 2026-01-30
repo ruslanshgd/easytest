@@ -4,7 +4,7 @@ import { supabase } from "./supabaseClient";
 import { v4 as uuidv4 } from "uuid";
 import TestView from "./TestView.tsx";
 import { useViewerStore } from "./store";
-import { ArrowRight, MoveRight, ChevronLeft, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronLeft, Trash2 } from "lucide-react";
 
 // ============= Компонент модального окна для изображений =============
 interface ImageModalProps {
@@ -264,7 +264,7 @@ function OpenQuestionBlock({ question, optional, imageUrl, onSubmit, onSkip }: O
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
-      <div style={{ maxWidth: "600px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+      <div style={{ maxWidth: "600px", width: "100%" }}>
         <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>{question || "Вопрос"}</h2>
         <textarea 
           value={answer} 
@@ -287,7 +287,6 @@ function OpenQuestionBlock({ question, optional, imageUrl, onSubmit, onSkip }: O
           onClick={handleSubmit} 
           disabled={(!answer.trim() && !optional) || submitting} 
           style={{ 
-            width: "100%",
             padding: "12px 24px", 
             background: (answer.trim() || optional) && !submitting ? "#007AFF" : "#ccc", 
             color: "white", 
@@ -296,14 +295,13 @@ function OpenQuestionBlock({ question, optional, imageUrl, onSubmit, onSkip }: O
             fontSize: "16px", 
             fontWeight: 600, 
             cursor: (answer.trim() || optional) && !submitting ? "pointer" : "not-allowed",
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            justifyContent: "center",
             gap: 8
           }}
         >
           {submitting ? "Сохранение..." : "Далее"}
-          {!submitting && <MoveRight size={20} />}
+          {!submitting && <ArrowRight size={18} />}
         </button>
       </div>
     </div>
@@ -478,7 +476,6 @@ function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
             onClick={handleSubmit} 
             disabled={(!hasAnswer && !config.optional) || submitting} 
             style={{ 
-              flex: 1, 
               padding: "12px 24px", 
               background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", 
               color: "white", 
@@ -487,14 +484,13 @@ function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
               fontSize: "16px", 
               fontWeight: 600, 
               cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed",
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
-              justifyContent: "center",
               gap: 8
             }}
           >
             {submitting ? "Сохранение..." : "Далее"}
-            {!submitting && <MoveRight size={20} />}
+            {!submitting && <ArrowRight size={18} />}
           </button>
         </div>
       </div>
@@ -634,18 +630,21 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
     const min = config.min ?? 1;
     const max = config.max ?? 5;
     const values = Array.from({ length: max - min + 1 }, (_, i) => min + i);
-    
+    const hasLabels = (config.minLabel?.trim() || config.maxLabel?.trim());
+
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-          <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel || min}</span>
-          <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel || max}</span>
-        </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
           {values.map(v => (
             <button key={v} onClick={() => setValue(v)} style={{ width: 44, height: 44, borderRadius: 8, border: value === v ? "2px solid #007AFF" : "1px solid #ddd", background: value === v ? "#007AFF" : "white", color: value === v ? "white" : "#333", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>{v}</button>
           ))}
         </div>
+        {hasLabels && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -654,39 +653,39 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
     const emojis3 = ["😞", "😐", "😊"];
     const emojis5 = ["😠", "😞", "😐", "😊", "😄"];
     const emojis = config.emojiCount === 3 ? emojis3 : emojis5;
-    const hasLabels = (config.minLabel && config.minLabel.trim()) || (config.maxLabel && config.maxLabel.trim());
+    const hasLabels = (config.minLabel?.trim() || config.maxLabel?.trim());
     return (
       <div>
-        {hasLabels && (
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
-            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
-          </div>
-        )}
         <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
           {emojis.map((emoji, i) => (
             <button key={`emoji-${i}-${emoji}`} onClick={() => setValue(i + 1)} style={{ width: 56, height: 56, borderRadius: 12, border: value === i + 1 ? "3px solid #007AFF" : "1px solid #ddd", background: value === i + 1 ? "#e3f2fd" : "white", fontSize: 28, cursor: "pointer", transition: "transform 0.2s", transform: value === i + 1 ? "scale(1.1)" : "scale(1)" }}>{emoji}</button>
           ))}
         </div>
+        {hasLabels && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
+          </div>
+        )}
       </div>
     );
   };
 
   const renderStars = () => {
-    const hasLabels = (config.minLabel && config.minLabel.trim()) || (config.maxLabel && config.maxLabel.trim());
+    const hasLabels = (config.minLabel?.trim() || config.maxLabel?.trim());
     return (
       <div>
-        {hasLabels && (
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
-            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
-          </div>
-        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
           {[1, 2, 3, 4, 5].map(star => (
             <button key={star} onClick={() => setValue(star)} style={{ background: "none", border: "none", fontSize: 36, cursor: "pointer", color: value !== null && star <= value ? "#ffc107" : "#ddd", transition: "transform 0.2s", transform: value !== null && star <= value ? "scale(1.1)" : "scale(1)" }}>★</button>
           ))}
         </div>
+        {hasLabels && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -697,29 +696,28 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
         <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
       )}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
-        <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+        <div style={{ maxWidth: "900px", width: "100%" }}>
           {config.imageUrl && (
             <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
               <img src={config.imageUrl} alt="" style={{ width: "100%", maxHeight: 500, objectFit: "contain", background: "#f5f5f5" }} />
               <div style={{ textAlign: "center", marginTop: 8, color: "#666", fontSize: 13 }}>Нажмите для увеличения</div>
             </div>
           )}
-        <h2 style={{ margin: "0 0 12px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>{config.question}</h2>
-        {config.description && <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "14px" }}>{config.description}</p>}
-        
-        <div style={{ marginBottom: 24 }}>
-          {config.scaleType === "numeric" && renderNumeric()}
-          {config.scaleType === "emoji" && renderEmoji()}
-          {config.scaleType === "stars" && renderStars()}
-        </div>
-        
-        <div style={{ display: "flex", gap: 12 }}>
-          <button onClick={handleSubmit} disabled={(value === null && !config.optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (value !== null || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (value !== null || config.optional) && !submitting ? "pointer" : "not-allowed" }}>
+          <h2 style={{ margin: "0 0 12px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>{config.question}</h2>
+          {config.description && <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "14px" }}>{config.description}</p>}
+          
+          <div style={{ marginBottom: 24 }}>
+            {config.scaleType === "numeric" && renderNumeric()}
+            {config.scaleType === "emoji" && renderEmoji()}
+            {config.scaleType === "stars" && renderStars()}
+          </div>
+          
+          <button onClick={handleSubmit} disabled={(value === null && !config.optional) || submitting} style={{ padding: "12px 24px", background: (value !== null || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (value !== null || config.optional) && !submitting ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 8 }}>
             {submitting ? "Сохранение..." : "Далее"}
+            {!submitting && <ArrowRight size={18} />}
           </button>
         </div>
       </div>
-    </div>
     </>
   );
 }
@@ -950,7 +948,7 @@ function FiveSecondsBlock({ config, onComplete }: FiveSecondsBlockProps) {
               alignSelf: "flex-start",
             }}
           >
-            Начать
+            Показать изображение
           </button>
         </aside>
         <div
@@ -1509,7 +1507,6 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
               onClick={hasSelection ? handleSubmit : handleSkip}
               disabled={(!hasSelection && !config.allowSkip) || submitting}
               style={{
-                flex: 1,
                 padding: "14px 24px",
                 background: (hasSelection || config.allowSkip) && !submitting ? "#007AFF" : "#ccc",
                 color: "white",
@@ -1517,10 +1514,14 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
                 borderRadius: "8px",
                 fontSize: "16px",
                 fontWeight: 600,
-                cursor: (hasSelection || config.allowSkip) && !submitting ? "pointer" : "not-allowed"
+                cursor: (hasSelection || config.allowSkip) && !submitting ? "pointer" : "not-allowed",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8
               }}
             >
               {submitting ? "Сохранение..." : "Далее"}
+              {!submitting && <ArrowRight size={18} />}
             </button>
           </div>
           <button
@@ -2177,7 +2178,7 @@ function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
         <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
       )}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
-        <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+        <div style={{ maxWidth: "900px", width: "100%" }}>
           {config.imageUrl && (
             <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
               <img src={config.imageUrl} alt="" style={{ width: "100%", maxHeight: 500, objectFit: "contain", background: "#f5f5f5" }} />
@@ -2246,8 +2247,9 @@ function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
           </div>
           
           <div style={{ display: "flex", gap: 12 }}>
-            <button onClick={handleSubmit} disabled={(!hasAnswer && !config.optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed" }}>
-              {submitting ? "Сохранение..." : "Далее →"}
+            <button onClick={handleSubmit} disabled={(!hasAnswer && !config.optional) || submitting} style={{ padding: "12px 24px", background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {submitting ? "Сохранение..." : "Далее"}
+              {!submitting && <ArrowRight size={18} />}
             </button>
           </div>
         </div>

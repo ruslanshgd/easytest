@@ -485,9 +485,36 @@ export default function StudiesList() {
         { study_id: studyData.id, type: "open_question", order_index: 3, config: { question: "Что именно было сложным или показалось непонятным?", optional: false } }
       ];
 
-      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
-      if (blocksError) {
-        setError(blocksError.message);
+      const { data: insertedBlocks, error: blocksError } = await supabase.from("study_blocks").insert(blocks).select("id, order_index");
+      if (blocksError || !insertedBlocks || insertedBlocks.length !== 4) {
+        setError(blocksError?.message ?? "Ошибка создания блоков");
+        return;
+      }
+
+      const byOrder = (a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index;
+      const sorted = [...insertedBlocks].sort(byOrder);
+      const scaleBlockId = sorted[2].id;
+      const openQuestionBlockId = sorted[3].id;
+      const openQuestionConfig = blocks[3].config as Record<string, unknown>;
+
+      const { error: updateLogicError } = await supabase
+        .from("study_blocks")
+        .update({
+          config: {
+            ...openQuestionConfig,
+            logic: {
+              showOnCondition: {
+                enabled: true,
+                action: "show",
+                conditions: [{ blockId: scaleBlockId, operator: "less_than" as const, value: "5" }]
+              },
+              conditionalLogic: { rules: [], elseGoToBlockId: "__end__" }
+            }
+          }
+        })
+        .eq("id", openQuestionBlockId);
+      if (updateLogicError) {
+        setError(updateLogicError.message);
         return;
       }
 
