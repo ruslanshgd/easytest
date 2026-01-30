@@ -1,0 +1,41 @@
+name: Design System Check
+
+on:
+  pull_request:
+    paths:
+      - 'figma-analytics/src/**'
+      - 'figma-analytics/eslint.config.js'
+  push:
+    branches:
+      - main
+    paths:
+      - 'figma-analytics/src/**'
+      - 'figma-analytics/eslint.config.js'
+
+jobs:
+  check-hardcoded-colors:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: figma-analytics/package.json
+      
+      - name: Install dependencies
+        working-directory: figma-analytics
+        run: npm ci
+      
+      - name: Check for hardcoded colors
+        working-directory: figma-analytics
+        run: npm run check:colors
+      
+      - name: Run ESLint
+        working-directory: figma-analytics
+        run: npm run lint
+        continue-on-error: true

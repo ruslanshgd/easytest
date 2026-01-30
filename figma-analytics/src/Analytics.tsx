@@ -3,6 +3,9 @@ import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { isValidUUID } from "./utils/validation";
 import { useAppStore } from "./store";
+import { chartColors, styleColors } from "./lib/styleUtils";
+import { cn } from "./lib/utils";
+import { MetricCard } from "./components/ui/metric-card";
 
 interface AnalyticsProps {
   sessionId: string | null;
@@ -1297,7 +1300,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     display: "flex",
     flexDirection: "column" as const,
     minHeight: "100vh",
-    background: "#f5f5f7",
+    background: styleColors.sidebar,
     padding: 20,
     width: "100%",
     maxWidth: "1104px",
@@ -1305,7 +1308,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
   };
 
   const sessionCardStyle = {
-    background: "#ffffff",
+    background: "var(--color-background)",
     borderRadius: 8,
     padding: 16,
     marginBottom: 12,
@@ -1325,14 +1328,14 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     fontFamily: "monospace",
     fontSize: 14,
     fontWeight: "bold",
-    color: "#333"
+    color: "var(--color-foreground)"
   };
 
   const metricsStyle = {
     display: "flex",
     gap: 16,
     fontSize: 12,
-    color: "#666"
+    color: styleColors.mutedText
   };
 
   const badgeStyle = (completed: boolean, aborted: boolean = false, closed: boolean = false) => ({
@@ -1340,27 +1343,18 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     borderRadius: 4,
     fontSize: 11,
     fontWeight: "bold",
-    background: completed ? "#4caf50" : closed ? "#f44336" : aborted ? "#ff9800" : "#9e9e9e",
-    color: "white"
+    background: completed ? "var(--color-success)" : closed ? "var(--color-destructive)" : aborted ? "var(--color-warning)" : styleColors.mutedText,
+    color: "var(--color-primary-foreground)"
   });
 
   if (analyticsLoading) {
     return (
       <div style={containerStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
+          <h2 className="m-0">Аналитика сессий</h2>
           <button
             onClick={() => navigate("/studies")}
-            style={{
-              padding: "8px 16px",
-              background: "#2196f3",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: "bold"
-            }}
+            className="px-4 py-2 bg-primary text-primary-foreground border-none rounded-md cursor-pointer text-sm font-bold"
           >
             Тесты
           </button>
@@ -1374,24 +1368,15 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     return (
       <div style={containerStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
+          <h2 className="m-0">Аналитика сессий</h2>
           <button
             onClick={() => navigate("/studies")}
-            style={{
-              padding: "8px 16px",
-              background: "#2196f3",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: "bold"
-            }}
+            className="px-4 py-2 bg-primary text-primary-foreground border-none rounded-md cursor-pointer text-sm font-bold"
           >
             Тесты
           </button>
         </div>
-        <p style={{ color: "red" }}>Ошибка: {error}</p>
+        <p style={{ color: "var(--color-destructive)" }}>Ошибка: {error}</p>
       </div>
     );
   }
@@ -1400,19 +1385,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
     return (
       <div style={containerStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
+          <h2 className="m-0">Аналитика сессий</h2>
           <button
             onClick={() => navigate("/studies")}
-            style={{
-              padding: "8px 16px",
-              background: "#2196f3",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: "bold"
-            }}
+            className="px-4 py-2 bg-primary text-primary-foreground border-none rounded-md cursor-pointer text-sm font-bold"
           >
             Тесты
           </button>
@@ -1650,8 +1626,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       {/* Блок "Аналитика сессий" */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h2 style={{ margin: 0 }}>Аналитика сессий</h2>
-          <p style={{ color: "#666", marginTop: 4 }}>
+          <h2 className="m-0">Аналитика сессий</h2>
+          <p className="text-muted-foreground mt-1">
             Найдено сессий: {totalSessions}
             {selectedSessions.size > 0 && ` | Выбрано: ${selectedSessions.size}`}
           </p>
@@ -1660,26 +1636,22 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           <button
             onClick={deleteSelectedSessions}
             disabled={selectedSessions.size === 0 || deleting}
-            style={{
-              padding: "8px 16px",
-              background: selectedSessions.size === 0 ? "#ccc" : "#f44336",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: selectedSessions.size === 0 ? "not-allowed" : "pointer",
-              fontSize: 14,
-              fontWeight: "bold"
-            }}
+            className={cn(
+              "px-4 py-2 text-white border-none rounded-md text-sm font-bold",
+              selectedSessions.size === 0 ? "bg-muted-foreground cursor-not-allowed" : "bg-destructive cursor-pointer"
+            )}
           >
             Удалить выбранные ({selectedSessions.size})
           </button>
           <button
             onClick={deleteAllSessions}
             disabled={sessions.length === 0 || deleting}
+            className={cn(
+              "px-4 py-2 text-white border-none rounded-md text-sm font-bold",
+              sessions.length === 0 ? "bg-muted-foreground cursor-not-allowed" : "bg-destructive cursor-pointer"
+            )}
             style={{
-              padding: "8px 16px",
-              background: sessions.length === 0 ? "#ccc" : "#d32f2f",
-              color: "white",
+              color: "var(--color-destructive-foreground)",
               border: "none",
               borderRadius: 4,
               cursor: sessions.length === 0 ? "not-allowed" : "pointer",
@@ -1693,30 +1665,18 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
       </div>
 
       {deleting && (
-        <div style={{ 
-          padding: 12, 
-          background: "#fff3cd", 
-          borderRadius: 4, 
-          marginBottom: 16,
-          color: "#856404"
-        }}>
+        <div className="p-3 bg-warning-subtle rounded-md mb-4 text-warning">
           Удаление...
         </div>
       )}
 
       {/* Хитмап кликов (глобальный - удаляется, будет внутри task groups) */}
       {false && Object.keys(prototypes).length > 0 && (
-        <div style={{
-          background: "#ffffff",
-          borderRadius: 8,
-          padding: 16,
-          marginBottom: 20,
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-            <h3 style={{ fontSize: 16, margin: 0, color: "#333" }}>Хитмап кликов</h3>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ fontSize: 12, color: "#666" }}>
+        <div className="bg-background rounded-lg p-4 mb-5 shadow-sm">
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+            <h3 className="text-base m-0 text-foreground">Хитмап кликов</h3>
+            <div className="flex gap-2 items-center flex-wrap">
+              <label className="text-xs text-muted-foreground">
                 Фильтр по сессиям:
               </label>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxWidth: "400px" }}>
@@ -1731,11 +1691,11 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                   style={{
                     padding: "4px 8px",
                     borderRadius: 4,
-                    border: "1px solid #ddd",
+                    border: "1px solid var(--color-input)",
                     fontSize: 11,
                     cursor: "pointer",
-                    background: heatmapFilterSessions.size === sessions.length ? "#2196f3" : "white",
-                    color: heatmapFilterSessions.size === sessions.length ? "white" : "#333"
+                    background: heatmapFilterSessions.size === sessions.length ? "var(--color-primary)" : "var(--color-background)",
+                    color: heatmapFilterSessions.size === sessions.length ? "var(--color-primary-foreground)" : "var(--color-foreground)"
                   }}
                 >
                   {heatmapFilterSessions.size === sessions.length ? "Снять все" : "Выбрать все"}
@@ -1769,11 +1729,11 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                       style={{
                         padding: "4px 8px",
                         borderRadius: 4,
-                        border: "1px solid #ddd",
+                        border: "1px solid var(--color-input)",
                         fontSize: 11,
                         cursor: "pointer",
-                        background: isSelected ? "#2196f3" : "white",
-                        color: isSelected ? "white" : "#333",
+                        background: isSelected ? "var(--color-primary)" : "var(--color-background)",
+                        color: isSelected ? "var(--color-primary-foreground)" : "var(--color-foreground)",
                         whiteSpace: "nowrap"
                       }}
                     >
@@ -1783,7 +1743,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                 })}
               </div>
               {heatmapFilterSessions.size > 0 && (
-                <span style={{ fontSize: 11, color: "#666" }}>
+                <span className="text-xs text-muted-foreground">
                   Выбрано: {heatmapFilterSessions.size} из {sessions.length}
                 </span>
               )}
@@ -1944,10 +1904,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                         position: "relative", 
                         display: "inline-block", 
                         border: abandonedScreens.closedScreens.has(screen.id) 
-                          ? "1px solid #f44336" 
+                          ? "1px solid var(--color-destructive)" 
                           : abandonedScreens.abortedScreens.has(screen.id)
-                          ? "1px solid #ff9800"
-                          : "2px solid #ddd", 
+                          ? "1px solid var(--color-warning)"
+                          : "2px solid var(--color-input)", 
                         borderRadius: 4,
                         width: previewWidth,
                         height: previewHeight,
@@ -1997,7 +1957,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                         )}
                       </div>
                       {clicks.length === 0 && (
-                        <div style={{ fontSize: 11, color: "#999", marginTop: 4, textAlign: "center" }}>
+                        <div className="text-xs text-muted-foreground/70 mt-1 text-center">
                           Нет кликов
                         </div>
                       )}
@@ -2030,7 +1990,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
         >
           <div
             style={{
-              background: "#ffffff",
+              background: "var(--color-background)",
               borderRadius: 8,
               padding: 20,
               maxWidth: "90vw",
@@ -2046,8 +2006,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                 position: "absolute",
                 top: 10,
                 right: 10,
-                background: "#f44336",
-                color: "white",
+                background: "var(--color-destructive)",
+                color: "var(--color-destructive-foreground)",
                 border: "none",
                 borderRadius: 4,
                 width: 32,
@@ -2062,7 +2022,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
               ×
             </button>
             <h3 style={{ marginTop: 0, marginBottom: 16 }}>{selectedHeatmapScreen.screen.name}</h3>
-            <div style={{ position: "relative", display: "inline-block", border: "1px solid #ddd", borderRadius: 4 }}>
+            <div className="relative inline-block border border-input rounded-md">
               <img 
                 src={selectedHeatmapScreen.screen.image} 
                 alt={selectedHeatmapScreen.screen.name}
@@ -2103,7 +2063,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
               })()}
             </div>
             {selectedHeatmapScreen.clicks.length === 0 && (
-              <div style={{ fontSize: 14, color: "#999", marginTop: 12, textAlign: "center" }}>
+              <div className="text-sm text-muted-foreground/70 mt-3 text-center">
                 Нет кликов на этом экране
               </div>
             )}
@@ -2116,7 +2076,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
         alignItems: "center", 
         marginBottom: 12, 
         padding: "8px 16px",
-        background: "#ffffff",
+        background: "var(--color-background)",
         borderRadius: 8,
         boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
       }}>
@@ -2139,7 +2099,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
           <div
             key={taskGroup.prototypeId}
             style={{
-              background: "#ffffff",
+              background: "var(--color-background)",
               borderRadius: 8,
               padding: 16,
               marginBottom: 20,
@@ -2158,7 +2118,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
               onClick={() => navigate(`/prototypes/${taskGroup.prototypeId}`)}
             >
               <div style={{ flex: 1 }}>
-                <h3 style={{ margin: "0 0 8px 0", fontSize: 18, fontWeight: 600, color: "#333" }}>
+                <h3 className="m-0 mb-2 text-lg font-semibold text-foreground">
                   {taskGroup.taskDescription || `Задание ${taskGroup.prototypeId.substring(0, 8)}...`}
                 </h3>
                 <div style={{ 
@@ -2166,55 +2126,39 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                   gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", 
                   gap: 12,
                   fontSize: 12,
-                  color: "#666"
+                  color: "var(--color-muted-foreground)"
                 }}>
-                  <div>
-                    <span style={{ color: "#999" }}>Запущено: </span>
-                    <span style={{ fontWeight: "bold" }}>{taskGroup.metrics.total}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#999" }}>Пройдено: </span>
-                    <span style={{ fontWeight: "bold", color: "#4caf50" }}>{taskGroup.metrics.completed}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#999" }}>Прервано (сдался): </span>
-                    <span style={{ fontWeight: "bold", color: "#ff9800" }}>{taskGroup.metrics.aborted}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#999" }}>Закрыто: </span>
-                    <span style={{ fontWeight: "bold", color: "#f44336" }}>{taskGroup.metrics.closed}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#999" }}>Всего брошено: </span>
-                    <span style={{ fontWeight: "bold", color: "#ff5722" }}>{taskGroup.metrics.totalAbandoned}</span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#999" }}>Конверсия: </span>
-                    <span style={{ fontWeight: "bold", color: "#2196f3" }}>{taskGroup.metrics.conversionRate}%</span>
-                  </div>
+                  <MetricCard label="Запущено:" value={taskGroup.metrics.total} />
+                  <MetricCard label="Пройдено:" value={taskGroup.metrics.completed} variant="success" />
+                  <MetricCard label="Прервано (сдался):" value={taskGroup.metrics.aborted} variant="warning" />
+                  <MetricCard label="Закрыто:" value={taskGroup.metrics.closed} variant="destructive" />
+                  <MetricCard label="Всего брошено:" value={taskGroup.metrics.totalAbandoned} variant="destructive" />
+                  <MetricCard label="Конверсия:" value={`${taskGroup.metrics.conversionRate}%`} />
                   {taskGroup.metrics.avgUmuxLite !== null && taskGroup.metrics.avgUmuxLite !== undefined && (
-                    <div>
-                      <span style={{ color: "#999" }}>UMUX Lite (среднее): </span>
-                      <span style={{ fontWeight: "bold", color: "#9c27b0" }}>
-                        {taskGroup.metrics.avgUmuxLite.toFixed(1)}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-xs text-muted-foreground/70">UMUX Lite (среднее): </span>
+                        <span className="text-sm font-bold" style={{ color: chartColors.accent }}>
+                          {taskGroup.metrics.avgUmuxLite.toFixed(1)}
+                        </span>
                         {taskGroup.metrics.avgUmuxLiteSus !== null && taskGroup.metrics.avgUmuxLiteSus !== undefined && (
-                          <span style={{ fontSize: 11, color: "#999", marginLeft: 4 }}>
+                          <span className="text-xs text-muted-foreground/70 ml-1">
                             (SUS: {taskGroup.metrics.avgUmuxLiteSus.toFixed(1)})
                           </span>
                         )}
-                      </span>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
-              <span style={{ fontSize: 18, marginLeft: 16, color: "#666" }}>
+              <span className="text-lg ml-4 text-muted-foreground">
                 {isGroupExpanded ? "▼" : "▶"}
               </span>
             </div>
 
             {/* Список сессий в группе */}
             {isGroupExpanded && (
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
+              <div className="mt-4 pt-4 border-t border-border">
                 {taskGroup.sessions.map(session => {
         const isExpanded = expandedSessions.has(session.id);
         const events = sessionEvents[session.id] || [];
@@ -2225,7 +2169,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
             key={session.id}
             style={{
               ...sessionCardStyle,
-              border: isSelected ? "2px solid #2196f3" : "none"
+              border: isSelected ? "2px solid var(--color-primary)" : "none"
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.boxShadow = "0 4px 8px rgba(0,0,0,0.15)";
@@ -2262,7 +2206,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                         </span>
                       )}
                       {(session.umux_lite_score !== null && session.umux_lite_score !== undefined) || (session.umux_lite_item1 !== null && session.umux_lite_item1 !== undefined) ? (
-                        <span style={{ color: "#2196f3", fontWeight: "bold" }}>
+                        <span className="text-primary font-bold">
                           {session.umux_lite_score !== null && session.umux_lite_score !== undefined ? (
                             <>
                               UMUX Lite: {session.umux_lite_score.toFixed(1)}
@@ -2311,8 +2255,8 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                     disabled={deleting}
                     style={{
                       padding: "6px 12px",
-                      background: "#f44336",
-                      color: "white",
+                      background: "var(--color-destructive)",
+                      color: "var(--color-destructive-foreground)",
                       border: "none",
                       borderRadius: 4,
                       cursor: deleting ? "not-allowed" : "pointer",
@@ -2327,25 +2271,25 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
             </div>
 
             {isExpanded && (
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
+              <div className="mt-4 pt-4 border-t border-border">
                 {session.feedback_text && (
                   <div style={{ 
                     marginBottom: 16, 
                     padding: 12, 
-                    background: "#f5f5f5", 
+                    background: "var(--color-muted)", 
                     borderRadius: 4,
-                    borderLeft: "3px solid #2196f3"
+                    borderLeft: "3px solid var(--color-primary)"
                   }}>
-                    <div style={{ fontSize: 12, fontWeight: "bold", color: "#333", marginBottom: 8 }}>
+                    <div className="text-xs font-bold text-foreground mb-2">
                       💬 Фидбэк от респондента:
                     </div>
-                    <div style={{ fontSize: 14, color: "#666", whiteSpace: "pre-wrap" }}>
+                    <div className="text-sm text-muted-foreground whitespace-pre-wrap">
                       {session.feedback_text}
                     </div>
                   </div>
                 )}
                 {events.length === 0 ? (
-                  <p style={{ color: "#999" }}>Загрузка событий...</p>
+                  <p className="text-muted-foreground/70">Загрузка событий...</p>
                 ) : (
                   <div>
                     <h3 style={{ fontSize: 14, marginBottom: 12 }}>
@@ -2354,24 +2298,16 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                     <div style={{ maxHeight: "400px", overflow: "auto" }}>
                       <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                         <thead>
-                          <tr style={{ background: "#f5f5f5" }}>
-                            <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                              Время
-                            </th>
-                            <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                              Тип
-                            </th>
-                            <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                              Экран
-                            </th>
-                            <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                              Область клика
-                            </th>
+                          <tr className="bg-muted">
+                            <th className="p-2 text-left border-b border-input">Время</th>
+                            <th className="p-2 text-left border-b border-input">Тип</th>
+                            <th className="p-2 text-left border-b border-input">Экран</th>
+                            <th className="p-2 text-left border-b border-input">Область клика</th>
                           </tr>
                         </thead>
                         <tbody>
                           {groupClicksByScreen(events, session.id).map((groupedEvent, idx) => (
-                            <tr key={`${groupedEvent.timestamp}-${idx}`} style={{ borderBottom: "1px solid #eee" }}>
+                            <tr key={`${groupedEvent.timestamp}-${idx}`} className="border-b border-border">
                               <td style={{ padding: "8px" }}>
                                 {new Date(groupedEvent.timestamp).toLocaleTimeString("ru-RU")}
                               </td>
@@ -2379,15 +2315,19 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                 <span style={{
                                   padding: "2px 6px",
                                   borderRadius: 3,
-                                  background: groupedEvent.event_type === "completed" ? "#4caf50" : 
-                                            groupedEvent.event_type === "clicks" ? "#2196f3" :
-                                            groupedEvent.event_type === "hotspot_click" ? "#2196f3" :
-                                            groupedEvent.event_type === "scroll" ? "#9c27b0" :
-                                            groupedEvent.event_type === "scroll_start" ? "#9c27b0" :
-                                            groupedEvent.event_type === "scroll_end" ? "#9c27b0" :
-                                            groupedEvent.event_type === "closed" ? "#f44336" :
-                                            groupedEvent.event_type === "aborted" ? "#ff9800" : "#ff9800",
-                                  color: "white",
+                                  background: groupedEvent.event_type === "completed" ? "var(--color-success)" : 
+                                            groupedEvent.event_type === "clicks" ? "var(--color-primary)" :
+                                            groupedEvent.event_type === "hotspot_click" ? "var(--color-primary)" :
+                                            groupedEvent.event_type === "scroll" ? chartColors.accent :
+                                            groupedEvent.event_type === "scroll_start" ? chartColors.accent :
+                                            groupedEvent.event_type === "scroll_end" ? chartColors.accent :
+                                            groupedEvent.event_type === "closed" ? "var(--color-destructive)" :
+                                            groupedEvent.event_type === "aborted" ? "var(--color-warning)" : "var(--color-warning)",
+                                  color: groupedEvent.event_type === "completed" ? "var(--color-success-foreground)" :
+                                         groupedEvent.event_type === "clicks" || groupedEvent.event_type === "hotspot_click" ? "var(--color-primary-foreground)" :
+                                         groupedEvent.event_type === "scroll" || groupedEvent.event_type === "scroll_start" || groupedEvent.event_type === "scroll_end" ? "var(--color-background)" :
+                                         groupedEvent.event_type === "closed" ? "var(--color-destructive-foreground)" :
+                                         "var(--color-warning-foreground)",
                                   fontSize: 11
                                 }}>
                                   {groupedEvent.event_type === "clicks" ? "Клики" : translateEventType(groupedEvent.event_type)}
@@ -2411,17 +2351,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                       </table>
                     </div>
                     <details style={{ marginTop: 12 }}>
-                      <summary style={{ cursor: "pointer", color: "#666", fontSize: 12 }}>
+                      <summary className="cursor-pointer text-muted-foreground text-xs">
                         Показать JSON
                       </summary>
-                      <pre style={{
-                        background: "#f5f5f5",
-                        padding: 12,
-                        borderRadius: 4,
-                        overflow: "auto",
-                        fontSize: 11,
-                        marginTop: 8
-                      }}>
+                      <pre className="bg-muted p-3 rounded-md overflow-auto text-xs mt-2">
                         {JSON.stringify(events, null, 2)}
                       </pre>
                     </details>
@@ -2517,12 +2450,12 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                     <div style={{
                       marginTop: 24,
                       paddingTop: 24,
-                      borderTop: "1px solid #eee"
+                      borderTop: "1px solid var(--color-border)"
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-                        <h3 style={{ fontSize: 16, margin: 0, color: "#333" }}>Хитмап кликов</h3>
+                        <h3 className="text-base m-0 text-foreground">Хитмап кликов</h3>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <label style={{ fontSize: 12, color: "#666" }}>
+                          <label className="text-xs text-muted-foreground">
                             Фильтр по сессиям:
                           </label>
                           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxWidth: "400px" }}>
@@ -2540,11 +2473,11 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                               style={{
                                 padding: "4px 8px",
                                 borderRadius: 4,
-                                border: "1px solid #ddd",
+                                border: "1px solid var(--color-input)",
                                 fontSize: 11,
                                 cursor: "pointer",
-                                background: taskFilterSessions.size === taskSessions.length ? "#2196f3" : "white",
-                                color: taskFilterSessions.size === taskSessions.length ? "white" : "#333"
+                                background: taskFilterSessions.size === taskSessions.length ? "var(--color-primary)" : "var(--color-background)",
+                                color: taskFilterSessions.size === taskSessions.length ? "var(--color-primary-foreground)" : "var(--color-foreground)"
                               }}
                             >
                               {taskFilterSessions.size === taskSessions.length ? "Снять все" : "Выбрать все"}
@@ -2587,11 +2520,11 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                   style={{
                                     padding: "4px 8px",
                                     borderRadius: 4,
-                                    border: "1px solid #ddd",
+                                    border: "1px solid var(--color-input)",
                                     fontSize: 11,
                                     cursor: "pointer",
-                                    background: isSelected ? "#2196f3" : "white",
-                                    color: isSelected ? "white" : "#333",
+                                    background: isSelected ? "var(--color-primary)" : "var(--color-background)",
+                                    color: isSelected ? "var(--color-primary-foreground)" : "var(--color-foreground)",
                                     whiteSpace: "nowrap"
                                   }}
                                 >
@@ -2601,7 +2534,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                             })}
                           </div>
                           {taskFilterSessions.size > 0 && (
-                            <span style={{ fontSize: 11, color: "#666" }}>
+                            <span className="text-xs text-muted-foreground">
                               Выбрано: {taskFilterSessions.size} из {taskSessions.length}
                             </span>
                           )}
@@ -2644,10 +2577,10 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                                 position: "relative", 
                                 display: "inline-block", 
                                 border: shouldHighlight && taskAbandonedScreens.closedScreens.has(screen.id) 
-                                  ? "1px solid #f44336" 
+                                  ? "1px solid var(--color-destructive)" 
                                   : shouldHighlight && taskAbandonedScreens.abortedScreens.has(screen.id)
-                                  ? "1px solid #ff9800"
-                                  : "2px solid #ddd", 
+                                  ? "1px solid var(--color-warning)"
+                                  : "2px solid var(--color-border)", 
                                 borderRadius: 4,
                                 width: previewWidth,
                                 height: previewHeight,
@@ -2695,7 +2628,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                               </div>
                               {/* Время на экранах под каждым экраном */}
                               {screenTimeData && (
-                                <div style={{ fontSize: 10, color: "#666", marginTop: 4, textAlign: "center" }}>
+                                <div className="text-[10px] text-muted-foreground mt-1 text-center">
                                   <div>Всего: {formatTime(screenTimeData.totalTime)}</div>
                                   <div>Среднее: {formatTime(Math.floor(screenTimeData.totalTime / screenTimeData.visitCount))}</div>
                                   <div>Посещений: {screenTimeData.visitCount}</div>
@@ -2703,7 +2636,7 @@ export default function Analytics({ sessionId: propSessionId }: AnalyticsProps) 
                               )}
                               {/* Показываем "нет кликов" только для нефинальных экранов */}
                               {clicks.length === 0 && !isFinalScreen && (
-                                <div style={{ fontSize: 11, color: "#999", marginTop: 4, textAlign: "center" }}>
+                                <div className="text-xs text-muted-foreground/70 mt-1 text-center">
                                   Нет кликов
                                 </div>
                               )}

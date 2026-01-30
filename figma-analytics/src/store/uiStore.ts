@@ -20,6 +20,8 @@ export interface UIStore {
   
   // Form states for StudiesList
   newStudyTitle: string;
+  newStudyDescription: string;
+  newStudyType: string;
   newFolderName: string;
   renameTitle: string;
   renameFolderName: string;
@@ -62,6 +64,8 @@ export interface UIStore {
   
   // Form actions
   setNewStudyTitle: (title: string) => void;
+  setNewStudyDescription: (description: string) => void;
+  setNewStudyType: (type: string) => void;
   setNewFolderName: (name: string) => void;
   setRenameTitle: (title: string) => void;
   setRenameFolderName: (name: string) => void;
@@ -94,6 +98,8 @@ export const createUIStore = (set: any, get: any): UIStore => ({
   showBulkMoveModal: false,
   showBulkDeleteDialog: false,
   newStudyTitle: "",
+  newStudyDescription: "",
+  newStudyType: "",
   newFolderName: "",
   renameTitle: "",
   renameFolderName: "",
@@ -112,7 +118,9 @@ export const createUIStore = (set: any, get: any): UIStore => ({
   openCreateStudyModal: () => set({ showCreateStudyModal: true }),
   closeCreateStudyModal: () => set({ 
     showCreateStudyModal: false, 
-    newStudyTitle: "" 
+    newStudyTitle: "",
+    newStudyDescription: "",
+    newStudyType: ""
   }),
   
   openCreateFolderModal: () => set({ showCreateFolderModal: true }),
@@ -153,12 +161,16 @@ export const createUIStore = (set: any, get: any): UIStore => ({
   
   // Form actions
   setNewStudyTitle: (title) => set({ newStudyTitle: title }),
+  setNewStudyDescription: (description) => set({ newStudyDescription: description }),
+  setNewStudyType: (type) => set({ newStudyType: type }),
   setNewFolderName: (name) => set({ newFolderName: name }),
   setRenameTitle: (title) => set({ renameTitle: title }),
   setRenameFolderName: (name) => set({ renameFolderName: name }),
   
   resetForms: () => set({
     newStudyTitle: "",
+    newStudyDescription: "",
+    newStudyType: "",
     newFolderName: "",
     renameTitle: "",
     renameFolderName: "",

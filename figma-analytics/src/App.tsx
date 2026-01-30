@@ -10,11 +10,18 @@ import ProfilePage from "./ProfilePage";
 import InvitePage from "./InvitePage";
 import { User } from "lucide-react";
 import { useAppStore } from "./store";
+import { useThemeStore } from "./store/themeStore";
 import { Button } from "@/components/ui/button";
 
 function App() {
   const location = useLocation();
   const { session, authLoading, checkSession, subscribeToAuth } = useAppStore();
+  const { initTheme } = useThemeStore();
+
+  // Инициализация темы при монтировании
+  useEffect(() => {
+    initTheme();
+  }, [initTheme]);
 
   // Проверка авторизации
   useEffect(() => {
@@ -31,12 +38,7 @@ function App() {
   // Показываем загрузку только для auth
   if (authLoading) {
     return (
-      <div style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        minHeight: "100vh",
-      }}>
+      <div className="flex items-center justify-center min-h-screen">
         <div>Загрузка...</div>
       </div>
     );
@@ -62,27 +64,10 @@ function App() {
     <div>
       {/* Шапка: ИзиТест слева, Профиль справа */}
       {showHeader && (
-        <header
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "0.75rem 1.5rem",
-            borderBottom: "1px solid #e5e5e3",
-            backgroundColor: "#ffffff",
-            position: "sticky",
-            top: 0,
-            zIndex: 1000,
-          }}
-        >
+        <header className="flex justify-between items-center px-6 py-3 border-b border-border bg-background sticky top-0 z-[1000]">
           <Link
             to="/"
-            style={{
-              fontSize: "1.25rem",
-              fontWeight: 600,
-              color: "#1f1f1f",
-              textDecoration: "none",
-            }}
+            className="text-xl font-semibold text-foreground no-underline"
           >
             ИзиТест
           </Link>

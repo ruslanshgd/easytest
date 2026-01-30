@@ -27,6 +27,7 @@ export interface StudyBlock {
   study_id: string;
   type: string;
   order_index: number;
+  deleted_at?: string | null;
 }
 
 export interface StudyStats {
@@ -47,6 +48,7 @@ export interface Session {
   umux_lite_score?: number | null;
   umux_lite_sus_score?: number | null;
   feedback_text?: string | null;
+  recording_url?: string | null;
 }
 
 export interface SessionEvent {
@@ -124,3 +126,12 @@ export type BlockType =
   | "first_click"
   | "matrix"
   | "agreement";
+
+// Конфигурация блока прототипа.
+// Используется для хранения дополнительных настроек поведения прототип‑блока.
+export interface PrototypeBlockConfig {
+  eye_tracking_enabled?: boolean;
+  record_screen?: boolean;
+  record_camera?: boolean;
+  record_audio?: boolean;
+}

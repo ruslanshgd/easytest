@@ -12,13 +12,13 @@ export default function Auth() {
     email,
     otpCode,
     step,
-    loading,
+    authFormLoading,
     error,
     message,
     setEmail,
     setOtpCode,
     setStep,
-    setLoading,
+    setAuthFormLoading,
     setError,
     setMessage,
     resetForm,
@@ -26,7 +26,7 @@ export default function Auth() {
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setAuthFormLoading(true);
     setError(null);
     setMessage(null);
 
@@ -40,7 +40,7 @@ export default function Auth() {
 
       if (error) {
         setError(translateAuthError(error));
-        setLoading(false);
+        setAuthFormLoading(false);
         return;
       }
 
@@ -49,13 +49,13 @@ export default function Auth() {
     } catch (err) {
       setError(translateAuthError(err));
     } finally {
-      setLoading(false);
+      setAuthFormLoading(false);
     }
   };
 
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setAuthFormLoading(true);
     setError(null);
 
     try {
@@ -70,7 +70,7 @@ export default function Auth() {
 
       if (error) {
         setError(translateAuthError(error));
-        setLoading(false);
+        setAuthFormLoading(false);
         return;
       }
 
@@ -81,7 +81,7 @@ export default function Auth() {
     } catch (err) {
       setError(translateAuthError(err));
     } finally {
-      setLoading(false);
+      setAuthFormLoading(false);
     }
   };
 
@@ -113,7 +113,7 @@ export default function Auth() {
           )}
 
           {message && (
-            <div className="bg-[#0f7b6c]/10 text-[#0f7b6c] px-4 py-3 rounded-lg mb-4 text-sm">
+            <div className="bg-success/10 text-success px-4 py-3 rounded-lg mb-4 text-sm">
               {message}
             </div>
           )}
@@ -130,7 +130,7 @@ export default function Auth() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    disabled={loading}
+                    disabled={authFormLoading}
                     className="pl-10"
                     placeholder="your@email.com"
                   />
@@ -138,11 +138,11 @@ export default function Auth() {
               </div>
               <Button
                 type="submit"
-                disabled={loading || !email.trim()}
+                disabled={authFormLoading || !email.trim()}
                 className="w-full"
               >
-                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {loading ? "Отправка..." : "Отправить код"}
+                {authFormLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {authFormLoading ? "Отправка..." : "Отправить код"}
               </Button>
             </form>
           ) : (
@@ -155,7 +155,7 @@ export default function Auth() {
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                   required
-                  disabled={loading}
+                  disabled={authFormLoading}
                   maxLength={8}
                   className="text-center text-2xl tracking-[0.5em] font-mono"
                   placeholder="123456"
@@ -165,17 +165,17 @@ export default function Auth() {
               <div className="space-y-2">
                 <Button
                   type="submit"
-                  disabled={loading || otpCode.length < 6}
+                  disabled={authFormLoading || otpCode.length < 6}
                   className="w-full"
                 >
-                  {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {loading ? "Проверка..." : "Войти"}
+                  {authFormLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {authFormLoading ? "Проверка..." : "Войти"}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={handleBackToEmail}
-                  disabled={loading}
+                  disabled={authFormLoading}
                   className="w-full"
                 >
                   <ArrowLeft className="h-4 w-4 mr-2" />

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabaseClient";
 import { useViewerStore } from "./store";
@@ -13,6 +13,29 @@ import { AnimatedScene } from "./components/AnimatedScene";
 import { FigmaEmbedViewer } from "./components/FigmaEmbedViewer";
 import { getCSSTransitionStyle } from "./utils/cssTransitions";
 import "./TestView.css";
+import { createMediaRecordingController, type MediaRecordingController } from "./lib/mediaRecording";
+import { CircleCheck, MoveRight } from "lucide-react";
+
+declare global {
+  interface Window {
+    webgazer?: {
+      begin: () => Promise<void> | void;
+      pause: () => void;
+      resume: () => void;
+      end: () => void;
+      setGazeListener: (cb: (data: { x: number; y: number } | null, elapsedTime: number) => void) => any;
+      showVideo?: (show: boolean) => void;
+      showPredictionPoints?: (show: boolean) => void;
+    };
+  }
+}
+
+interface GazeSample {
+  ts: number;
+  xNorm: number;
+  yNorm: number;
+  screenId: string | null;
+}
 
 // EMBED KIT 2.0: OAuth client-id для получения postMessage событий от Figma
 // Зарегистрирован в Figma Developer Console: https://www.figma.com/developers/apps
@@ -31,16 +54,24 @@ interface TestViewProps {
   runIdOverride?: string | null; // НОВОЕ: Для StudyRunView - run_id
   blockIdOverride?: string | null; // НОВОЕ: Для StudyRunView - block_id
   studyIdOverride?: string | null; // НОВОЕ: Для StudyRunView - study_id
+  enableEyeTracking?: boolean; // НОВОЕ: Включить экспериментальное отслеживание движений глаз
+  recordScreen?: boolean;
+  recordCamera?: boolean;
+  recordAudio?: boolean;
 }
 
 export default function TestView({ 
   sessionId: propSessionId, 
   prototypeIdOverride = null,
-  instructionsOverride: _instructionsOverride = null, // eslint-disable-line @typescript-eslint/no-unused-vars
+  instructionsOverride = null,
   onComplete = undefined,
   runIdOverride = null,
   blockIdOverride = null,
-  studyIdOverride = null
+  studyIdOverride = null,
+  enableEyeTracking = false,
+  recordScreen = false,
+  recordCamera = false,
+  recordAudio = false,
 }: TestViewProps) {
   // sessionId используется через propSessionId
   const navigate = useNavigate();
@@ -71,10 +102,81 @@ export default function TestView({
   // Refs for functions without closure
   const currentScreenRef = useRef<string | null>(null);
   const screenHistoryRef = useRef<string[]>([]);
+  const testCompleted = useRef<boolean>(false);
   
   // Local state for renderer (not shared)
   const [, setCurrentRenderer] = useState<"screen" | "scene">("screen");
   
+  // ===== Запись экрана/камеры/голоса =====
+  // Объявляем recordingController здесь, до первого использования в useEffect
+  const [recordingController, setRecordingController] = useState<MediaRecordingController | null>(null);
+  
+  // Функция для загрузки записи в Supabase Storage
+  const uploadRecording = useCallback(async (blob: Blob | null) => {
+    const currentSessionId = actualSessionId || propSessionId;
+    if (!blob || !currentSessionId) return;
+    try {
+      // КРИТИЧНО: Проверяем существование bucket перед загрузкой
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+      if (listError) {
+        console.error("TestView: failed to list storage buckets", listError);
+        return;
+      }
+      
+      const recordingsBucketExists = buckets?.some(b => b.name === "recordings");
+      if (!recordingsBucketExists) {
+        console.error("TestView: Storage bucket 'recordings' not found. Please create it in Supabase Storage.", {
+          availableBuckets: buckets?.map(b => b.name) || [],
+          error: "Bucket 'recordings' does not exist"
+        });
+        // НЕ прерываем выполнение - просто логируем ошибку
+        return;
+      }
+      
+      const filePath = `session-recordings/${currentSessionId}-${Date.now()}.webm`;
+      const { data, error } = await supabase.storage
+        .from("recordings")
+        .upload(filePath, blob, { contentType: "video/webm" });
+      if (error) {
+        console.error("TestView: failed to upload recording", {
+          error,
+          errorMessage: error.message,
+          errorCode: error.statusCode,
+          bucket: "recordings",
+          filePath,
+          note: error.message?.includes("Bucket not found") 
+            ? "Bucket 'recordings' does not exist in Supabase Storage. Please create it in the Supabase dashboard."
+            : "Check Supabase Storage configuration and RLS policies."
+        });
+        return;
+      }
+      
+      if (!data) {
+        console.error("TestView: upload succeeded but no data returned", { filePath });
+        return;
+      }
+      
+      const { data: publicUrlData } = supabase.storage.from("recordings").getPublicUrl(data.path);
+      const recordingUrl = publicUrlData?.publicUrl;
+      if (recordingUrl) {
+        const { error: updateError } = await supabase.from("sessions").update({ recording_url: recordingUrl }).eq("id", currentSessionId);
+        if (updateError) {
+          console.error("TestView: failed to update session with recording_url", updateError);
+        } else {
+          console.log("TestView: Recording uploaded and session updated successfully", { recordingUrl, sessionId: currentSessionId });
+        }
+      } else {
+        console.error("TestView: failed to get public URL for recording", { path: data.path });
+      }
+    } catch (err) {
+      console.error("TestView: unexpected error while saving recording_url", {
+        error: err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        sessionId: currentSessionId
+      });
+    }
+  }, [actualSessionId, propSessionId]);
+
   // ДИАГНОСТИКА: Логируем изменения showSuccessPopup
   useEffect(() => {
     console.log("TestView: showSuccessPopup changed", { showSuccessPopup, currentScreen, protoEnd: proto?.end });
@@ -91,6 +193,16 @@ export default function TestView({
       return () => clearTimeout(timer);
     }
   }, [showSuccessPopup, onComplete]);
+
+  // Остановка записи и загрузка после завершения прототипа
+  useEffect(() => {
+    if (showSuccessPopup && testCompleted.current && recordingController) {
+      void (async () => {
+        const blob = await recordingController.stop();
+        await uploadRecording(blob);
+      })();
+    }
+  }, [showSuccessPopup, recordingController, uploadRecording]);
   
   // Helper функции для работы с v1/v2 прототипами
   const getScreenOrScene = (proto: Proto | null, id: string): Screen | Scene | null => {
@@ -140,8 +252,33 @@ export default function TestView({
   const isHoveringOverlayRef = useRef<boolean>(false);
   
   const hasRecordedClosed = useRef<boolean>(false);
-  const testCompleted = useRef<boolean>(false);
+  // Таймаут неактивности сессии: используется для авто‑закрытия \"зависших\" прототипов
+  const SESSION_INACTIVITY_TIMEOUT_MS = (Number(import.meta.env.VITE_SESSION_INACTIVITY_TIMEOUT_SECONDS || "300") || 300) * 1000;
+  const INACTIVITY_CHECK_INTERVAL_MS = 30000; // 30s между проверками
+  const lastActivityAtRef = useRef<number>(Date.now());
+  const inactivityIntervalRef = useRef<number | null>(null);
   const scrollTimeoutRef = useRef<number | null>(null);
+  const gazeBufferRef = useRef<GazeSample[]>([]);
+  const gazeFlushIntervalRef = useRef<number | null>(null);
+
+  // ===== Запись экрана/камеры/голоса =====
+  const [permissionStep, setPermissionStep] = useState<0 | 1 | 2 | 3>(0); // 0 - не требуется, 1/2 - шаги, 3 - финальный экран
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const [readyToStartTest, setReadyToStartTest] = useState<boolean>(false);
+
+  useEffect(() => {
+    console.log("TestView: useEffect - checking recording requirements", { recordScreen, recordCamera, recordAudio });
+    if (recordScreen || recordCamera || recordAudio) {
+      console.log("TestView: Recording required, setting permissionStep to 1");
+      setPermissionStep(1);
+      setReadyToStartTest(false); // Явно устанавливаем false при необходимости разрешений
+    } else {
+      console.log("TestView: No recording required, setting permissionStep to 0 and readyToStartTest to true");
+      setPermissionStep(0);
+      setReadyToStartTest(true);
+    }
+  }, [recordScreen, recordCamera, recordAudio]);
 
   // Определяем prototypeId из URL или override
   // ВАЖНО: prototypeIdOverride имеет приоритет над URL (для StudyView)
@@ -164,6 +301,136 @@ export default function TestView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlPrototypeId]);
+
+  // ======== EXPERIMENTAL: WebGazer eye-tracking integration ========
+
+  // Загружаем WebGazer.js динамически только при необходимости
+  async function loadWebgazerScript(): Promise<typeof window.webgazer | null> {
+    if (typeof window === "undefined") return null;
+    if (window.webgazer) return window.webgazer;
+
+    return new Promise((resolve) => {
+      const existing = document.querySelector<HTMLScriptElement>('script[data-webgazer="true"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(window.webgazer || null));
+        existing.addEventListener("error", () => resolve(null));
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://webgazer.cs.brown.edu/webgazer.js";
+      script.async = true;
+      script.defer = true;
+      script.dataset.webgazer = "true";
+      script.onload = () => resolve(window.webgazer || null);
+      script.onerror = () => resolve(null);
+      document.head.appendChild(script);
+    });
+  }
+
+  async function startEyeTracking() {
+    try {
+      const webgazer = await loadWebgazerScript();
+      if (!webgazer) {
+        console.warn("TestView: WebGazer.js failed to load, skipping eye-tracking");
+        return;
+      }
+
+      // Не показываем отладочное видео/точки пользователю
+      if (webgazer.showVideo) webgazer.showVideo(false);
+      if (webgazer.showPredictionPoints) webgazer.showPredictionPoints(false);
+
+      webgazer.setGazeListener((data, _elapsedTime) => {
+        if (!data) return;
+        const vw = window.innerWidth || 1;
+        const vh = window.innerHeight || 1;
+        const xNorm = Math.min(1, Math.max(0, data.x / vw));
+        const yNorm = Math.min(1, Math.max(0, data.y / vh));
+
+        gazeBufferRef.current.push({
+          ts: Date.now(),
+          xNorm,
+          yNorm,
+          screenId: currentScreenRef.current,
+        });
+      });
+
+      await webgazer.begin();
+
+      if (gazeFlushIntervalRef.current === null) {
+        gazeFlushIntervalRef.current = window.setInterval(() => {
+          flushGazeBuffer();
+        }, 750);
+      }
+    } catch (err) {
+      console.error("TestView: Error starting WebGazer eye-tracking", err);
+    }
+  }
+
+  async function flushGazeBuffer() {
+    if (!runIdOverride || !blockIdOverride || !studyIdOverride) return;
+    const currentSessionId = actualSessionId || propSessionId;
+    if (!currentSessionId) return;
+
+    const buffer = gazeBufferRef.current;
+    if (!buffer.length) return;
+    gazeBufferRef.current = [];
+
+    const payload = buffer.map((sample) => ({
+      session_id: currentSessionId,
+      run_id: runIdOverride,
+      block_id: blockIdOverride,
+      study_id: studyIdOverride,
+      screen_id: sample.screenId,
+      ts_ms: sample.ts,
+      x_norm: sample.xNorm,
+      y_norm: sample.yNorm,
+    }));
+
+    try {
+      const { error } = await supabase.from("gaze_points").insert(payload);
+      if (error) {
+        console.error("TestView: Error inserting gaze_points batch", error);
+      }
+    } catch (err) {
+      console.error("TestView: Unexpected error inserting gaze_points", err);
+    }
+  }
+
+  function stopEyeTracking() {
+    try {
+      if (typeof window !== "undefined" && window.webgazer) {
+        window.webgazer.pause?.();
+        window.webgazer.end?.();
+      }
+    } catch (err) {
+      console.error("TestView: Error stopping WebGazer", err);
+    }
+    if (gazeFlushIntervalRef.current !== null) {
+      clearInterval(gazeFlushIntervalRef.current);
+      gazeFlushIntervalRef.current = null;
+    }
+    // Последний flush буфера
+    void flushGazeBuffer();
+  }
+
+  // Управление жизненным циклом eye-tracking
+  useEffect(() => {
+    if (!enableEyeTracking) {
+      stopEyeTracking();
+      return;
+    }
+
+    // Включаем eye-tracking только если это часть StudyRun (есть run/block/study)
+    if (runIdOverride && blockIdOverride && studyIdOverride) {
+      void startEyeTracking();
+    }
+
+    return () => {
+      stopEyeTracking();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enableEyeTracking, runIdOverride, blockIdOverride, studyIdOverride]);
   
   // Обновляем actualSessionId когда propSessionId меняется (для аналитики)
   useEffect(() => {
@@ -362,6 +629,8 @@ export default function TestView({
     overlayData?: { overlayId?: string; position?: string; closeMethod?: string; oldOverlayId?: string; newOverlayId?: string },
     transitionData?: { transitionRequested?: string; transitionEffective?: string; transitionDuration?: number }
   ) {
+    // Любая запись события считается пользовательской активностью
+    lastActivityAtRef.current = Date.now();
     // Используем актуальный sessionId из state
     const currentSessionId = actualSessionId || propSessionId;
     if (!currentSessionId) {
@@ -459,28 +728,66 @@ export default function TestView({
     
     // Если useBeacon = true, используем sendBeacon для надежной отправки при закрытии страницы
     if (useBeacon && typeof navigator.sendBeacon === 'function') {
-      const url = `${SUPABASE_URL}/rest/v1/events`;
+      // Supabase поддерживает передачу API ключа через URL параметр apikey
+      // Это позволяет использовать navigator.sendBeacon, который более надежен при закрытии страницы
+      const url = `${SUPABASE_URL}/rest/v1/events?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}`;
       const payload = JSON.stringify(eventData);
+      const payloadSize = new Blob([payload]).size;
       
-      console.log("TestView: recordEvent - Using sendBeacon", { url, payload });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:681',message:'recordEvent useBeacon entry',data:{useBeacon,hasSendBeacon:typeof navigator.sendBeacon === 'function',url,payloadSize,payloadLength:payload.length,hasSupabaseUrl:!!SUPABASE_URL,hasSupabaseKey:!!SUPABASE_ANON_KEY},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       
-      // Используем fetch с keepalive для надежной отправки при закрытии
-      // sendBeacon не поддерживает кастомные заголовки, поэтому используем fetch
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Prefer': 'return=minimal'
-        },
-        body: payload,
-        keepalive: true // Критично для отправки при закрытии страницы
-      }).then(() => {
-        console.log("TestView: Event sent via keepalive fetch:", type);
-      }).catch(err => {
-        console.error("TestView: Error sending event with keepalive:", err);
-      });
+      console.log("TestView: recordEvent - Using sendBeacon", { url: url.replace(SUPABASE_ANON_KEY, '***'), payload });
+      
+      // Проверяем размер payload перед отправкой (sendBeacon имеет ограничение ~64KB)
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:690',message:'Payload size check before sendBeacon',data:{payloadSize,payloadSizeKB:(payloadSize/1024).toFixed(2),exceeds64KB:payloadSize > 64*1024,url},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
+      // Используем navigator.sendBeacon с Blob для отправки JSON данных
+      // sendBeacon более надежен при закрытии страницы, чем fetch с keepalive
+      const blob = new Blob([payload], { type: 'application/json' });
+      const sendBeaconStartTime = Date.now();
+      const beaconSent = navigator.sendBeacon(url, blob);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:697',message:'sendBeacon result',data:{type,beaconSent,elapsedMs:Date.now()-sendBeaconStartTime,url,payloadSize},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      
+      if (beaconSent) {
+        console.log("TestView: Event sent via sendBeacon:", type);
+      } else {
+        console.warn("TestView: sendBeacon returned false, event may not be sent:", type);
+        
+        // Fallback: пытаемся использовать fetch с keepalive, если sendBeacon не принял запрос
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:704',message:'sendBeacon failed, attempting fetch keepalive fallback',data:{type,url},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        
+        const fallbackUrl = `${SUPABASE_URL}/rest/v1/events`;
+        fetch(fallbackUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Prefer': 'return=minimal'
+          },
+          body: payload,
+          keepalive: true
+        }).then(() => {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:715',message:'Fallback fetch keepalive success',data:{type},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
+          console.log("TestView: Event sent via fallback fetch keepalive:", type);
+        }).catch(fallbackErr => {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:718',message:'Fallback fetch keepalive also failed',data:{type,errorName:fallbackErr.name,errorMessage:fallbackErr.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
+          console.error("TestView: Fallback fetch keepalive also failed:", fallbackErr);
+        });
+      }
       return;
     }
 
@@ -1881,7 +2188,7 @@ export default function TestView({
   }, [currentScreen, proto, actualSessionId, propSessionId]);
   
 
-  // Отслеживание закрытия вкладки/браузера
+  // Отслеживание закрытия вкладки/браузера и авто‑закрытие по неактивности
   useEffect(() => {
     // Используем актуальный sessionId из state
     const currentSessionId = actualSessionId || propSessionId;
@@ -1889,7 +2196,7 @@ export default function TestView({
       return;
     }
 
-    const handleBeforeUnload = () => {
+    const maybeSendClosed = () => {
       // Не записываем closed, если тест уже завершен (completed отправлен)
       // Проверяем, не на финальном экране ли мы (если да, то тест завершен или завершается)
       if (!hasRecordedClosed.current && currentScreen !== proto.end && !testCompleted.current) {
@@ -1898,12 +2205,57 @@ export default function TestView({
       }
     };
 
-    // Добавляем обработчик
+    const handleBeforeUnload = () => {
+      maybeSendClosed();
+    };
+
+    const handlePageHide = () => {
+      maybeSendClosed();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        maybeSendClosed();
+      }
+    };
+
+    // Периодически проверяем неактивность для авто‑закрытия
+    const startInactivityInterval = () => {
+      if (inactivityIntervalRef.current !== null) {
+        return;
+      }
+      inactivityIntervalRef.current = window.setInterval(() => {
+        // Если уже есть терминальное событие — ничего не делаем
+        if (testCompleted.current || hasRecordedClosed.current) {
+          return;
+        }
+        const now = Date.now();
+        const inactivityMs = now - lastActivityAtRef.current;
+        if (inactivityMs >= SESSION_INACTIVITY_TIMEOUT_MS) {
+          maybeSendClosed();
+        }
+      }, INACTIVITY_CHECK_INTERVAL_MS);
+    };
+
+    const stopInactivityInterval = () => {
+      if (inactivityIntervalRef.current !== null) {
+        clearInterval(inactivityIntervalRef.current);
+        inactivityIntervalRef.current = null;
+      }
+    };
+
+    // Стартуем отслеживание
+    startInactivityInterval();
     window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     // Очистка при размонтировании
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stopInactivityInterval();
     };
   }, [actualSessionId, propSessionId, proto, currentScreen]);
 
@@ -1928,6 +2280,460 @@ export default function TestView({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
+
+  // Мастер разрешений и запуск записи - показываем сайдбар и оверлей поверх прототипа
+  const showPermissionsUI = (recordScreen || recordCamera || recordAudio) && permissionStep > 0 && !readyToStartTest;
+  
+  console.log("TestView: Permissions UI state", {
+    recordScreen,
+    recordCamera,
+    recordAudio,
+    permissionStep,
+    readyToStartTest,
+    showPermissionsUI,
+    hasProto: !!proto
+  });
+  const micEnabled = !!cameraStream && (recordAudio || recordCamera);
+  const cameraEnabled = !!cameraStream && recordCamera;
+  const screenEnabled = !!screenStream && recordScreen;
+
+  const handleRequestCameraAndMic = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: recordAudio || recordCamera,
+        video: recordCamera,
+      });
+      setCameraStream(stream);
+    } catch (err) {
+      console.warn("TestView: getUserMedia failed", err);
+    } finally {
+      setPermissionStep(2);
+    }
+  };
+
+  const handleRequestScreen = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: recordScreen,
+        audio: false,
+      } as DisplayMediaStreamConstraints);
+      
+      // КРИТИЧНО: Добавляем обработчик события ended для треков экрана
+      // Когда пользователь останавливает запись экрана через браузер, трек завершается
+      stream.getVideoTracks().forEach((track) => {
+        track.onended = () => {
+          console.log("TestView: Screen recording track ended by user");
+          setScreenStream(null);
+          // Останавливаем запись, если она была запущена
+          if (recordingController) {
+            recordingController.stop();
+            setRecordingController(null);
+          }
+        };
+      });
+      
+      setScreenStream(stream);
+      console.log("TestView: Screen stream obtained", { 
+        hasVideoTracks: stream.getVideoTracks().length > 0,
+        trackLabel: stream.getVideoTracks()[0]?.label 
+      });
+    } catch (err) {
+      console.warn("TestView: getDisplayMedia failed", err);
+    } finally {
+      setPermissionStep(3);
+    }
+  };
+
+  const handleStart = () => {
+    console.log("TestView: handleStart called", { 
+      cameraStream: !!cameraStream, 
+      screenStream: !!screenStream,
+      hasProto: !!proto,
+      currentScreen,
+      showPermissionsUI
+    });
+    const streams: MediaStream[] = [];
+    if (cameraStream) streams.push(cameraStream);
+    if (screenStream) streams.push(screenStream);
+
+    if (streams.length > 0) {
+      const controller = createMediaRecordingController({ streams });
+      controller.start();
+      setRecordingController(controller);
+      console.log("TestView: Recording started", { streamsCount: streams.length });
+    }
+
+    console.log("TestView: Setting readyToStartTest to true - sidebar should hide now");
+    setReadyToStartTest(true);
+    
+    // КРИТИЧНО: Убеждаемся, что прототип виден после скрытия sidebar
+    setTimeout(() => {
+      console.log("TestView: After handleStart - checking visibility", {
+        readyToStartTest,
+        showPermissionsUI: (recordScreen || recordCamera || recordAudio) && permissionStep > 0 && !readyToStartTest,
+        hasProto: !!proto,
+        currentScreen
+      });
+    }, 100);
+  };
+
+  // Функция-обертка для рендеринга сайдбара и оверлея поверх прототипа
+  // КРИТИЧНО: Всегда возвращаем одинаковую структуру DOM для предотвращения пересоздания компонентов
+  // Скрываем sidebar и overlay через CSS (display: none), а не условным рендерингом
+  const renderWithPermissionsUI = (children: React.ReactNode) => {
+    console.log("TestView: renderWithPermissionsUI called", { 
+      showPermissionsUI, 
+      permissionStep, 
+      readyToStartTest,
+      recordScreen,
+      recordCamera,
+      recordAudio,
+      hasChildren: !!children
+    });
+
+    return (
+      <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden" }}>
+        {/* Основной контент прототипа (на всю ширину, по центру) */}
+        <div style={{ 
+          width: "100%",
+          height: "100%",
+          position: "relative",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          zIndex: 1 // КРИТИЧНО: Убеждаемся, что прототип виден поверх overlay
+        }}>
+          {children}
+        </div>
+
+        {/* Overlay с темным фоном БЕЗ blur, только на области контента (справа от sidebar) */}
+        {/* КРИТИЧНО: Скрываем через display: none вместо условного рендеринга для стабильности DOM */}
+        <div style={{
+          position: "absolute",
+          top: 0,
+          left: "400px", // Начинается справа от sidebar
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.5)",
+          zIndex: 999,
+          pointerEvents: "none",
+          display: showPermissionsUI ? "block" : "none"
+        }} />
+
+        {/* Сайдбар слева с разрешениями (overlay поверх всего, абсолютно позиционирован) */}
+        {/* КРИТИЧНО: Скрываем через display: none вместо условного рендеринга для стабильности DOM */}
+        {/* Это предотвращает пересоздание компонентов при изменении showPermissionsUI */}
+        <div style={{
+          position: "fixed",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: "400px",
+          background: "#ffffff",
+          zIndex: 1001,
+          boxShadow: "2px 0 8px rgba(0,0,0,0.1)",
+          overflowY: "auto",
+          padding: "24px",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          display: showPermissionsUI ? "block" : "none"
+        }}>
+          {permissionStep === 1 && (recordCamera || recordAudio) && (
+              <>
+                <h2 style={{ margin: "0 0 12px 0", fontSize: 22, fontWeight: 600 }}>Шаг 1</h2>
+                <p style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 500 }}>Настройка разрешений для задания</p>
+                <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#555" }}>
+                  Следующая задача потребует некоторых дополнительных разрешений.
+                </p>
+                <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 4 }}>Разрешить запись аудио и видео</div>
+                  <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                    Это поможет нам захватить ваши реальные реакции и мысли. Когда вас попросят, просто нажмите
+                    «Разрешить», чтобы предоставить разрешения.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    onClick={() => setPermissionStep(2)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #ddd",
+                      background: "#f5f5f5",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Пропустить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRequestCameraAndMic}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#007AFF",
+                      color: "#ffffff",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Продолжить
+                  </button>
+                </div>
+              </>
+            )}
+
+            {permissionStep === 2 && recordScreen && (
+              <>
+                <h2 style={{ margin: "0 0 12px 0", fontSize: 22, fontWeight: 600 }}>Шаг 2</h2>
+                <p style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 500 }}>Настройка разрешений для задания</p>
+                <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#555" }}>
+                  Следующая задача потребует некоторых дополнительных разрешений.
+                </p>
+                <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 4 }}>Разрешить запись экрана</div>
+                  <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                    Выберите экран, окно или вкладку, которыми вы хотите поделиться.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    onClick={() => setPermissionStep(3)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #ddd",
+                      background: "#f5f5f5",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Пропустить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRequestScreen}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#007AFF",
+                      color: "#ffffff",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Продолжить
+                  </button>
+                </div>
+              </>
+            )}
+
+            {permissionStep === 3 && (
+              <>
+                <h2 style={{ margin: "0 0 12px 0", fontSize: 22, fontWeight: 600 }}>Вы все настроили</h2>
+                <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#555" }}>
+                  Перед началом задания проверьте, какие разрешения активны.
+                </p>
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                    <span
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        marginRight: 8,
+                        background: micEnabled ? "#0f9d58" : "#ccc",
+                      }}
+                    />
+                    <span style={{ fontSize: 14 }}>Микрофон</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                    <span
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        marginRight: 8,
+                        background: cameraEnabled ? "#0f9d58" : "#ccc",
+                      }}
+                    />
+                    <span style={{ fontSize: 14 }}>Камера</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <span
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        marginRight: 8,
+                        background: screenEnabled ? "#0f9d58" : "#ccc",
+                      }}
+                    />
+                    <span style={{ fontSize: 14 }}>Экран</span>
+                  </div>
+                </div>
+
+                {!micEnabled && !cameraEnabled && !screenEnabled && (
+                  <p style={{ margin: "0 0 16px 0", fontSize: 13, color: "#777" }}>
+                    Некоторые разрешения заблокированы. Если вы хотите включить эти разрешения, вы можете сделать это в
+                    настройках вашего браузера.
+                  </p>
+                )}
+
+                {/* Показываем задание, если есть */}
+                {instructionsOverride && (
+                  <div style={{ 
+                    marginBottom: 16, 
+                    padding: 16, 
+                    background: "#f5f5f7", 
+                    borderRadius: 8 
+                  }}>
+                    <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 600 }}>Задание</h3>
+                    <p style={{ margin: 0, fontSize: 14, color: "#333", whiteSpace: "pre-wrap" }}>
+                      {instructionsOverride}
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  style={{
+                    width: "100%",
+                    marginTop: 8,
+                    padding: "12px 16px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#007AFF",
+                    color: "#ffffff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Начать
+                </button>
+              </>
+            )}
+        </div>
+      </div>
+    );
+  };
+
+  // Функция-обертка для рендеринга сайдбара успешного завершения поверх прототипа
+  const renderWithSuccessSidebar = (children: React.ReactNode) => {
+    if (!showSuccessPopup) {
+      return children;
+    }
+
+    return (
+      <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden" }}>
+        {/* Основной контент прототипа (на всю ширину, по центру) */}
+        <div style={{ 
+          width: "100%",
+          height: "100%",
+          position: "relative",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          zIndex: 1 // КРИТИЧНО: Убеждаемся, что прототип виден поверх overlay
+        }}>
+          {children}
+        </div>
+
+        {/* Overlay с темным фоном БЕЗ blur, только на области контента (справа от sidebar) */}
+        {showSuccessPopup && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: "400px", // Начинается справа от sidebar
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            zIndex: 999,
+            pointerEvents: "none"
+          }} />
+        )}
+
+        {/* Сайдбар слева с сообщением об успехе (overlay поверх всего, абсолютно позиционирован) */}
+        {showSuccessPopup && (
+          <div style={{
+            position: "fixed",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: "400px",
+            background: "#ffffff",
+            zIndex: 1001,
+            boxShadow: "2px 0 8px rgba(0,0,0,0.1)",
+            overflowY: "auto",
+            padding: "24px",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center"
+          }}>
+            <CircleCheck 
+              size={64} 
+              color="#0f9d58" 
+              style={{ marginBottom: 24 }}
+            />
+            <h2 style={{ 
+              margin: "0 0 16px 0", 
+              fontSize: 24, 
+              fontWeight: 600,
+              color: "#333",
+              textAlign: "center"
+            }}>
+              Поздравляем, вы справились с заданием
+            </h2>
+            <button
+              type="button"
+              onClick={() => {
+                setShowSuccessPopup(false);
+                // НОВОЕ: Если есть onComplete callback (для StudyView), вызываем его вместо навигации
+                if (onComplete) {
+                  console.log("TestView: Calling onComplete callback (from success sidebar button)");
+                  onComplete();
+                  return;
+                }
+                // Иначе переходим на опрос (legacy режим)
+                const currentSessionId = actualSessionId || propSessionId;
+                if (currentSessionId) {
+                  navigate(`/finished/${currentSessionId}`, { state: { aborted: false, sessionId: currentSessionId } });
+                }
+              }}
+              style={{
+                width: "100%",
+                marginTop: 24,
+                padding: "12px 16px",
+                borderRadius: 8,
+                border: "none",
+                background: "#007AFF",
+                color: "#ffffff",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                fontSize: 16
+              }}
+            >
+              Далее
+              <MoveRight size={20} />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (!proto) {
     // Empty state - когда нет prototypeId в URL
@@ -2154,7 +2960,7 @@ export default function TestView({
       hotspotsForCurrentScreen: proto.hotspots.filter((h: Hotspot) => h.frame === currentScreen).length
     });
     
-    return (
+    const content = (
       <div style={{ 
         display: "flex", 
         flexDirection: "column",
@@ -2165,10 +2971,24 @@ export default function TestView({
         padding: "20px"
       }}>
         {/* Отображение задания над прототипом */}
-        {taskDescription && (
+        {taskDescription && (() => {
+          // КРИТИЧНО: Поддержка v1 (Screen) и v2 (Scene) прототипов для taskDescription
+          // ВАЖНО: Используем startScreenOrScene для стабильных размеров, не зависящих от currentScreen
+          let maxTaskWidth: number;
+          if (isProtoV2(proto) && startScreenOrScene && "size" in startScreenOrScene) {
+            const scene = startScreenOrScene as Scene;
+            maxTaskWidth = scene.size?.width || 375;
+          } else if (startScreenOrScene) {
+            const screen = startScreenOrScene as Screen;
+            maxTaskWidth = screen.viewportWidth || screen.width || 375;
+          } else {
+            maxTaskWidth = 375; // Fallback если startScreenOrScene не найден
+          }
+          
+          return (
           <div style={{
             width: "100%",
-            maxWidth: "100%",
+            maxWidth: maxTaskWidth,
             marginBottom: 20,
             padding: 16,
             background: "#ffffff",
@@ -2192,18 +3012,124 @@ export default function TestView({
               {taskDescription}
             </p>
           </div>
-        )}
+          );
+        })()}
         
         {/* НОВОЕ: FigmaEmbedViewer для canvas-based рендеринга */}
         {/* ВАЖНО: Используем Figma embed для точного рендеринга прототипа */}
         {/* КРИТИЧНО: Загружаем iframe ОДИН РАЗ с figmaStartNodeId, позволяем Figma обрабатывать все переходы */}
         {/* ВАЖНО: key стабильный, чтобы React НЕ пересоздавал компонент при переходах */}
-        <FigmaEmbedViewer
-          key={`figma-embed-${proto.figmaFileId}`} // КРИТИЧНО: Стабильный key - iframe загружается один раз
-          fileId={proto.figmaFileId!}
-          nodeId={proto.figmaStartNodeId!} // КРИТИЧНО: Всегда используем figmaStartNodeId - iframe загружается один раз
-          fileName={proto.figmaFileName || "fileName"} // Fallback на "fileName" если не указано
-          hotspots={proto.hotspots} // Передаем ВСЕ хотспоты, фильтруем по currentScreen внутри компонента
+        {(() => {
+          // КРИТИЧНО: Поддержка v1 (Screen) и v2 (Scene) прототипов
+          // ВАЖНО: Используем startScreenOrScene для стабильных размеров iframe, не зависящих от currentScreen
+          // Размеры должны оставаться постоянными на протяжении всего взаимодействия с прототипом
+          let screenWidth: number;
+          let screenHeight: number;
+          
+          if (isProtoV2(proto) && startScreenOrScene && "size" in startScreenOrScene) {
+            // Для v2 прототипов используем size из начальной Scene
+            const scene = startScreenOrScene as Scene;
+            screenWidth = scene.size?.width || 375; // Fallback на стандартную ширину мобильного экрана
+            screenHeight = scene.size?.height || 812; // Fallback на стандартную высоту мобильного экрана
+          } else if (startScreenOrScene) {
+            // Для v1 прототипов используем Screen свойства начального экрана
+            const screen = startScreenOrScene as Screen;
+            screenWidth = screen.viewportWidth || screen.width || 375;
+            screenHeight = screen.viewportHeight || screen.height || 812;
+          } else {
+            // Fallback если startScreenOrScene не найден
+            screenWidth = 375;
+            screenHeight = 812;
+          }
+          
+          // КРИТИЧНО: Проверяем, что размеры валидны (не NaN, не 0, не отрицательные)
+          if (!screenWidth || !screenHeight || isNaN(screenWidth) || isNaN(screenHeight) || screenWidth <= 0 || screenHeight <= 0) {
+            console.warn("TestView: Invalid screen dimensions, using fallback", {
+              screenWidth,
+              screenHeight,
+              startScreenOrScene,
+              currentScreen,
+              isProtoV2: isProtoV2(proto),
+              note: "Using startScreenOrScene for stable dimensions"
+            });
+            screenWidth = 375;
+            screenHeight = 812;
+          }
+          
+          // Вычисляем максимальные размеры с учетом viewport и padding
+          const availableWidth = window.innerWidth - 40; // 40px для padding
+          const availableHeight = window.innerHeight - 200; // 200px для taskDescription и padding
+          
+          const maxWidth = Math.min(screenWidth, availableWidth);
+          const maxHeight = Math.min(screenHeight, availableHeight);
+          
+          // Вычисляем масштаб с сохранением соотношения сторон
+          const scaleByWidth = maxWidth / screenWidth;
+          const scaleByHeight = maxHeight / screenHeight;
+          const scale = Math.min(scaleByWidth, scaleByHeight, 1); // Не увеличиваем больше оригинала
+          
+          const scaledWidth = screenWidth * scale;
+          const scaledHeight = screenHeight * scale;
+          
+          // Логируем вычисленные размеры для отладки
+          console.log("TestView: Calculated prototype dimensions", {
+            originalWidth: screenWidth,
+            originalHeight: screenHeight,
+            scaledWidth,
+            scaledHeight,
+            scale,
+            availableWidth: window.innerWidth - 40,
+            availableHeight: window.innerHeight - 200,
+            isProtoV2: isProtoV2(proto),
+            startScreenOrSceneType: startScreenOrScene ? ("size" in startScreenOrScene ? "Scene" : "Screen") : "null",
+            startScreenId: proto.start,
+            currentScreenId: currentScreen,
+            note: "Dimensions based on startScreenOrScene for stable iframe size"
+          });
+          
+          // КРИТИЧНО: Финальная проверка на валидность вычисленных размеров
+          if (isNaN(scaledWidth) || isNaN(scaledHeight) || scaledWidth <= 0 || scaledHeight <= 0) {
+            console.error("TestView: Calculated dimensions are invalid", {
+              scaledWidth,
+              scaledHeight,
+              screenWidth,
+              screenHeight,
+              scale,
+              scaleByWidth,
+              scaleByHeight,
+              maxWidth,
+              maxHeight
+            });
+            // Fallback на исходные размеры экрана
+            return (
+              <div style={{
+                width: screenWidth,
+                height: screenHeight,
+                margin: "0 auto",
+                position: "relative"
+              }}>
+                <div style={{ padding: "20px", color: "#d32f2f" }}>
+                  Ошибка: не удалось вычислить размеры прототипа
+                </div>
+              </div>
+            );
+          }
+          
+          return (
+            <div style={{
+              width: scaledWidth,
+              height: scaledHeight,
+              margin: "0 auto",
+              position: "relative"
+            }}>
+              <FigmaEmbedViewer
+                key={`figma-embed-${proto.figmaFileId}`} // КРИТИЧНО: Стабильный key - iframe загружается один раз
+                fileId={proto.figmaFileId!}
+                nodeId={proto.figmaStartNodeId!} // КРИТИЧНО: Всегда используем figmaStartNodeId - iframe загружается один раз
+                fileName={proto.figmaFileName || "fileName"} // Fallback на "fileName" если не указано
+                hotspots={proto.hotspots} // Передаем ВСЕ хотспоты, фильтруем по currentScreen внутри компонента
+                width={scaledWidth}
+                height={scaledHeight}
           onHotspotClick={(hotspot, clickX, clickY, currentScreenIdFromProxy) => {
             // КРИТИЧНО: Вызываем основную функцию onHotspotClick для обработки всех событий
             // onHotspotClick уже записывает hotspot_click, overlay_open/close/swap и обрабатывает BACK action
@@ -2217,13 +3143,44 @@ export default function TestView({
               overlayActionType: hotspot.overlayAction?.type
             });
             
+            // КРИТИЧНО: Проверяем, имеет ли hotspot overlayAction перед вызовом onHotspotClick
+            // Если hotspot открывает overlay, мы не должны обновлять currentScreen для hotspot.target
+            const hasOverlayAction = hotspot.overlayAction?.type === "OPEN_OVERLAY";
+            
             onHotspotClick(hotspot, clickX, clickY);
             
             // КРИТИЧНО: Если hotspot.target указывает на другой экран, обновляем currentScreen
             // Это альтернативный способ отслеживания изменений экрана, если PRESENTED_NODE_CHANGED не приходит
-            if (hotspot.target && hotspot.target !== currentScreen) {
+            // ВАЖНО: НЕ обновляем currentScreen если hotspot открывает overlay (даже если overlayAction обработан в onHotspotClick)
+            if (hotspot.target && hotspot.target !== currentScreen && !hasOverlayAction) {
               const targetScreenOrScene = getScreenOrScene(proto, hotspot.target);
               if (targetScreenOrScene) {
+                // КРИТИЧНО: Проверяем, является ли это overlay-экраном
+                // Если это overlay, НЕ обновляем currentScreen - overlay не должен менять размеры основного iframe
+                // Проверяем двумя способами:
+                // 1. Если overlay уже открыт (в overlayStack)
+                // 2. Если какой-либо hotspot имеет overlayAction, который ссылается на этот экран
+                const isOverlayInStack = overlayStack.some(o => o.screenId === targetScreenOrScene.id);
+                const isOverlayReferenced = proto && proto.hotspots?.some(h => 
+                  h.overlayAction?.type === "OPEN_OVERLAY" && h.overlayAction.overlayId === targetScreenOrScene.id
+                );
+                const isOverlayScreen = isOverlayInStack || isOverlayReferenced;
+                
+                if (isOverlayScreen) {
+                  console.log("TestView: hotspot.target points to overlay screen - skipping currentScreen update", {
+                    target: hotspot.target,
+                    overlayScreenId: targetScreenOrScene.id,
+                    overlayScreenName: "name" in targetScreenOrScene ? targetScreenOrScene.name : null,
+                    currentScreen,
+                    isOverlayInStack,
+                    isOverlayReferenced,
+                    hotspotId: hotspot.id,
+                    hotspotName: hotspot.name,
+                    note: "Overlay screens should not change main iframe dimensions"
+                  });
+                  return; // НЕ обновляем currentScreen для overlay - это предотвращает изменение размеров iframe
+                }
+                
                 const targetScreenName = "name" in targetScreenOrScene ? targetScreenOrScene.name : null;
                 const isTargetFinalScreen = hotspot.target === proto.end || 
                   (targetScreenName && /\[final\]/i.test(targetScreenName));
@@ -2434,6 +3391,30 @@ export default function TestView({
               return false;
             });
             
+            // КРИТИЧНО: Проверяем, является ли это overlay-экраном
+            // Если это overlay, НЕ обновляем currentScreen - overlay не должен менять размеры основного iframe
+            // Проверяем двумя способами:
+            // 1. Если overlay уже открыт (в overlayStack)
+            // 2. Если какой-либо hotspot имеет overlayAction, который ссылается на этот экран
+            const isOverlayInStack = screenOrScene && overlayStack.some(o => o.screenId === screenOrScene.id);
+            const isOverlayReferenced = screenOrScene && proto && proto.hotspots?.some(h => 
+              h.overlayAction?.type === "OPEN_OVERLAY" && h.overlayAction.overlayId === screenOrScene.id
+            );
+            const isOverlayScreen = isOverlayInStack || isOverlayReferenced;
+            
+            if (isOverlayScreen) {
+              console.log("TestView: PRESENTED_NODE_CHANGED for overlay screen - ignoring to prevent dimension change", {
+                figmaNodeId,
+                overlayScreenId: screenOrScene.id,
+                overlayScreenName: "name" in screenOrScene ? screenOrScene.name : null,
+                currentScreen,
+                isOverlayInStack,
+                isOverlayReferenced,
+                note: "Overlay screens should not change main iframe dimensions"
+              });
+              return; // НЕ обновляем currentScreen для overlay - это предотвращает изменение размеров iframe
+            }
+            
             if (screenOrScene) {
               const screenName = "name" in screenOrScene ? screenOrScene.name : null;
               // КРИТИЧНО: Улучшаем проверку финального экрана - ищем [final], [end], или "final" в конце имени
@@ -2595,17 +3576,6 @@ export default function TestView({
           // EMBED KIT 2.0: OAuth client-id для получения postMessage событий
           figmaClientId={FIGMA_CLIENT_ID}
           embedHost={FIGMA_EMBED_HOST}
-          // НОВОЕ: Передаем реальные размеры начального экрана
-          width={isProtoV1(proto) && startScreenOrScene 
-            ? (startScreenOrScene as Screen).width 
-            : startScreenOrScene && "size" in startScreenOrScene
-            ? startScreenOrScene.size.width
-            : 375}
-          height={isProtoV1(proto) && startScreenOrScene 
-            ? (startScreenOrScene as Screen).height 
-            : startScreenOrScene && "size" in startScreenOrScene
-            ? startScreenOrScene.size.height
-            : 812}
         />
         
         {/* КРИТИЧНО: Рендерим overlay поверх FigmaEmbedViewer */}
@@ -3001,6 +3971,17 @@ export default function TestView({
               if (currentSessionId) {
                 recordEvent("aborted", currentScreen);
                 
+                // Сохраняем запись при прерывании теста, если она была запущена
+                if (recordingController) {
+                  try {
+                    const blob = await recordingController.stop();
+                    await uploadRecording(blob);
+                    setRecordingController(null);
+                  } catch (err) {
+                    console.error("TestView: Error saving recording on abort", err);
+                  }
+                }
+                
                 // Если есть runIdOverride (используется в StudyRunView), обновляем статус сессии
                 if (runIdOverride && blockIdOverride) {
                   try {
@@ -3033,99 +4014,13 @@ export default function TestView({
           </button>
         )}
         
-        {/* НОВОЕ: Попап "Вы успешно прошли задачу" */}
-        {showSuccessPopup && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 10000,
-              backgroundColor: "rgba(0, 0, 0, 0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 20
-            }}
-            onClick={() => {
-              // При клике на overlay закрываем попап
-              setShowSuccessPopup(false);
-              // НОВОЕ: Если есть onComplete callback (для StudyView), вызываем его вместо навигации
-              if (onComplete) {
-                console.log("TestView: Calling onComplete callback (from success popup click)");
-                onComplete();
-                return;
-              }
-              // Иначе переходим на опрос (legacy режим)
-              const currentSessionId = actualSessionId || propSessionId;
-              if (currentSessionId) {
-                navigate(`/finished/${currentSessionId}`, { state: { aborted: false, sessionId: currentSessionId } });
-              }
-            }}
-          >
-            <div
-              style={{
-                background: "#4caf50", // Зеленый цвет
-                borderRadius: 12,
-                padding: "32px 40px",
-                maxWidth: 400,
-                width: "100%",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-                textAlign: "center",
-                color: "#ffffff"
-              }}
-              onClick={(e) => e.stopPropagation()} // Предотвращаем закрытие при клике на сам попап
-            >
-              <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-              <h2 style={{ margin: 0, marginBottom: 12, fontSize: 24, fontWeight: "bold", color: "#ffffff" }}>
-                Вы успешно прошли задачу!
-              </h2>
-              <p style={{ margin: 0, marginBottom: 24, fontSize: 16, color: "#ffffff", opacity: 0.9 }}>
-                Пожалуйста, ответьте на несколько вопросов о вашем опыте
-              </p>
-              <button
-                onClick={() => {
-                  setShowSuccessPopup(false);
-                  // НОВОЕ: Если есть onComplete callback (для StudyView), вызываем его вместо навигации
-                  if (onComplete) {
-                    console.log("TestView: Calling onComplete callback (from success popup button)");
-                    onComplete();
-                    return;
-                  }
-                  // Иначе переходим на опрос (legacy режим)
-                  const currentSessionId = actualSessionId || propSessionId;
-                  if (currentSessionId) {
-                    navigate(`/finished/${currentSessionId}`, { state: { aborted: false, sessionId: currentSessionId } });
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  padding: "12px 24px",
-                  background: "#ffffff",
-                  color: "#4caf50",
-                  border: "none",
-                  borderRadius: 8,
-                  fontSize: 16,
-                  fontWeight: "bold",
-                  cursor: "pointer",
-                  transition: "background 0.2s"
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#f5f5f5";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "#ffffff";
-                }}
-              >
-                Продолжить
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
+        })()}
+      </div>
+    );
+    
+    return renderWithSuccessSidebar(renderWithPermissionsUI(content));
   }
   
   // НОВОЕ: Phase 0 - поддержка v2 proto с Scene Graph
@@ -3133,7 +4028,7 @@ export default function TestView({
     const scene = screenOrScene as Scene;
     if (!scene) {
       console.error("TestView: Scene not found for v2 proto", currentScreen);
-      return (
+      const errorContent = (
         <div style={{ 
           display: "flex", 
           flexDirection: "column",
@@ -3154,6 +4049,7 @@ export default function TestView({
           </div>
         </div>
       );
+      return renderWithSuccessSidebar(renderWithPermissionsUI(errorContent));
     }
     
     // НОВОЕ: Phase 1 - используем AnimatedScene для SMART_ANIMATE transitions
@@ -3178,7 +4074,7 @@ export default function TestView({
       }
     }
     
-    return (
+    const v2Content = (
       <div style={{ 
         display: "flex", 
         flexDirection: "column",
@@ -3186,7 +4082,9 @@ export default function TestView({
         alignItems: "center", 
         background: "#f5f5f7",
         width: "100%",
-        padding: "20px"
+        minHeight: "100vh",
+        padding: 0,
+        margin: 0
       }}>
         {taskDescription && (
           <div style={{
@@ -3298,6 +4196,8 @@ export default function TestView({
         </div>
       </div>
     );
+    
+    return renderWithSuccessSidebar(renderWithPermissionsUI(v2Content));
   }
   
   // Для v1 используем существующую логику
@@ -3370,7 +4270,7 @@ export default function TestView({
     );
   }
 
-  return (
+  const mainContent = (
     <div style={{ 
       display: "flex", 
       flexDirection: "column",
@@ -3415,19 +4315,38 @@ export default function TestView({
       {/* ВАЖНО: Проверяем и canScroll, и overflowDirection напрямую для обратной совместимости */}
       {/* ВАЖНО: Обертываем экран в контейнер с position: relative для правильного позиционирования overlay */}
       {/* ВАЖНО: overflow: visible позволяет overlay выходить за границы контейнера, если нужно (для MANUAL позиции) */}
-      <div style={{ 
-        position: "relative", 
-        width: screen.viewportWidth || screen.width, 
-        height: screen.viewportHeight || screen.height,
-        overflow: "visible" // Позволяем overlay выходить за границы, если нужно (для MANUAL позиции)
-      }}>
+      {/* НОВОЕ: Масштабируем контейнер с сохранением соотношения сторон, чтобы прототип помещался в viewport */}
+      {(() => {
+        const screenWidth = screen.viewportWidth || screen.width;
+        const screenHeight = screen.viewportHeight || screen.height;
+        
+        // Вычисляем максимальные размеры с учетом viewport и padding
+        const maxWidth = Math.min(screenWidth, window.innerWidth - 40); // 40px для padding
+        const maxHeight = Math.min(screenHeight, window.innerHeight - 200); // 200px для taskDescription и padding
+        
+        // Вычисляем масштаб с сохранением соотношения сторон
+        const scaleByWidth = maxWidth / screenWidth;
+        const scaleByHeight = maxHeight / screenHeight;
+        const scale = Math.min(scaleByWidth, scaleByHeight, 1); // Не увеличиваем больше оригинала
+        
+        const scaledWidth = screenWidth * scale;
+        const scaledHeight = screenHeight * scale;
+        
+        return (
+          <div style={{ 
+            position: "relative", 
+            width: scaledWidth,
+            height: scaledHeight,
+            overflow: "visible", // Позволяем overlay выходить за границы, если нужно (для MANUAL позиции)
+            margin: "0 auto" // Центрируем прототип
+          }}>
       {(screen.canScroll || (screen.overflowDirection && screen.overflowDirection !== "NONE")) ? (
         // Скроллируемый экран - используем только CSS overflow, без дополнительных элементов
         <div 
           style={{ 
             position: "relative", 
-            width: screen.viewportWidth || screen.width,
-            height: screen.viewportHeight || screen.height,
+            width: scaledWidth,
+            height: scaledHeight,
             // ВАЖНО: clipsContent: false означает, что контент не обрезается, но скролл все равно должен работать
             // Используем только overflow для скролла, без дополнительных элементов
             overflowX: (screen.overflowDirection === "HORIZONTAL" || screen.overflowDirection === "BOTH") && (screen.contentWidth || screen.width) > (screen.viewportWidth || screen.width)
@@ -3495,8 +4414,8 @@ export default function TestView({
           <img 
             src={screen.image} 
             style={{ 
-              width: screen.contentWidth || screen.width,
-              height: screen.contentHeight || screen.height,
+              width: (screen.contentWidth || screen.width) * scale,
+              height: (screen.contentHeight || screen.height) * scale,
               display: "block",
               // Применяем отступы только если они положительные (контент начинается внутри viewport)
               // Если offset отрицательный, контент начинается выше/левее viewport, но мы не применяем отрицательный margin
@@ -3804,7 +4723,7 @@ export default function TestView({
         <div 
           style={{ 
             position: "relative", 
-            width: screen.width,
+            width: scaledWidth,
             // Блокируем взаимодействие с основным экраном, если открыт overlay
             pointerEvents: overlayStack.length > 0 ? "none" : "auto",
             opacity: overlayStack.length > 0 ? 1 : 1 // Основной экран остается видимым
@@ -3851,7 +4770,7 @@ export default function TestView({
             }
           }}
         >
-          <img src={screen.image} width={screen.width} />
+          <img src={screen.image} width={scaledWidth} style={{ height: "auto" }} />
           
           {isFinalScreen && (
             <div style={{
@@ -3930,6 +4849,9 @@ export default function TestView({
           )}
         </div>
       )}
+          </div>
+        );
+      })()}
       
       {/* НОВОЕ: Рендеринг overlay поверх экрана (внутри контейнера экрана) */}
       {/* ВАЖНО: Overlay рендерится как абсолютно позиционированный элемент поверх основного экрана,
@@ -4292,13 +5214,11 @@ export default function TestView({
           </div>
         );
       })}
-      </div>
       
       {/* Кнопка "Сдаться" под прототипом */}
       {!testCompleted.current && (
         <button
           style={{
-            width: screen.width,
             marginTop: 20,
             padding: "12px 24px",
             background: "#e0e0e0",
@@ -4311,37 +5231,24 @@ export default function TestView({
             textAlign: "center"
           }}
           onClick={async () => {
-            // Используем актуальный sessionId из state
             const currentSessionId = actualSessionId || propSessionId;
-            // Записываем событие о прерывании теста
             if (currentSessionId) {
               recordEvent("aborted", currentScreen);
-              
-              // Если есть runIdOverride (используется в StudyRunView), обновляем статус сессии
               if (runIdOverride && blockIdOverride) {
                 try {
-                  const { error: updateError } = await supabase
+                  await supabase
                     .from("sessions")
                     .update({ completed: false, aborted: true })
                     .eq("id", currentSessionId);
-                  if (updateError) {
-                    console.error("Error updating session status:", updateError);
-                  }
                 } catch (err) {
                   console.error("Error updating session:", err);
                 }
               }
-              
-              // Если есть onComplete callback (используется в StudyRunView), вызываем его вместо навигации
               if (onComplete) {
-                console.log("TestView: User gave up, calling onComplete callback to continue test");
                 onComplete();
               } else {
-                // Если нет onComplete, переходим на страницу завершения (старое поведение)
                 navigate(`/finished/${currentSessionId}`, { state: { aborted: true, sessionId: currentSessionId } });
               }
-            } else {
-              console.error("TestView: Cannot handle give up - sessionId is null");
             }
           }}
         >
@@ -4349,5 +5256,7 @@ export default function TestView({
         </button>
       )}
     </div>
-  );
+    );
+  
+  return renderWithSuccessSidebar(renderWithPermissionsUI(mainContent));
 }

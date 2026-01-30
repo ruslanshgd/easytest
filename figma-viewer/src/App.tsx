@@ -357,8 +357,8 @@ function App() {
       <Routes>
         <Route path="/" element={<TestView sessionId={sessionId} />} />
         <Route path="/prototype/:prototypeId" element={<TestView sessionId={sessionId} />} />
-        <Route path="/run/:token" element={<StudyRunView />} />
-        <Route path="/share/:token" element={<StudyRunView />} />
+        <Route path="/run/*" element={<StudyRunView />} />
+        <Route path="/share/*" element={<StudyRunView />} />
         <Route path="/:sessionId" element={<TestView sessionId={sessionId} />} />
         <Route path="/finished/:sessionId?" element={<Finished />} />
       </Routes>

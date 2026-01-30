@@ -35,6 +35,7 @@
   /* Muted */
   --color-muted: #f7f7f5;
   --color-muted-foreground: rgba(27, 31, 59, 0.65); /* Вторичные подписи, лейблы, плейсхолдеры: #1B1F3B 65% */
+  --color-progress-bg: #e5e5e3; /* Фон для прогресс баров в светлой теме */
   
   /* Accent (same as primary for consistency) */
   --color-accent: #f7f7f5;
@@ -72,6 +73,139 @@
   --color-success-foreground: #ffffff;
   --color-warning: #c77c1e;
   --color-warning-foreground: #ffffff;
+  
+  /* Additional colors for forms and alerts */
+  --color-info: #526ED3; /* для информационных блоков */
+  --color-info-bg: rgba(82, 110, 211, 0.1);
+  --color-warning-bg: rgba(199, 124, 30, 0.1);
+  --color-destructive-bg: rgba(224, 62, 62, 0.1);
+  --color-success-bg: rgba(15, 123, 108, 0.1);
+  --color-success-subtle: rgba(15, 123, 108, 0.05);
+  
+  /* Chart colors */
+  --color-chart-primary: var(--color-primary);
+  --color-chart-secondary: var(--color-muted-foreground);
+  --color-chart-accent: #9333ea; /* фиолетовый для графиков */
+}
+
+/* Dark theme */
+[data-theme="dark"] {
+  --color-background: #1a1a1a;
+  --color-foreground: #ffffff;
+  
+  --color-card: #2a2a2a;
+  --color-card-foreground: #ffffff;
+  
+  --color-popover: #2a2a2a;
+  --color-popover-foreground: #ffffff;
+  
+  --color-primary: #6C86E2; /* немного светлее для темной темы */
+  --color-primary-foreground: #ffffff;
+  --color-primary-hover: #8BA3F0;
+  --color-primary-active: #526ED3;
+  --color-primary-disabled: rgba(108, 134, 226, 0.56);
+  
+  --color-secondary: #2a2a2a;
+  --color-secondary-foreground: #ffffff;
+  
+  --color-muted: #2a2a2a;
+  --color-muted-foreground: rgba(255, 255, 255, 0.65);
+  --color-progress-bg: #404040; /* Более контрастный фон для прогресс баров */
+  
+  --color-accent: #2a2a2a;
+  --color-accent-foreground: #ffffff;
+  
+  --color-destructive: #ff5252;
+  --color-destructive-foreground: #ffffff;
+  
+  --color-border: #404040;
+  --color-input: #404040;
+  --color-ring: #6C86E2;
+  
+  /* Input colors for dark theme - более контрастные для видимости на темном фоне */
+  --input-label-color: rgba(255, 255, 255, 0.7); /* Светлый label/placeholder */
+  --input-value-color: #ffffff; /* Белый текст для значения */
+  
+  --color-success: #4caf50;
+  --color-success-foreground: #ffffff;
+  --color-success-on-bg: #ffffff; /* Белый текст для темной темы на success-bg фоне */
+  --color-warning: #ff9800;
+  --color-warning-foreground: #ffffff;
+  --color-warning-on-bg: #c77c1e; /* Темный оранжевый для текста на светлом warning-bg фоне */
+  
+  --color-info: #6C86E2;
+  --color-info-bg: rgba(108, 134, 226, 0.2);
+  --color-info-on-bg: #526ED3; /* Темный синий для текста на светлом info-bg фоне */
+  --color-warning-bg: rgba(255, 152, 0, 0.2);
+  --color-destructive-bg: rgba(255, 82, 82, 0.2);
+  --color-destructive-on-bg: #e03e3e; /* Темный красный для текста на светлом destructive-bg фоне */
+  --color-success-bg: rgba(76, 175, 80, 0.2);
+  --color-success-subtle: rgba(76, 175, 80, 0.1);
+  
+  --color-chart-primary: var(--color-primary);
+  --color-chart-secondary: var(--color-muted-foreground);
+  --color-chart-accent: #b794f6; /* светлее для темной темы */
+}
+
+/* System theme (автоматический режим) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --color-background: #1a1a1a;
+    --color-foreground: #ffffff;
+    
+    --color-card: #2a2a2a;
+    --color-card-foreground: #ffffff;
+    
+    --color-popover: #2a2a2a;
+    --color-popover-foreground: #ffffff;
+    
+    --color-primary: #6C86E2;
+    --color-primary-foreground: #ffffff;
+    --color-primary-hover: #8BA3F0;
+    --color-primary-active: #526ED3;
+    --color-primary-disabled: rgba(108, 134, 226, 0.56);
+    
+    --color-secondary: #2a2a2a;
+    --color-secondary-foreground: #ffffff;
+    
+    --color-muted: #2a2a2a;
+    --color-muted-foreground: rgba(255, 255, 255, 0.65);
+    --color-progress-bg: #404040; /* Более контрастный фон для прогресс баров */
+    
+    --color-accent: #2a2a2a;
+    --color-accent-foreground: #ffffff;
+    
+    --color-destructive: #ff5252;
+    --color-destructive-foreground: #ffffff;
+    
+    --color-border: #404040;
+    --color-input: #404040;
+    --color-ring: #6C86E2;
+    
+    /* Input colors for dark theme - более контрастные для видимости на темном фоне */
+    --input-label-color: rgba(255, 255, 255, 0.7); /* Светлый label/placeholder */
+    --input-value-color: #ffffff; /* Белый текст для значения */
+    
+    --color-success: #4caf50;
+    --color-success-foreground: #ffffff;
+    --color-success-on-bg: #ffffff; /* Белый текст для темной темы на success-bg фоне */
+    --color-warning: #ff9800;
+    --color-warning-foreground: #ffffff;
+    --color-warning-on-bg: #c77c1e; /* Темный оранжевый для текста на светлом warning-bg фоне */
+    
+    --color-info: #6C86E2;
+    --color-info-bg: rgba(108, 134, 226, 0.2);
+    --color-info-on-bg: #526ED3; /* Темный синий для текста на светлом info-bg фоне */
+    --color-warning-bg: rgba(255, 152, 0, 0.2);
+    --color-destructive-bg: rgba(255, 82, 82, 0.2);
+    --color-destructive-on-bg: #e03e3e; /* Темный красный для текста на светлом destructive-bg фоне */
+    --color-success-bg: rgba(76, 175, 80, 0.2);
+    --color-success-subtle: rgba(76, 175, 80, 0.1);
+    
+    --color-chart-primary: var(--color-primary);
+    --color-chart-secondary: var(--color-muted-foreground);
+    --color-chart-accent: #b794f6;
+  }
 }
 
 @layer base {
@@ -109,20 +243,20 @@
     min-height: 44px;
     width: 100%;
     padding: 12px 12px 8px 16px;
-    background: #FFFFFF;
-    border: 1px solid #E0E0E0;
+    background: var(--color-background);
+    border: 1px solid var(--color-input);
     box-shadow: 0px 2px 3px rgba(0, 0, 0, 0.1);
     border-radius: 12px;
     font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     font-weight: 500;
     font-size: 15px;
     line-height: 24px;
-    color: rgba(25, 28, 48, 0.9);
+    color: var(--color-foreground);
     resize: vertical;
   }
   
   textarea::placeholder {
-    color: rgba(27, 31, 59, 0.65);
+    color: var(--color-muted-foreground);
     font-size: 15px;
     line-height: 24px;
   }
@@ -156,5 +290,90 @@
   
   .bg-subtle-hover:hover {
     background-color: rgba(0, 0, 0, 0.05);
+  }
+  
+  /* Utility classes for common backgrounds */
+  .bg-sidebar {
+    background-color: var(--color-muted);
+  }
+  
+  .bg-warning-subtle {
+    background-color: var(--color-warning-bg);
+  }
+  
+  .bg-info-subtle {
+    background-color: var(--color-info-bg);
+  }
+  
+  .bg-destructive-subtle {
+    background-color: var(--color-destructive-bg);
+  }
+  
+  .bg-success-subtle {
+    background-color: var(--color-success-bg);
+  }
+  
+  .bg-success-subtle-light {
+    background-color: var(--color-success-subtle);
+  }
+}
+
+/* Bulk actions bar (studies list) — fixed island at bottom, dark theme */
+[data-theme="dark"] .studies-bulk-actions-bar {
+  background-color: rgba(108, 134, 226, 0.15);
+  border-color: rgba(108, 134, 226, 0.35);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25), 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .studies-bulk-actions-bar {
+    background-color: rgba(108, 134, 226, 0.15);
+    border-color: rgba(108, 134, 226, 0.35);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25), 0 4px 10px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* React Flow Controls стили для темной темы */
+[data-theme="dark"] .react-flow__controls-button {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+}
+
+[data-theme="dark"] .react-flow__controls-button:hover {
+  background-color: var(--color-muted);
+  color: var(--color-foreground);
+}
+
+[data-theme="dark"] .react-flow__controls-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+[data-theme="dark"] .react-flow__controls-button svg {
+  fill: var(--color-foreground);
+  stroke: var(--color-foreground);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .react-flow__controls-button {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    color: var(--color-foreground);
+  }
+  
+  :root:not([data-theme]) .react-flow__controls-button:hover {
+    background-color: var(--color-muted);
+    color: var(--color-foreground);
+  }
+  
+  :root:not([data-theme]) .react-flow__controls-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  :root:not([data-theme]) .react-flow__controls-button svg {
+    fill: var(--color-foreground);
+    stroke: var(--color-foreground);
   }
 }

@@ -52,14 +52,15 @@ export const createStudiesStore = (set: any, get: any): StudiesStore => ({
   setStudyStats: (stats) => set({ studyStats: stats }),
   setStudiesLoading: (studiesLoading) => set({ studiesLoading }),
   
-  // Helper functions
+  // Helper functions (current schema: team_members has only user_id)
   getUserTeamId: async (userId: string) => {
-    const { data } = await supabase
+    const { data: byUserId, error } = await supabase
       .from("team_members")
       .select("team_id")
       .eq("user_id", userId)
       .maybeSingle();
-    return data?.team_id || null;
+    if (error || !byUserId?.team_id) return null;
+    return byUserId.team_id;
   },
   
   buildBreadcrumbs: (folderId: string | null, allFolders: Folder[]): Folder[] => {
@@ -143,6 +144,7 @@ export const createStudiesStore = (set: any, get: any): StudiesStore => ({
             .from("study_blocks")
             .select("id, study_id, type, order_index")
             .in("study_id", studyIds)
+            .is("deleted_at", null)
             .order("order_index", { ascending: true });
           
           const { data: sessionsData } = await supabase

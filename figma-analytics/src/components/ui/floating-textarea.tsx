@@ -55,7 +55,7 @@ const FloatingTextarea = React.forwardRef<HTMLTextAreaElement, FloatingTextareaP
           onBlur={handleBlur}
           placeholder={displayPlaceholder}
           className={cn(
-            "w-full rounded-xl border border-input bg-white px-4",
+            "w-full rounded-xl border border-input bg-background px-4",
             label ? (isFloating ? "pt-6 pb-2" : "pt-8 pb-2") : "py-3",
             "h-[84px]",
             "text-[13px] leading-5 tracking-0 font-normal",

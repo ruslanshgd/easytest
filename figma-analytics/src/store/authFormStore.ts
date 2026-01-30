@@ -5,7 +5,7 @@ export interface AuthFormStore {
   email: string;
   otpCode: string;
   step: "email" | "code";
-  loading: boolean;
+  authFormLoading: boolean;
   error: string | null;
   message: string | null;
   
@@ -13,7 +13,7 @@ export interface AuthFormStore {
   setEmail: (email: string) => void;
   setOtpCode: (otpCode: string) => void;
   setStep: (step: "email" | "code") => void;
-  setLoading: (loading: boolean) => void;
+  setAuthFormLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setMessage: (message: string | null) => void;
   resetForm: () => void;
@@ -24,7 +24,7 @@ export const createAuthFormStore = (set: any): AuthFormStore => ({
   email: "",
   otpCode: "",
   step: "email",
-  loading: false,
+  authFormLoading: false,
   error: null,
   message: null,
   
@@ -32,7 +32,7 @@ export const createAuthFormStore = (set: any): AuthFormStore => ({
   setEmail: (email) => set({ email }),
   setOtpCode: (otpCode) => set({ otpCode }),
   setStep: (step) => set({ step }),
-  setLoading: (loading) => set({ loading }),
+  setAuthFormLoading: (loading) => set({ authFormLoading: loading }),
   setError: (error) => set({ error }),
   setMessage: (message) => set({ message }),
   
@@ -40,7 +40,7 @@ export const createAuthFormStore = (set: any): AuthFormStore => ({
     email: "",
     otpCode: "",
     step: "email",
-    loading: false,
+    authFormLoading: false,
     error: null,
     message: null,
   }),

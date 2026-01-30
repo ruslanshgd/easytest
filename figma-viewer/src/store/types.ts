@@ -21,6 +21,7 @@ export interface StudyBlock {
   prototype_id: string | null;
   instructions: string | null;
   config: any;
+  eye_tracking_enabled?: boolean;
 }
 
 export type BlockType = 

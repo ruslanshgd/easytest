@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { useAppStore } from "./store";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { 
   ArrowLeft, 
   Users, 
@@ -17,8 +18,19 @@ import {
   LogOut,
   Mail,
   Calendar,
-  Loader2
+  Loader2,
+  Palette,
+  Pencil,
+  X
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface Team {
   id: string;
@@ -83,11 +95,20 @@ export default function ProfilePage() {
     setInviteError,
     setCreatedInvites,
     setCopiedLink,
+    resetTeam,
   } = useAppStore();
 
   useEffect(() => {
     loadUserData();
   }, []);
+
+  const [memberToRemoveId, setMemberToRemoveId] = useState<string | null>(null);
+  const [isRemoveDialogOpen, setIsRemoveDialogOpen] = useState(false);
+  const [isEditingTeamName, setIsEditingTeamName] = useState(false);
+  const [editTeamNameValue, setEditTeamNameValue] = useState("");
+  const [isSavingTeamName, setIsSavingTeamName] = useState(false);
+  const [isDeleteTeamDialogOpen, setIsDeleteTeamDialogOpen] = useState(false);
+  const [isDeletingTeam, setIsDeletingTeam] = useState(false);
 
   const loadUserData = async () => {
     try {
@@ -105,23 +126,31 @@ export default function ProfilePage() {
 
   const loadTeamData = async (userId: string) => {
     try {
-      const { data: membersData, error: membersError } = await supabase
+      // Current schema: team_members has only user_id (no member_user_id)
+      const { data: row, error } = await supabase
         .from("team_members")
-        .select("*, teams(*)")
+        .select("team_id, role, teams(*)")
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (membersError) {
-        console.error("Error loading team:", membersError);
-        return;
+      if (error || !row) return;
+
+      // RLS on teams can block the join for members — then teams(*) is null; fetch team by id
+      let teamData: Team | null = (row.teams as Team) || null;
+      if (!teamData && row.team_id) {
+        const { data: t, error: te } = await supabase
+          .from("teams")
+          .select("id, name, created_at")
+          .eq("id", row.team_id)
+          .single();
+        if (!te && t) teamData = t as Team;
       }
 
-      if (membersData && membersData.teams) {
-        const teamData = membersData.teams as Team;
+      if (teamData) {
         setTeam(teamData);
-        setIsOwner(membersData.role === "owner");
+        setIsOwner(row.role === "owner");
         await loadTeamMembers(teamData.id);
-        if (membersData.role === "owner") {
+        if (row.role === "owner") {
           await loadTeamInvitations(teamData.id);
         }
       }
@@ -268,15 +297,90 @@ export default function ProfilePage() {
     return `${window.location.origin}/invite/${token}`;
   };
 
-  const handleRemoveMember = async (memberUserId: string) => {
-    if (!confirm("Вы уверены, что хотите удалить этого участника из команды?")) {
-      return;
-    }
+  const openRemoveMemberDialog = (memberUserId: string) => {
+    setMemberToRemoveId(memberUserId);
+    setIsRemoveDialogOpen(true);
+  };
 
+  const startEditTeamName = () => {
+    if (team) {
+      setEditTeamNameValue(team.name);
+      setIsEditingTeamName(true);
+    }
+  };
+
+  const cancelEditTeamName = () => {
+    setIsEditingTeamName(false);
+    setEditTeamNameValue("");
+  };
+
+  const handleSaveTeamName = async () => {
+    if (!team || !editTeamNameValue.trim()) return;
+    setIsSavingTeamName(true);
+    try {
+      const { error } = await supabase
+        .from("teams")
+        .update({ name: editTeamNameValue.trim() })
+        .eq("id", team.id);
+
+      if (error) {
+        alert(`Ошибка обновления названия: ${error.message}`);
+        return;
+      }
+      setTeam({ ...team, name: editTeamNameValue.trim() });
+      setIsEditingTeamName(false);
+      setEditTeamNameValue("");
+    } catch (err: unknown) {
+      alert(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsSavingTeamName(false);
+    }
+  };
+
+  const handleConfirmDeleteTeam = async () => {
+    if (!team) return;
+    setIsDeletingTeam(true);
+    try {
+      const { error: invErr } = await supabase
+        .from("team_invitations")
+        .delete()
+        .eq("team_id", team.id);
+      if (invErr) {
+        alert(`Ошибка при удалении приглашений: ${invErr.message}`);
+        return;
+      }
+      const { error: memErr } = await supabase
+        .from("team_members")
+        .delete()
+        .eq("team_id", team.id);
+      if (memErr) {
+        alert(`Ошибка при удалении участников: ${memErr.message}`);
+        return;
+      }
+      const { error: teamErr } = await supabase
+        .from("teams")
+        .delete()
+        .eq("id", team.id);
+      if (teamErr) {
+        alert(`Ошибка при удалении команды: ${teamErr.message}`);
+        return;
+      }
+      resetTeam();
+      setIsDeleteTeamDialogOpen(false);
+    } catch (err: unknown) {
+      alert(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsDeletingTeam(false);
+    }
+  };
+
+  const handleConfirmRemoveMember = async () => {
+    if (!memberToRemoveId) return;
+    
     try {
       const { error } = await supabase.rpc("remove_team_member", {
         p_team_id: team?.id,
-        p_user_id: memberUserId,
+        p_user_id: memberToRemoveId,
       });
 
       if (error) {
@@ -285,8 +389,14 @@ export default function ProfilePage() {
       }
 
       await loadTeamMembers(team?.id || "");
+      setIsRemoveDialogOpen(false);
+      setMemberToRemoveId(null);
     } catch (error: any) {
       alert(`Ошибка: ${error.message}`);
+    } finally {
+      // keep dialog closed on any outcome
+      setIsRemoveDialogOpen(false);
+      setMemberToRemoveId(null);
     }
   };
 
@@ -352,6 +462,22 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
+      {/* Theme Settings */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Palette className="h-5 w-5 text-muted-foreground" />
+            Тема оформления
+          </CardTitle>
+          <CardDescription>
+            Выберите светлую, темную тему или используйте системные настройки
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemeToggle />
+        </CardContent>
+      </Card>
+
       {/* Team Section */}
       <Card className="mb-6">
         <CardHeader>
@@ -411,49 +537,97 @@ export default function ProfilePage() {
             </div>
           ) : (
             <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-medium">{team.name}</h3>
-                {isOwner && <Badge>Owner</Badge>}
+              <div className="flex items-center gap-2 flex-wrap">
+                {isOwner && isEditingTeamName ? (
+                  <>
+                    <Input
+                      value={editTeamNameValue}
+                      onChange={(e) => setEditTeamNameValue(e.target.value)}
+                      disabled={isSavingTeamName}
+                      className="max-w-xs"
+                      placeholder="Название команды"
+                    />
+                    <Button
+                      size="sm"
+                      disabled={isSavingTeamName || !editTeamNameValue.trim()}
+                      onClick={handleSaveTeamName}
+                    >
+                      {isSavingTeamName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={isSavingTeamName}
+                      onClick={cancelEditTeamName}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-lg font-medium">{team.name}</h3>
+                    {isOwner && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={startEditTeamName}
+                          title="Редактировать название"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Badge>Владелец</Badge>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Team Members — видны всем участникам команды */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-muted-foreground">Участники команды</h4>
+                {teamMembers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    В команде пока нет других участников.
+                  </p>
+                ) : (
+                  teamMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-3 rounded-lg border"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{member.email}</span>
+                          {member.role === "owner" && <Badge variant="secondary">Владелец</Badge>}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Присоединился: {new Date(member.joined_at).toLocaleDateString("ru-RU")}
+                        </p>
+                      </div>
+                      {isOwner && member.role !== "owner" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => openRemoveMemberDialog(member.member_user_id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
 
               {isOwner && (
                 <>
-                  {/* Team Members */}
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium text-muted-foreground">Участники команды</h4>
-                    {teamMembers.map((member) => (
-                      <div
-                        key={member.id}
-                        className="flex items-center justify-between p-3 rounded-lg border"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{member.email}</span>
-                            {member.role === "owner" && <Badge variant="secondary">Owner</Badge>}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Присоединился: {new Date(member.joined_at).toLocaleDateString("ru-RU")}
-                          </p>
-                        </div>
-                        {member.role !== "owner" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleRemoveMember(member.member_user_id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
                   {/* Invite Form */}
                   {createdInvites.length > 0 ? (
-                    <Card className="border-[#0f7b6c]/30 bg-[#0f7b6c]/5">
+                    <Card className="border-success/30 bg-success/5">
                       <CardContent className="p-4 space-y-4">
-                        <div className="flex items-center gap-2 text-[#0f7b6c]">
+                        <div className="flex items-center gap-2 text-success">
                           <Check className="h-5 w-5" />
                           <span className="font-medium">Приглашения созданы!</span>
                         </div>
@@ -563,6 +737,21 @@ export default function ProfilePage() {
                       ))}
                     </div>
                   )}
+
+                  {/* Удаление команды — только владелец */}
+                  <div className="pt-4 border-t">
+                    <Button
+                      variant="destructive"
+                      onClick={() => setIsDeleteTeamDialogOpen(true)}
+                      className="text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Удалить команду
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Все участники будут исключены из команды, приглашения отменены. Действие необратимо.
+                    </p>
+                  </div>
                 </>
               )}
 
@@ -577,6 +766,68 @@ export default function ProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Remove member confirmation dialog */}
+      <Dialog open={isRemoveDialogOpen} onOpenChange={setIsRemoveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Удалить участника из команды</DialogTitle>
+            <DialogDescription>
+              Вы уверены, что хотите удалить этого участника из команды?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => {
+                setIsRemoveDialogOpen(false);
+                setMemberToRemoveId(null);
+              }}
+            >
+              Отменить
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              onClick={handleConfirmRemoveMember}
+              disabled={!memberToRemoveId}
+            >
+              Удалить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete team confirmation dialog */}
+      <Dialog open={isDeleteTeamDialogOpen} onOpenChange={setIsDeleteTeamDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Удалить команду</DialogTitle>
+            <DialogDescription>
+              Все участники будут исключены из команды, приглашения отменены. Исследования, привязанные к команде, могут остаться без команды. Это действие необратимо. Продолжить?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setIsDeleteTeamDialogOpen(false)}
+              disabled={isDeletingTeam}
+            >
+              Отменить
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              onClick={handleConfirmDeleteTeam}
+              disabled={isDeletingTeam}
+            >
+              {isDeletingTeam ? <Loader2 className="h-4 w-4 animate-spin" /> : "Удалить команду"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Sign Out */}
       <div className="pt-6 border-t">

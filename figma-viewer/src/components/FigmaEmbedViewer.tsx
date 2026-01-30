@@ -638,9 +638,11 @@ export function FigmaEmbedViewer({
     };
   }, [onScreenChange, _hotspots, currentScreen, _onHotspotClick, _onEmptyAreaClick, internalCurrentScreen, figmaClientId, embedHost, allScreensOrScenes, _protoEnd]);
 
-  // НОВОЕ: Вычисляем реальные размеры для iframe
-  const iframeWidth = width || 375; // Дефолт для мобильных прототипов
-  const iframeHeight = height || 812; // Дефолт для мобильных прототипов
+  // НОВОЕ: Вычисляем реальные размеры для iframe с сохранением соотношения сторон
+  // Если width и height переданы как числа, используем их напрямую
+  // Если не переданы, используем 100% для адаптивности
+  const iframeWidth = typeof width === "number" ? `${width}px` : (width || "100%");
+  const iframeHeight = typeof height === "number" ? `${height}px` : (height || "100vh");
 
   return (
     <div
@@ -651,6 +653,7 @@ export function FigmaEmbedViewer({
         height: iframeHeight,
         overflow: "hidden",
         margin: "0 auto", // Центрируем iframe
+        maxWidth: "100%",
         ...style
       }}
     >
@@ -727,8 +730,8 @@ export function FigmaEmbedViewer({
         ref={containerRef}
         style={{
           position: "relative",
-          width: iframeWidth,
-          height: iframeHeight,
+          width: "100%",
+          height: "100%",
           overflow: "hidden",
           backgroundColor: bgColor ? `#${bgColor}` : "#000000"
         }}
@@ -789,8 +792,8 @@ export function FigmaEmbedViewer({
           ref={iframeRef}
           src={iframeUrl}
           style={{
-            width: iframeWidth,
-            height: iframeHeight,
+            width: "100%",
+            height: "100%",
             border: "none",
             display: "block",
             pointerEvents: "auto" // КРИТИЧНО: Разрешаем клики по iframe - Figma сам обрабатывает переходы через свои хотспоты

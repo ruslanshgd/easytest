@@ -19,8 +19,8 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   );
 }
 
-// Диагностика: проверяем формат URL (только в development)
-if (import.meta.env.DEV) {
+// Диагностика: проверяем формат URL (только в development, не в тестах)
+if (import.meta.env.DEV && import.meta.env.MODE !== 'test') {
   console.log('🔍 Supabase Configuration Check:');
   console.log('  - URL:', SUPABASE_URL ? `${SUPABASE_URL.substring(0, 30)}...` : '❌ MISSING');
   console.log('  - Anon Key:', SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 20)}...` : '❌ MISSING');

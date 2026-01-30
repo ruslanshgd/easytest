@@ -55,7 +55,7 @@ const FloatingInput = React.forwardRef<HTMLInputElement, FloatingInputProps>(
           onBlur={handleBlur}
           placeholder={displayPlaceholder}
           className={cn(
-            "flex h-11 w-full rounded-xl border border-input bg-white px-4",
+            "flex h-11 w-full rounded-xl border border-input bg-background px-4",
             label ? "pt-4 pb-2" : "py-0",
             "text-[13px] leading-5 tracking-0 font-normal",
             "text-[var(--input-value-color)]",

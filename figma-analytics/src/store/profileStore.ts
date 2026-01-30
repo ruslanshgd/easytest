@@ -51,6 +51,8 @@ export interface ProfileStore {
   setCreatedInvites: (invites: CreatedInvite[]) => void;
   setCopiedLink: (link: string | null) => void;
   resetForms: () => void;
+  /** Сброс данных команды после удаления (frontend + Zustand) */
+  resetTeam: () => void;
 }
 
 export const createProfileStore = (set: any, get: any): ProfileStore => ({
@@ -109,5 +111,12 @@ export const createProfileStore = (set: any, get: any): ProfileStore => ({
     inviteError: null,
     createdInvites: [],
     copiedLink: null,
+  }),
+
+  resetTeam: () => set({
+    team: null,
+    teamMembers: [],
+    teamInvitations: [],
+    isOwner: false,
   }),
 });

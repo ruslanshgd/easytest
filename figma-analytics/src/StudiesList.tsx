@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FormTextarea } from "@/components/forms/FormTextarea";
+import { FormSelect } from "@/components/forms/FormSelect";
+import { FormField } from "@/components/forms/FormField";
 import {
   Dialog,
   DialogContent,
@@ -55,11 +58,15 @@ import {
   ClipboardList,
   Users,
   Check,
-  MousePointerClick
+  MousePointerClick,
+  LayoutGrid,
+  GitBranch,
+  Table,
+  ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Block type icons mapping
+// Block type icons mapping (must match block types in constructor; see lib/block-icons.tsx)
 const BLOCK_ICONS: Record<string, React.ElementType> = {
   prototype: Layers,
   open_question: MessageSquare,
@@ -70,6 +77,10 @@ const BLOCK_ICONS: Record<string, React.ElementType> = {
   five_seconds: Timer,
   umux_lite: ClipboardList,
   first_click: MousePointerClick,
+  card_sorting: LayoutGrid,
+  tree_testing: GitBranch,
+  matrix: Table,
+  agreement: ShieldCheck,
 };
 
 const BLOCK_COLORS: Record<string, string> = {
@@ -82,6 +93,10 @@ const BLOCK_COLORS: Record<string, string> = {
   five_seconds: "bg-red-100 text-red-600",
   umux_lite: "bg-purple-100 text-purple-600",
   first_click: "bg-teal-100 text-teal-600",
+  card_sorting: "bg-indigo-100 text-indigo-600",
+  tree_testing: "bg-amber-100 text-amber-600",
+  matrix: "bg-cyan-100 text-cyan-600",
+  agreement: "bg-emerald-100 text-emerald-600",
 };
 
 interface Study {
@@ -111,6 +126,7 @@ interface StudyBlock {
   study_id: string;
   type: string;
   order_index: number;
+  deleted_at?: string | null;
 }
 
 interface StudyStats {
@@ -134,6 +150,7 @@ export default function StudiesList() {
     studyStats,
     // UI state
     error,
+    showCreateStudyModal,
     showCreateFolderModal,
     showRenameModal,
     showRenameFolderModal,
@@ -143,6 +160,9 @@ export default function StudiesList() {
     showDeleteFolderDialog,
     showBulkMoveModal,
     showBulkDeleteDialog,
+    newStudyTitle,
+    newStudyDescription,
+    newStudyType,
     newFolderName,
     renameTitle,
     renameFolderName,
@@ -157,6 +177,8 @@ export default function StudiesList() {
     getUserTeamId,
     buildBreadcrumbs,
     // Modal actions
+    openCreateStudyModal,
+    closeCreateStudyModal,
     openCreateFolderModal,
     closeCreateFolderModal,
     openRenameModal,
@@ -176,6 +198,9 @@ export default function StudiesList() {
     openBulkDeleteDialog,
     closeBulkDeleteDialog,
     // Form actions
+    setNewStudyTitle,
+    setNewStudyDescription,
+    setNewStudyType,
     setNewFolderName,
     setRenameTitle,
     setRenameFolderName,
@@ -302,6 +327,68 @@ export default function StudiesList() {
     }
   };
 
+  // Create study from modal form
+  const handleCreateStudy = async () => {
+    if (!newStudyTitle.trim()) {
+      setError("Название исследования не может быть пустым");
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Требуется авторизация");
+        return;
+      }
+
+      const teamId = await getUserTeamId(user.id);
+      
+      // Prepare study data
+      const studyData: {
+        title: string;
+        user_id: string | null;
+        team_id: string | null;
+        folder_id: string | null;
+        status: string;
+        description?: string;
+        type?: string;
+      } = {
+        title: newStudyTitle.trim(),
+        user_id: teamId ? null : user.id,
+        team_id: teamId || null,
+        folder_id: currentFolderId || null,
+        status: "draft"
+      };
+
+      // Add optional fields if provided
+      if (newStudyDescription.trim()) {
+        studyData.description = newStudyDescription.trim();
+      }
+      if (newStudyType.trim()) {
+        studyData.type = newStudyType.trim();
+      }
+
+      const { data, error: createError } = await supabase
+        .from("studies")
+        .insert([studyData])
+        .select()
+        .single();
+
+      if (createError) {
+        setError(createError.message);
+        return;
+      }
+
+      if (data) {
+        closeCreateStudyModal();
+        navigate(`/studies/${data.id}`);
+      }
+    } catch (err) {
+      console.error("Unexpected error creating study:", err);
+      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   const PLACEHOLDER_IMAGE_DATA_URI = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23e5e7eb' width='400' height='300'/%3E%3Ctext fill='%239ca3af' x='50%25' y='50%25' text-anchor='middle' dy='.3em' font-size='14'%3EДобавьте своё изображение%3C/text%3E%3C/svg%3E";
 
   // Create study from template "Тестирование прототипа"
@@ -339,7 +426,7 @@ export default function StudiesList() {
         return;
       }
 
-      const contextText = "Привет 👋 Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
+      const contextText = "Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
       const prototypeInstructions = "Найдите в прототипе нужный раздел и выполните предложенное задание. Опишите своими словами, как вы это сделали.";
       const blocks: Array<{ study_id: string; type: string; order_index: number; prototype_id?: string | null; instructions?: string | null; config: object }> = [
         { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextText } },
@@ -509,10 +596,38 @@ export default function StudiesList() {
 
       const contextDescription = "Спасибо, что хотите поделиться с нами своими мыслями. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
       const fiveSecondsInstruction = "Сейчас мы покажем фрагмент лендинга банка на короткое время. Постарайтесь запомнить как можно больше деталей.";
+      const matrixRows = [
+        { id: crypto.randomUUID(), title: "Этот банк ориентирован на продукты для бизнеса" },
+        { id: crypto.randomUUID(), title: "Страница визуально привлекательна" },
+        { id: crypto.randomUUID(), title: "Этот банк подходит для тех, кто ведет активный образ жизни" },
+      ];
+      const matrixColumns = [
+        { id: crypto.randomUUID(), title: "Полностью не согласен(а)" },
+        { id: crypto.randomUUID(), title: "Не согласен(а)" },
+        { id: crypto.randomUUID(), title: "Нейтрально(а)" },
+        { id: crypto.randomUUID(), title: "Согласен(а)" },
+        { id: crypto.randomUUID(), title: "Полностью согласен(а)" },
+      ];
       const blocks: Array<{ study_id: string; type: string; order_index: number; config: object }> = [
         { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextDescription } },
         { study_id: studyData.id, type: "five_seconds", order_index: 1, config: { instruction: fiveSecondsInstruction, duration: 5, imageUrl: PLACEHOLDER_IMAGE_DATA_URI } },
-        { study_id: studyData.id, type: "open_question", order_index: 2, config: { question: "Какое у вас первое впечатление об этой странице банковского приложения?", optional: false } }
+        { study_id: studyData.id, type: "open_question", order_index: 2, config: { question: "Какое у вас первое впечатление об этой странице банковского приложения?", optional: false } },
+        {
+          study_id: studyData.id,
+          type: "matrix",
+          order_index: 3,
+          config: {
+            question: "Оцените, насколько вы согласны или не согласны со следующими утверждениями об этом банке",
+            description: "",
+            imageUrl: undefined,
+            rows: matrixRows,
+            columns: matrixColumns,
+            shuffleRows: false,
+            shuffleColumns: false,
+            allowMultiple: false,
+            optional: false,
+          },
+        },
       ];
 
       const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
@@ -559,17 +674,69 @@ export default function StudiesList() {
       const contextDescription = "Спасибо, что хотите поделиться с нами своими мыслями о нашем фитнес приложении. Здесь нет правильных или неправильных ответов — просто оставайтесь собой и делитесь тем, что приходит в голову. Мы очень ценим ваш вклад!";
       const blocks: Array<{ study_id: string; type: string; order_index: number; config: object }> = [
         { study_id: studyData.id, type: "context", order_index: 0, config: { title: "Привет 👋", description: contextDescription } },
-        { study_id: studyData.id, type: "choice", order_index: 1, config: { question: "Как часто вы пользуетесь приложением?", options: ["Ежедневно", "Несколько раз в неделю", "Раз в неделю", "Реже"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
+        { study_id: studyData.id, type: "choice", order_index: 1, config: { question: "Как часто вы пользуетесь приложением?", options: ["Ежедневно", "Несколько раз в неделю", "Раз в неделю", "Реже", "Очень редко"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
         { study_id: studyData.id, type: "open_question", order_index: 2, config: { question: "Можете рассказать, почему вы не пользуетесь приложением чаще?", optional: false } },
         { study_id: studyData.id, type: "choice", order_index: 3, config: { question: "Для чего вы пользуетесь приложением чаще всего?", options: ["Тренировки", "Отслеживание прогресса", "Питание", "Сообщество"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
-        { study_id: studyData.id, type: "choice", order_index: 4, config: { question: "Какая функция для вас наиболее полезна?", options: ["Планы тренировок", "Статистика", "Напоминания", "Другое"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
+        { study_id: studyData.id, type: "choice", order_index: 4, config: { question: "Какая функция для вас наиболее полезна?", options: ["Планы тренировок", "Счётчик шагов", "Подсчёт калорий", "Интеграция с другими устройствами"], allowMultiple: false, shuffle: false, allowOther: false, allowNone: false, optional: false } },
         { study_id: studyData.id, type: "scale", order_index: 5, config: { question: "Насколько легко пользоваться приложением?", scaleType: "stars", min: 1, max: 5, optional: false } },
         { study_id: studyData.id, type: "open_question", order_index: 6, config: { question: "Расскажите, как мы можем сделать приложение удобнее для вас? Поделитесь своими идеями", optional: false } }
       ];
 
-      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
-      if (blocksError) {
-        setError(blocksError.message);
+      const { data: insertedBlocks, error: blocksError } = await supabase.from("study_blocks").insert(blocks).select("id, order_index");
+      if (blocksError || !insertedBlocks || insertedBlocks.length !== 7) {
+        setError(blocksError?.message ?? "Ошибка создания блоков");
+        return;
+      }
+
+      const byOrder = (a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index;
+      const sorted = [...insertedBlocks].sort(byOrder);
+      const choiceHowOftenId = sorted[1].id;
+      const scaleEasyId = sorted[5].id;
+      const openWhyNotId = sorted[2].id;
+      const openIdeasId = sorted[6].id;
+
+      const block2Config = blocks[2].config as Record<string, unknown>;
+      const block6Config = blocks[6].config as Record<string, unknown>;
+
+      const { error: update2Error } = await supabase
+        .from("study_blocks")
+        .update({
+          config: {
+            ...block2Config,
+            logic: {
+              showOnCondition: {
+                enabled: true,
+                action: "show",
+                conditions: [{ blockId: choiceHowOftenId, operator: "contains" as const, value: "Очень редко" }]
+              },
+              conditionalLogic: { rules: [], elseGoToBlockId: "__next__" }
+            }
+          }
+        })
+        .eq("id", openWhyNotId);
+      if (update2Error) {
+        setError(update2Error.message);
+        return;
+      }
+
+      const { error: update6Error } = await supabase
+        .from("study_blocks")
+        .update({
+          config: {
+            ...block6Config,
+            logic: {
+              showOnCondition: {
+                enabled: true,
+                action: "show",
+                conditions: [{ blockId: scaleEasyId, operator: "less_than" as const, value: "5" }]
+              },
+              conditionalLogic: { rules: [], elseGoToBlockId: "__end__" }
+            }
+          }
+        })
+        .eq("id", openIdeasId);
+      if (update6Error) {
+        setError(update6Error.message);
         return;
       }
 
@@ -1073,9 +1240,13 @@ export default function StudiesList() {
         </div>
       )}
 
-      {/* Bulk actions bar */}
+      {/* Bulk actions bar — fixed at bottom as island, 24px inset */}
       {selectedStudies.size > 0 && (
-        <div className="bg-primary/5 border border-primary/20 rounded-lg px-4 py-3 mb-6 flex justify-between items-center">
+        <div
+          className="studies-bulk-actions-bar fixed left-6 right-6 bottom-6 z-50 flex justify-between items-center rounded-lg px-4 py-3 shadow-lg border bg-primary/5 border-primary/20 text-foreground"
+          role="region"
+          aria-label="Действия с выбранными тестами"
+        >
           <span className="text-sm font-medium">Выбрано: {selectedStudies.size}</span>
           <div className="flex gap-2">
             {hasFolders && (
@@ -1095,9 +1266,8 @@ export default function StudiesList() {
         </div>
       )}
 
-      {/* Folders */}
-      {currentFolderFolders.length > 0 && (
-        <div className="mb-8">
+      {/* Folders — показываем всегда (в корне и внутри папки): список папок текущего уровня + карточка «Новая папка» */}
+      <div className="mb-8">
           <h2 className="text-[15px] font-extrabold leading-6 text-foreground mb-3">Папки</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {currentFolderFolders.map(folder => {
@@ -1194,7 +1364,6 @@ export default function StudiesList() {
             </Card>
       </div>
         </div>
-      )}
 
       {/* Studies header with select all (only when there are studies) */}
       {studies.length > 0 && (
@@ -1210,12 +1379,10 @@ export default function StudiesList() {
               />
               Выбрать все
             </label>
-            {currentFolderName && (
-              <Button onClick={handleCreateStudyNoModal} size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Тест
-              </Button>
-            )}
+            <Button onClick={openCreateStudyModal} size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              Тест
+            </Button>
           </div>
         </div>
       )}
@@ -1225,7 +1392,7 @@ export default function StudiesList() {
         <div className="space-y-6" id="onboarding-empty">
           <div className="flex justify-between items-center">
             <h2 className="text-[15px] font-extrabold leading-6 text-foreground">Тесты</h2>
-            <Button onClick={handleCreateStudyNoModal} size="sm">
+            <Button onClick={openCreateStudyModal} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               Тест
             </Button>
@@ -1290,7 +1457,7 @@ export default function StudiesList() {
             <h2 className="text-[15px] font-extrabold leading-6 text-foreground">
               Тесты {currentFolderName && `в папке "${currentFolderName}"`}
             </h2>
-            <Button onClick={handleCreateStudyNoModal} size="sm">
+            <Button onClick={openCreateStudyModal} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               Тест
             </Button>
@@ -1356,7 +1523,7 @@ export default function StudiesList() {
             const isSelected = selectedStudies.has(study.id);
             const isBeingDragged = draggedItem?.type === "study" && draggedItem.id === study.id;
             const stats = studyStats[study.id];
-            const blocks = stats?.blocks || [];
+            const blocks = (stats?.blocks || []).filter(b => !('deleted_at' in b && b.deleted_at));
             const sessionsCount = stats?.sessionsCount || 0;
             
             return (
@@ -1366,7 +1533,7 @@ export default function StudiesList() {
                 onDragStart={(e) => handleDragStart(e, "study", study.id)}
                 onDragEnd={handleDragEnd}
                 className={cn(
-                  "transition-colors duration-200 group !shadow-none border-2 border-border hover:border-[#526ED3]",
+                  "transition-colors duration-200 group !shadow-none border-2 border-border hover:border-primary",
                   isSelected && "ring-2 ring-primary",
                   isBeingDragged && "opacity-50"
                 )}
@@ -1636,6 +1803,67 @@ export default function StudiesList() {
             </Button>
             <Button onClick={handleUseTemplateProductSurvey}>
               Использовать этот шаблон
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Study Modal */}
+      <Dialog open={showCreateStudyModal} onOpenChange={(open) => open ? openCreateStudyModal() : closeCreateStudyModal()}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Создать исследование</DialogTitle>
+            <DialogDescription>
+              Заполните форму для создания нового исследования
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <FormField label="Название исследования">
+              <Input
+                id="study-title"
+                placeholder="Введите название исследования"
+                value={newStudyTitle}
+                onChange={(e) => setNewStudyTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleCreateStudy();
+                  }
+                }}
+                autoFocus
+              />
+            </FormField>
+            <FormField label="Описание" optional>
+              <FormTextarea
+                id="study-description"
+                placeholder="Введите описание исследования (опционально)"
+                value={newStudyDescription}
+                onChange={(e) => setNewStudyDescription(e.target.value)}
+                rows={4}
+              />
+            </FormField>
+            <FormField label="Тип исследования" optional>
+              <FormSelect
+                id="study-type"
+                value={newStudyType}
+                onChange={(e) => setNewStudyType(e.target.value)}
+              >
+                <option value="">Выберите тип исследования</option>
+                <option value="prototype">Тестирование прототипа</option>
+                <option value="first_click">Тест первого клика</option>
+                <option value="survey">Опрос</option>
+                <option value="usability">Юзабилити-тест</option>
+                <option value="card_sorting">Карточная сортировка</option>
+                <option value="preference">Тест предпочтений</option>
+              </FormSelect>
+            </FormField>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeCreateStudyModal}>
+              Отмена
+            </Button>
+            <Button onClick={handleCreateStudy} disabled={!newStudyTitle.trim()}>
+              Создать исследование
             </Button>
           </DialogFooter>
         </DialogContent>

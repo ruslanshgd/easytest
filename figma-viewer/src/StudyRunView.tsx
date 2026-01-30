@@ -1,9 +1,10 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { v4 as uuidv4 } from "uuid";
 import TestView from "./TestView.tsx";
 import { useViewerStore } from "./store";
+import { ArrowRight, MoveRight, ChevronLeft, Trash2 } from "lucide-react";
 
 // ============= Компонент модального окна для изображений =============
 interface ImageModalProps {
@@ -27,55 +28,67 @@ function ImageModal({ imageUrl, onClose, onNext, onPrev, showNavigation = false,
     return () => window.removeEventListener("keydown", handleEscape);
   }, [onClose, onNext, onPrev]);
 
+  const modalOverlayStyles: React.CSSProperties = {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: "rgba(0, 0, 0, 0.95)",
+    zIndex: 10000,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20
+  };
+
+  const modalContentStyles: React.CSSProperties = {
+    position: "relative",
+    maxWidth: "90vw",
+    maxHeight: "90vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  };
+
+  const navButtonStyles: React.CSSProperties = {
+    position: "absolute",
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "rgba(255, 255, 255, 0.2)",
+    border: "none",
+    borderRadius: "50%",
+    width: 48,
+    height: 48,
+    color: "white",
+    fontSize: 24,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10001
+  };
+
+  const imageStyles: React.CSSProperties = {
+    maxWidth: "100%",
+    maxHeight: "90vh",
+    objectFit: "contain",
+    borderRadius: 8
+  };
+
   return (
     <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0, 0, 0, 0.95)",
-        zIndex: 10000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20
-      }}
+      style={modalOverlayStyles}
       onClick={onClose}
     >
       <div
-        style={{
-          position: "relative",
-          maxWidth: "90vw",
-          maxHeight: "90vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center"
-        }}
+        style={modalContentStyles}
         onClick={(e) => e.stopPropagation()}
       >
         {showNavigation && onPrev && (
           <button
             onClick={onPrev}
-            style={{
-              position: "absolute",
-              left: -60,
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "rgba(255, 255, 255, 0.2)",
-              border: "none",
-              borderRadius: "50%",
-              width: 48,
-              height: 48,
-              color: "white",
-              fontSize: 24,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 10001
-            }}
+            style={{ ...navButtonStyles, left: -60 }}
           >
             ‹
           </button>
@@ -83,34 +96,12 @@ function ImageModal({ imageUrl, onClose, onNext, onPrev, showNavigation = false,
         <img
           src={imageUrl}
           alt=""
-          style={{
-            maxWidth: "100%",
-            maxHeight: "90vh",
-            objectFit: "contain",
-            borderRadius: 8
-          }}
+          style={imageStyles}
         />
         {showNavigation && onNext && (
           <button
             onClick={onNext}
-            style={{
-              position: "absolute",
-              right: -60,
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "rgba(255, 255, 255, 0.2)",
-              border: "none",
-              borderRadius: "50%",
-              width: 48,
-              height: 48,
-              color: "white",
-              fontSize: 24,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 10001
-            }}
+            style={{ ...navButtonStyles, right: -60 }}
           >
             ›
           </button>
@@ -162,6 +153,66 @@ function ImageModal({ imageUrl, onClose, onNext, onPrev, showNavigation = false,
   );
 }
 
+// Кнопка «Показать задание» — фиксирована слева внизу, открывает сайдбар с инструкцией
+const SHOW_TASK_TRIGGER_BOTTOM_PX = 80;
+const SHOW_TASK_LABEL_DURATION_MS = 3000;
+
+interface ShowTaskTriggerProps {
+  onClick: () => void;
+  showLabel: boolean;
+}
+
+function ShowTaskTrigger({ onClick, showLabel }: ShowTaskTriggerProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        position: "fixed",
+        left: 0,
+        bottom: SHOW_TASK_TRIGGER_BOTTOM_PX,
+        zIndex: 99,
+        height: 48,
+        paddingLeft: 6,
+        paddingRight: 12,
+        paddingTop: 4,
+        paddingBottom: 4,
+        border: "none",
+        borderTopRightRadius: 8,
+        borderBottomRightRadius: 8,
+        background: "rgba(30, 30, 30, 0.88)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        color: "white",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
+        transition: "opacity 0.2s",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+    >
+      <ChevronLeft size={24} style={{ flexShrink: 0 }} />
+      <span
+        style={{
+          fontSize: 15,
+          fontWeight: 500,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          maxWidth: showLabel ? 180 : 0,
+          opacity: showLabel ? 1 : 0,
+          transform: showLabel ? "translateX(0)" : "translateX(-10px)",
+          transition: "max-width 0.25s, opacity 0.2s, transform 0.2s",
+        }}
+      >
+        Показать задание
+      </span>
+    </button>
+  );
+}
+
 // Все типы блоков
 type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click" | "matrix" | "agreement";
 
@@ -194,7 +245,6 @@ function OpenQuestionBlock({ question, optional, imageUrl, onSubmit, onSkip }: O
   const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startTime] = useState(Date.now());
-  const [showImageModal, setShowImageModal] = useState(false);
 
   const handleSubmit = async () => {
     if (submitting) return;
@@ -212,44 +262,51 @@ function OpenQuestionBlock({ question, optional, imageUrl, onSubmit, onSkip }: O
     }
   };
 
-  const handleSkip = async () => {
-    if (!optional || !onSkip) return;
-    setSubmitting(true);
-    try {
-      await onSkip();
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   return (
-    <>
-      {showImageModal && imageUrl && (
-        <ImageModal imageUrl={imageUrl} onClose={() => setShowImageModal(false)} />
-      )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
-        <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-          {imageUrl && (
-            <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
-              <img src={imageUrl} alt="" style={{ width: "100%", maxHeight: 500, objectFit: "contain", background: "#f5f5f5" }} />
-              <div style={{ textAlign: "center", marginTop: 8, color: "#666", fontSize: 13 }}>Нажмите для увеличения</div>
-            </div>
-          )}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
+      <div style={{ maxWidth: "600px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
         <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>{question || "Вопрос"}</h2>
-        <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Введите ваш ответ..." style={{ width: "100%", minHeight: "150px", padding: "12px", border: "1px solid #ddd", borderRadius: "8px", fontSize: "16px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box", marginBottom: "20px" }} />
-        <div style={{ display: "flex", gap: 12 }}>
-          {optional && (
-            <button onClick={handleSkip} disabled={submitting} style={{ flex: 1, padding: "12px 24px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: "8px", fontSize: "16px", cursor: submitting ? "not-allowed" : "pointer" }}>
-              Пропустить
-            </button>
-          )}
-          <button onClick={handleSubmit} disabled={(!answer.trim() && !optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (answer.trim() || optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (answer.trim() || optional) && !submitting ? "pointer" : "not-allowed" }}>
-            {submitting ? "Сохранение..." : "Далее"}
-          </button>
-        </div>
+        <textarea 
+          value={answer} 
+          onChange={(e) => setAnswer(e.target.value)} 
+          placeholder="Введите текст ответа" 
+          style={{ 
+            width: "100%", 
+            minHeight: "120px", 
+            padding: "12px", 
+            border: "1px solid #ddd", 
+            borderRadius: "8px", 
+            fontSize: "16px", 
+            fontFamily: "inherit", 
+            resize: "vertical", 
+            boxSizing: "border-box", 
+            marginBottom: "20px" 
+          }} 
+        />
+        <button 
+          onClick={handleSubmit} 
+          disabled={(!answer.trim() && !optional) || submitting} 
+          style={{ 
+            width: "100%",
+            padding: "12px 24px", 
+            background: (answer.trim() || optional) && !submitting ? "#007AFF" : "#ccc", 
+            color: "white", 
+            border: "none", 
+            borderRadius: "8px", 
+            fontSize: "16px", 
+            fontWeight: 600, 
+            cursor: (answer.trim() || optional) && !submitting ? "pointer" : "not-allowed",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8
+          }}
+        >
+          {submitting ? "Сохранение..." : "Далее"}
+          {!submitting && <MoveRight size={20} />}
+        </button>
       </div>
     </div>
-    </>
   );
 }
 
@@ -363,7 +420,7 @@ function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
       {showImageModal && config.imageUrl && (
         <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
       )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
         <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
           {config.imageUrl && (
             <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
@@ -379,7 +436,7 @@ function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
         
         <div style={{ marginBottom: 20 }}>
           {shuffledOptions.map((option, i) => (
-            <button key={i} onClick={() => handleSelect(option)} disabled={noneSelected} style={{ display: "flex", alignItems: "center", width: "100%", padding: "14px 16px", marginBottom: 8, border: selected.includes(option) ? "2px solid #007AFF" : "1px solid #ddd", borderRadius: 8, background: selected.includes(option) ? "#e3f2fd" : "white", cursor: noneSelected ? "not-allowed" : "pointer", textAlign: "left", fontSize: 15, opacity: noneSelected ? 0.5 : 1 }}>
+            <button key={typeof option === 'string' ? option : `option-${i}-${(option as any).id || (option as any).value || i}`} onClick={() => handleSelect(option)} disabled={noneSelected} style={{ display: "flex", alignItems: "center", width: "100%", padding: "14px 16px", marginBottom: 8, border: selected.includes(option) ? "2px solid #007AFF" : "1px solid #ddd", borderRadius: 8, background: selected.includes(option) ? "#e3f2fd" : "white", cursor: noneSelected ? "not-allowed" : "pointer", textAlign: "left", fontSize: 15, opacity: noneSelected ? 0.5 : 1 }}>
               <span style={{ width: 24, height: 24, borderRadius: config.allowMultiple ? 4 : 12, border: selected.includes(option) ? "2px solid #007AFF" : "2px solid #ccc", marginRight: 12, display: "flex", alignItems: "center", justifyContent: "center", background: selected.includes(option) ? "#007AFF" : "white" }}>
                 {selected.includes(option) && <span style={{ color: "white", fontSize: 14 }}>✓</span>}
               </span>
@@ -410,12 +467,34 @@ function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
           )}
         </div>
         
+        {config.allowMultiple && (
+          <p style={{ margin: "0 0 20px 0", fontSize: "13px", color: "#666" }}>
+            Вы можете выбрать несколько вариантов ответа
+          </p>
+        )}
+        
         <div style={{ display: "flex", gap: 12 }}>
-          {config.optional && (
-            <button onClick={handleSkip} disabled={submitting} style={{ flex: 1, padding: "12px 24px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: "8px", fontSize: "16px", cursor: submitting ? "not-allowed" : "pointer" }}>Пропустить</button>
-          )}
-          <button onClick={handleSubmit} disabled={(!hasAnswer && !config.optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed" }}>
+          <button 
+            onClick={handleSubmit} 
+            disabled={(!hasAnswer && !config.optional) || submitting} 
+            style={{ 
+              flex: 1, 
+              padding: "12px 24px", 
+              background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", 
+              color: "white", 
+              border: "none", 
+              borderRadius: "8px", 
+              fontSize: "16px", 
+              fontWeight: 600, 
+              cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8
+            }}
+          >
             {submitting ? "Сохранение..." : "Далее"}
+            {!submitting && <MoveRight size={20} />}
           </button>
         </div>
       </div>
@@ -432,11 +511,73 @@ interface ContextBlockProps {
 
 function ContextBlock({ config, onNext }: ContextBlockProps) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
-      <div style={{ maxWidth: "600px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-        <h2 style={{ margin: "0 0 16px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>{config.title}</h2>
-        {config.description && <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "16px", lineHeight: 1.6 }}>{config.description}</p>}
-        <button onClick={onNext} style={{ width: "100%", padding: "12px 24px", background: "#007AFF", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: "pointer" }}>Далее</button>
+    <div
+      className="context-block-wrapper"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100vh",
+        width: "100%",
+        padding: "var(--space-4)",
+      }}
+    >
+      <div
+        className="context-block-content"
+        style={{
+          maxWidth: "var(--context-block-max-width)",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-4)",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: "var(--text-context-title)",
+            fontWeight: "var(--text-context-title-weight)",
+            color: "var(--color-foreground, #333)",
+          }}
+        >
+          {config.title}
+        </h2>
+        {config.description && (
+          <p
+            style={{
+              margin: 0,
+              fontSize: "var(--text-context-desc)",
+              fontWeight: "var(--text-context-desc-weight)",
+              color: "var(--color-muted-foreground, #666)",
+              lineHeight: 1.6,
+            }}
+          >
+            {config.description}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onNext}
+          style={{
+            width: "auto",
+            alignSelf: "flex-start",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "12px 24px",
+            background: "var(--color-primary, #007AFF)",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+            fontSize: "16px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Далее
+          <ArrowRight size={18} />
+        </button>
       </div>
     </div>
   );
@@ -513,22 +654,39 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
     const emojis3 = ["😞", "😐", "😊"];
     const emojis5 = ["😠", "😞", "😐", "😊", "😄"];
     const emojis = config.emojiCount === 3 ? emojis3 : emojis5;
-    
+    const hasLabels = (config.minLabel && config.minLabel.trim()) || (config.maxLabel && config.maxLabel.trim());
     return (
-      <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-        {emojis.map((emoji, i) => (
-          <button key={i} onClick={() => setValue(i + 1)} style={{ width: 56, height: 56, borderRadius: 12, border: value === i + 1 ? "3px solid #007AFF" : "1px solid #ddd", background: value === i + 1 ? "#e3f2fd" : "white", fontSize: 28, cursor: "pointer", transition: "transform 0.2s", transform: value === i + 1 ? "scale(1.1)" : "scale(1)" }}>{emoji}</button>
-        ))}
+      <div>
+        {hasLabels && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+          {emojis.map((emoji, i) => (
+            <button key={`emoji-${i}-${emoji}`} onClick={() => setValue(i + 1)} style={{ width: 56, height: 56, borderRadius: 12, border: value === i + 1 ? "3px solid #007AFF" : "1px solid #ddd", background: value === i + 1 ? "#e3f2fd" : "white", fontSize: 28, cursor: "pointer", transition: "transform 0.2s", transform: value === i + 1 ? "scale(1.1)" : "scale(1)" }}>{emoji}</button>
+          ))}
+        </div>
       </div>
     );
   };
 
   const renderStars = () => {
+    const hasLabels = (config.minLabel && config.minLabel.trim()) || (config.maxLabel && config.maxLabel.trim());
     return (
-      <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-        {[1, 2, 3, 4, 5].map(star => (
-          <button key={star} onClick={() => setValue(star)} style={{ background: "none", border: "none", fontSize: 36, cursor: "pointer", color: value !== null && star <= value ? "#ffc107" : "#ddd", transition: "transform 0.2s", transform: value !== null && star <= value ? "scale(1.1)" : "scale(1)" }}>★</button>
-        ))}
+      <div>
+        {hasLabels && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.minLabel?.trim() || ""}</span>
+            <span style={{ fontSize: 13, color: "#999" }}>{config.maxLabel?.trim() || ""}</span>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+          {[1, 2, 3, 4, 5].map(star => (
+            <button key={star} onClick={() => setValue(star)} style={{ background: "none", border: "none", fontSize: 36, cursor: "pointer", color: value !== null && star <= value ? "#ffc107" : "#ddd", transition: "transform 0.2s", transform: value !== null && star <= value ? "scale(1.1)" : "scale(1)" }}>★</button>
+          ))}
+        </div>
       </div>
     );
   };
@@ -538,7 +696,7 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
       {showImageModal && config.imageUrl && (
         <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
       )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
         <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
           {config.imageUrl && (
             <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
@@ -556,9 +714,6 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
         </div>
         
         <div style={{ display: "flex", gap: 12 }}>
-          {config.optional && (
-            <button onClick={handleSkip} disabled={submitting} style={{ flex: 1, padding: "12px 24px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: "8px", fontSize: "16px", cursor: submitting ? "not-allowed" : "pointer" }}>Пропустить</button>
-          )}
           <button onClick={handleSubmit} disabled={(value === null && !config.optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (value !== null || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (value !== null || config.optional) && !submitting ? "pointer" : "not-allowed" }}>
             {submitting ? "Сохранение..." : "Далее"}
           </button>
@@ -714,12 +869,12 @@ function PreferenceBlock({ config, onSubmit }: PreferenceBlockProps) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
       <div style={{ maxWidth: "1200px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
         <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333", textAlign: "center" }}>{config.question}</h2>
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(shuffledImages.length, 4)}, 1fr)`, gap: 20 }}>
           {shuffledImages.map((img, i) => (
-            <button key={i} onClick={() => handleSelectAll(i)} disabled={submitting} style={{ padding: 0, border: selected === i ? "3px solid #007AFF" : "2px solid #ddd", borderRadius: 12, overflow: "hidden", cursor: submitting ? "not-allowed" : "pointer", background: selected === i ? "#e3f2fd" : "white", transition: "all 0.2s" }}>
+            <button key={`preference-${i}-${img.url || img.id || i}`} onClick={() => handleSelectAll(i)} disabled={submitting} style={{ padding: 0, border: selected === i ? "3px solid #007AFF" : "2px solid #ddd", borderRadius: 12, overflow: "hidden", cursor: submitting ? "not-allowed" : "pointer", background: selected === i ? "#e3f2fd" : "white", transition: "all 0.2s" }}>
               <img src={img.url} alt={`Вариант ${i + 1}`} style={{ width: "100%", height: 250, objectFit: "cover" }} onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='250'%3E%3Crect fill='%23f0f0f0' width='200' height='250'/%3E%3Ctext fill='%23999' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНет изображения%3C/text%3E%3C/svg%3E"; }} />
               <div style={{ padding: 16, fontWeight: 500, fontSize: 15, textAlign: "center" }}>Вариант {String.fromCharCode(65 + i)}</div>
             </button>
@@ -763,13 +918,68 @@ function FiveSecondsBlock({ config, onComplete }: FiveSecondsBlockProps) {
 
   if (phase === "instruction") {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
-        <div style={{ maxWidth: "600px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>⏱️</div>
-          <h2 style={{ margin: "0 0 16px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>Тест на {config.duration} секунд</h2>
-          <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "16px", lineHeight: 1.6 }}>{config.instruction}</p>
-          <p style={{ margin: "0 0 24px 0", color: "#999", fontSize: "14px" }}>Изображение будет показано на {config.duration} секунд. Постарайтесь запомнить как можно больше деталей.</p>
-          <button onClick={startViewing} style={{ padding: "14px 32px", background: "#007AFF", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: "pointer" }}>Начать</button>
+      <div style={{ display: "flex", width: "100%", minHeight: "100vh", background: "#f5f5f7" }}>
+        <aside
+          style={{
+            width: "320px",
+            minWidth: "320px",
+            background: "white",
+            boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+            padding: "24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "20px",
+            zIndex: 2,
+          }}
+        >
+          <div style={{ fontSize: 40, marginBottom: 8 }}>⏱️</div>
+          <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 600, color: "#333" }}>Тест на {config.duration} секунд</h2>
+          <p style={{ margin: 0, color: "#666", fontSize: "15px", lineHeight: 1.6, flex: 1 }}>{config.instruction}</p>
+          <p style={{ margin: 0, color: "#999", fontSize: "14px", lineHeight: 1.5 }}>Изображение будет показано на {config.duration} секунд. Постарайтесь запомнить как можно больше деталей.</p>
+          <button
+            onClick={startViewing}
+            style={{
+              padding: "14px 24px",
+              background: "#007AFF",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              fontSize: "15px",
+              fontWeight: 600,
+              cursor: "pointer",
+              alignSelf: "flex-start",
+            }}
+          >
+            Начать
+          </button>
+        </aside>
+        <div
+          style={{
+            flex: 1,
+            position: "relative",
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#1a1a1a",
+          }}
+        >
+          <img
+            src={config.imageUrl}
+            alt=""
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              filter: "blur(20px)",
+              transform: "scale(1.05)",
+              opacity: 0.6,
+            }}
+            onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23ddd' width='400' height='300'/%3E%3Ctext fill='%23666' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНе удалось загрузить изображение%3C/text%3E%3C/svg%3E"; }}
+          />
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", pointerEvents: "none" }} />
         </div>
       </div>
     );
@@ -797,10 +1007,23 @@ function FirstClickBlock({ config, onSubmit }: FirstClickBlockProps) {
   const [showImageAt, setShowImageAt] = useState<number | null>(null);
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showSidebarOverlay, setShowSidebarOverlay] = useState(false);
+  const [showLabelOnTrigger, setShowLabelOnTrigger] = useState(false);
+  const labelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleShowImage = () => {
     setPhase("clicking");
     setShowImageAt(Date.now());
+  };
+
+  const handleHideSidebarFromOverlay = () => {
+    setShowSidebarOverlay(false);
+    setShowLabelOnTrigger(true);
+    if (labelTimeoutRef.current) clearTimeout(labelTimeoutRef.current);
+    labelTimeoutRef.current = window.setTimeout(() => {
+      setShowLabelOnTrigger(false);
+      labelTimeoutRef.current = null;
+    }, SHOW_TASK_LABEL_DURATION_MS);
   };
 
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
@@ -827,64 +1050,132 @@ function FirstClickBlock({ config, onSubmit }: FirstClickBlockProps) {
     setPending(null);
   };
 
-  if (phase === "instruction") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
-        <div style={{ maxWidth: "600px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", textAlign: "center" }}>
-          <h2 style={{ margin: "0 0 16px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>Тест первого клика</h2>
-          <p style={{ margin: "0 0 24px 0", color: "#666", fontSize: "16px", lineHeight: 1.6 }}>{config.instruction}</p>
-          <button onClick={handleShowImage} style={{ padding: "14px 32px", background: "#007AFF", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: "pointer" }}>Показать изображение</button>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => () => {
+    if (labelTimeoutRef.current) clearTimeout(labelTimeoutRef.current);
+  }, []);
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
-      <div style={{ position: "relative", display: "inline-block", maxWidth: "100%" }}>
+  const renderSidebarWithBlurredImage = (buttonLabel: string, onButtonClick: () => void) => (
+    <div style={{ display: "flex", width: "100%", minHeight: "100vh", background: "#f5f5f7" }}>
+      <aside
+        style={{
+          width: "320px",
+          minWidth: "320px",
+          background: "white",
+          boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+          padding: "24px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "20px",
+          zIndex: 2,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 600, color: "#333" }}>Тест первого клика</h2>
+        <p style={{ margin: 0, color: "#666", fontSize: "15px", lineHeight: 1.6, flex: 1 }}>{config.instruction}</p>
+        <button
+          onClick={onButtonClick}
+          style={{
+            padding: "14px 24px",
+            background: "var(--color-primary, #007AFF)",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+            fontSize: "15px",
+            fontWeight: 600,
+            cursor: "pointer",
+            alignSelf: "flex-start",
+          }}
+        >
+          {buttonLabel}
+        </button>
+      </aside>
+      <div
+        style={{
+          flex: 1,
+          position: "relative",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#1a1a1a",
+        }}
+      >
         <img
           src={config.imageUrl}
           alt=""
-          onClick={handleImageClick}
-          style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", cursor: "crosshair", borderRadius: "8px", border: "1px solid #e0e0e0", display: "block" }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            filter: "blur(20px)",
+            transform: "scale(1.05)",
+            opacity: 0.6,
+          }}
           onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23ddd' width='400' height='300'/%3E%3Ctext fill='%23666' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНе удалось загрузить%3C/text%3E%3C/svg%3E"; }}
         />
-        {pending && (
-          <>
-            <div
-              style={{
-                position: "absolute",
-                left: `${pending.x * 100}%`,
-                top: `${pending.y * 100}%`,
-                transform: "translate(-50%, -50%)",
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                background: "#22c55e",
-                border: "2px solid white",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                pointerEvents: "none",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: `${pending.x * 100}%`,
-                top: `${pending.y * 100}%`,
-                transform: "translate(-50%, -100%)",
-                display: "flex",
-                gap: 8,
-                marginTop: -8,
-                pointerEvents: "auto",
-              }}
-            >
-              <button onClick={(e) => { e.stopPropagation(); handleConfirm(); }} disabled={submitting} style={{ padding: "8px 16px", background: "#22c55e", color: "white", border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer" }}>Подтвердить клик</button>
-              <button onClick={(e) => { e.stopPropagation(); handleCancel(); }} disabled={submitting} style={{ padding: "8px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer" }}>Отменить клик</button>
-            </div>
-          </>
-        )}
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", pointerEvents: "none" }} />
       </div>
     </div>
+  );
+
+  if (phase === "instruction") {
+    return renderSidebarWithBlurredImage("Показать изображение", handleShowImage);
+  }
+
+  if (phase === "clicking" && showSidebarOverlay) {
+    return renderSidebarWithBlurredImage("Показать изображение", handleHideSidebarFromOverlay);
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
+        <div style={{ position: "relative", display: "inline-block", maxWidth: "100%" }}>
+          <img
+            src={config.imageUrl}
+            alt=""
+            onClick={handleImageClick}
+            style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", cursor: "crosshair", borderRadius: "8px", border: "1px solid #e0e0e0", display: "block" }}
+            onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23ddd' width='400' height='300'/%3E%3Ctext fill='%23666' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНе удалось загрузить%3C/text%3E%3C/svg%3E"; }}
+          />
+          {pending && (
+            <>
+              <div
+                style={{
+                  position: "absolute",
+                  left: `${pending.x * 100}%`,
+                  top: `${pending.y * 100}%`,
+                  transform: "translate(-50%, -50%)",
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: "#22c55e",
+                  border: "2px solid white",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  pointerEvents: "none",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: `${pending.x * 100}%`,
+                  top: `${pending.y * 100}%`,
+                  transform: "translate(-50%, -100%)",
+                  display: "flex",
+                  gap: 8,
+                  marginTop: -8,
+                  pointerEvents: "auto",
+                }}
+              >
+                <button onClick={(e) => { e.stopPropagation(); handleConfirm(); }} disabled={submitting} style={{ padding: "8px 16px", background: "#22c55e", color: "white", border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer" }}>Подтвердить клик</button>
+                <button onClick={(e) => { e.stopPropagation(); handleCancel(); }} disabled={submitting} style={{ padding: "8px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer" }}>Отменить клик</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      <ShowTaskTrigger onClick={() => setShowSidebarOverlay(true)} showLabel={showLabelOnTrigger} />
+    </>
   );
 }
 
@@ -1214,40 +1505,22 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
         {/* Кнопки */}
         <div style={{ display: "flex", gap: 12, flexDirection: "column" }}>
           <div style={{ display: "flex", gap: 12 }}>
-            {config.allowSkip && (
-              <button
-                onClick={handleSkip}
-                disabled={submitting}
-                style={{
-                  flex: 1,
-                  padding: "14px 24px",
-                  background: "#f5f5f5",
-                  color: "#666",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  cursor: submitting ? "not-allowed" : "pointer"
-                }}
-              >
-                Пропустить
-              </button>
-            )}
             <button
-              onClick={handleSubmit}
-              disabled={!hasSelection || submitting}
+              onClick={hasSelection ? handleSubmit : handleSkip}
+              disabled={(!hasSelection && !config.allowSkip) || submitting}
               style={{
                 flex: 1,
                 padding: "14px 24px",
-                background: hasSelection && !submitting ? "#007AFF" : "#ccc",
+                background: (hasSelection || config.allowSkip) && !submitting ? "#007AFF" : "#ccc",
                 color: "white",
                 border: "none",
                 borderRadius: "8px",
                 fontSize: "16px",
                 fontWeight: 600,
-                cursor: hasSelection && !submitting ? "pointer" : "not-allowed"
+                cursor: (hasSelection || config.allowSkip) && !submitting ? "pointer" : "not-allowed"
               }}
             >
-              {submitting ? "Сохранение..." : "Подтвердить выбор"}
+              {submitting ? "Сохранение..." : "Далее"}
             </button>
           </div>
           <button
@@ -1417,10 +1690,8 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
   // Перетаскиваемая карточка
   const [draggingCard, setDraggingCard] = useState<CardSortingCard | null>(null);
   
-  // Показать зону создания категории
+  // Показать зону создания категории (подсветка при drag over)
   const [showCreateCategoryZone, setShowCreateCategoryZone] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [pendingCardForNewCategory, setPendingCardForNewCategory] = useState<CardSortingCard | null>(null);
   
   const allCategories = [...shuffledCategories, ...userCategories];
   const sortedCount = shuffledCards.length - unsortedCards.length;
@@ -1430,7 +1701,9 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
     setStartTime(Date.now());
   };
   
-  const handleDragStart = (card: CardSortingCard) => {
+  const handleDragStart = (e: React.DragEvent, card: CardSortingCard) => {
+    e.dataTransfer.setData("text/plain", card.id);
+    e.dataTransfer.effectAllowed = "move";
     setDraggingCard(card);
   };
   
@@ -1465,38 +1738,26 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
   
   const handleDropOnCreateCategory = () => {
     if (!draggingCard || config.sortingType === "closed") return;
-    setPendingCardForNewCategory(draggingCard);
-    setDraggingCard(null);
-    setShowCreateCategoryZone(false);
-    setNewCategoryName("");
-  };
-  
-  const handleCreateCategory = () => {
-    if (!newCategoryName.trim() || !pendingCardForNewCategory) return;
-    
     const newCat: CardSortingCategory = {
       id: crypto.randomUUID(),
-      name: newCategoryName.trim()
+      name: ""
     };
-    
     setUserCategories(prev => [...prev, newCat]);
-    
-    // Удаляем карточку из несортированных
-    setUnsortedCards(prev => prev.filter(c => c.id !== pendingCardForNewCategory.id));
-    
-    // Добавляем в новую категорию
-    setSortedCards(prev => ({
-      ...prev,
-      [newCat.id]: [pendingCardForNewCategory]
-    }));
-    
-    setPendingCardForNewCategory(null);
-    setNewCategoryName("");
+    setUnsortedCards(prev => prev.filter(c => c.id !== draggingCard.id));
+    setSortedCards(prev => {
+      const newSorted = { ...prev };
+      Object.keys(newSorted).forEach(catId => {
+        newSorted[catId] = newSorted[catId].filter(c => c.id !== draggingCard.id);
+      });
+      newSorted[newCat.id] = [draggingCard];
+      return newSorted;
+    });
+    setDraggingCard(null);
+    setShowCreateCategoryZone(false);
   };
   
-  const handleCancelCreateCategory = () => {
-    setPendingCardForNewCategory(null);
-    setNewCategoryName("");
+  const handleUpdateCategoryName = (categoryId: string, newName: string) => {
+    setUserCategories(prev => prev.map(c => c.id === categoryId ? { ...c, name: newName } : c));
   };
   
   const handleRemoveCategory = (categoryId: string) => {
@@ -1554,127 +1815,60 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
     }
   };
   
-  // Intro phase
+  // Intro phase: левый сайдбар с заданием, справа затемнение
   if (phase === "intro") {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 20, background: "#f5f5f7" }}>
-        <div style={{ maxWidth: 600, width: "100%", background: "white", borderRadius: 12, padding: 32, boxShadow: "0 2px 8px rgba(0,0,0,0.1)", textAlign: "center" }}>
-          <h2 style={{ margin: "0 0 24px 0", fontSize: 28, fontWeight: 700, color: "#333" }}>Сортировка карточек</h2>
-          <p style={{ margin: "0 0 16px 0", color: "#666", fontSize: 16, lineHeight: 1.6 }}>
-            Отсортируйте каждую карточку в категорию, которая вам кажется наиболее подходящей. Перетащите карточки в правую часть страницы, чтобы создать категории.
-          </p>
-          <p style={{ margin: "0 0 32px 0", color: "#999", fontSize: 14 }}>
-            Просто делайте то, что кажется вам наиболее подходящим, нет правильных или неправильных ответов.
+      <div style={{ display: "flex", width: "100%", minHeight: "100vh", background: "#f5f5f7" }}>
+        <aside style={{ width: 320, minWidth: 320, background: "white", boxShadow: "2px 0 12px rgba(0,0,0,0.08)", padding: 24, display: "flex", flexDirection: "column", gap: 20, zIndex: 2 }}>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#333" }}>Сортировка карточки</h2>
+          <p style={{ margin: 0, color: "#666", fontSize: 15, lineHeight: 1.6, flex: 1, whiteSpace: "pre-wrap" }}>{config.task || ""}</p>
+          <p style={{ margin: 0, color: "#666", fontSize: 15, lineHeight: 1.6 }}>
+            Отсортируйте каждую карточку в категорию, которая вам кажется наиболее подходящей, перетащите карточки в правую часть страницы, чтобы создать категории. Просто делайте то, что кажется вам наиболее подходящим, нет правильных или неправильных ответов.
           </p>
           <button
             onClick={handleStart}
             style={{
-              padding: "14px 32px",
+              padding: "14px 24px",
               background: "#007AFF",
               color: "white",
               border: "none",
               borderRadius: 8,
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: 600,
-              cursor: "pointer"
+              cursor: "pointer",
+              alignSelf: "flex-start",
             }}
           >
             Начать
           </button>
+        </aside>
+        <div style={{ flex: 1, position: "relative" }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)", pointerEvents: "none" }} />
         </div>
       </div>
     );
   }
   
-  // Modal for creating new category
-  if (pendingCardForNewCategory) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 20, background: "#f5f5f7" }}>
-        <div style={{ maxWidth: 400, width: "100%", background: "white", borderRadius: 12, padding: 24, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }}>
-          <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600 }}>Создать новую категорию</h3>
-          <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#666" }}>
-            Карточка: <strong>{pendingCardForNewCategory.title}</strong>
-          </p>
-          <input
-            type="text"
-            value={newCategoryName}
-            onChange={e => setNewCategoryName(e.target.value)}
-            placeholder="Название категории"
-            autoFocus
-            style={{
-              width: "100%",
-              padding: "12px",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              fontSize: 14,
-              marginBottom: 16,
-              boxSizing: "border-box"
-            }}
-            onKeyDown={e => {
-              if (e.key === "Enter" && newCategoryName.trim()) {
-                handleCreateCategory();
-              }
-            }}
-          />
-          <div style={{ display: "flex", gap: 12 }}>
-            <button
-              onClick={handleCancelCreateCategory}
-              style={{
-                flex: 1,
-                padding: "10px",
-                background: "#f5f5f5",
-                color: "#666",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 14,
-                cursor: "pointer"
-              }}
-            >
-              Отмена
-            </button>
-            <button
-              onClick={handleCreateCategory}
-              disabled={!newCategoryName.trim()}
-              style={{
-                flex: 1,
-                padding: "10px",
-                background: newCategoryName.trim() ? "#007AFF" : "#ccc",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: newCategoryName.trim() ? "pointer" : "not-allowed"
-              }}
-            >
-              Создать
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  
-  // Sorting phase
+  // Sorting phase: слева сайдбар (задание + карточки + прогресс + Готово), справа категории горизонтально
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#f5f5f7" }}>
-      {/* Left side - Unsorted cards */}
-      <div style={{ width: 280, padding: 20, borderRight: "1px solid #e0e0e0", background: "white", display: "flex", flexDirection: "column" }}>
+    <div style={{ display: "flex", width: "100%", minHeight: "100vh", background: "#f5f5f7" }}>
+      {/* Left sidebar - task + cards list + progress + Готово */}
+      <div style={{ width: 280, padding: "16px 20px 16px 16px", borderRight: "1px solid #e0e0e0", background: "white", display: "flex", flexDirection: "column", flexShrink: 0, minHeight: 0, overflowY: "auto" }}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>{config.task}</div>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>Карточки</div>
-          <div style={{ fontSize: 13, color: "#999" }}>{sortedCount} / {shuffledCards.length}</div>
-          <div style={{ marginTop: 8, height: 4, background: "#e0e0e0", borderRadius: 2 }}>
-            <div style={{ height: "100%", background: "#007AFF", borderRadius: 2, width: `${(sortedCount / shuffledCards.length) * 100}%`, transition: "width 0.3s" }} />
+          <p style={{ fontSize: 14, color: "#666", marginBottom: 12, whiteSpace: "pre-wrap" }}>{config.task}</p>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Карточки</div>
+          <div style={{ fontSize: 13, color: "#999" }}>{sortedCount} из {shuffledCards.length}</div>
+          <div style={{ marginTop: 8, height: 6, background: "#e0e0e0", borderRadius: 3 }}>
+            <div style={{ height: "100%", background: "#007AFF", borderRadius: 3, width: `${shuffledCards.length ? (sortedCount / shuffledCards.length) * 100 : 0}%`, transition: "width 0.3s" }} />
           </div>
         </div>
         
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div style={{ flex: 1, minHeight: 0 }}>
           {unsortedCards.map(card => (
             <div
               key={card.id}
               draggable
-              onDragStart={() => handleDragStart(card)}
+              onDragStart={e => handleDragStart(e, card)}
               onDragEnd={handleDragEnd}
               style={{
                 padding: "12px 16px",
@@ -1725,13 +1919,13 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
             cursor: canSubmit && !submitting ? "pointer" : "not-allowed"
           }}
         >
-          {submitting ? "Сохранение..." : "Завершить"}
+          {submitting ? "Сохранение..." : "Готово"}
         </button>
       </div>
       
-      {/* Right side - Categories */}
-      <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 16 }}>
+      {/* Right side - Categories horizontally */}
+      <div style={{ flex: 1, minWidth: 0, padding: 20, overflowX: "auto", overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "row", gap: 16, minHeight: "100%", alignItems: "flex-start" }}>
           {allCategories.map(cat => {
             const isUserCreated = userCategories.some(uc => uc.id === cat.id);
             const categoryCards = sortedCards[cat.id] || [];
@@ -1746,19 +1940,41 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
                   borderRadius: 12,
                   border: draggingCard ? "2px dashed #007AFF" : "1px solid #e0e0e0",
                   minHeight: 200,
+                  minWidth: 220,
+                  flex: "1 1 220px",
                   display: "flex",
                   flexDirection: "column"
                 }}
               >
-                <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>{cat.name}</span>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  {isUserCreated ? (
+                    <input
+                      type="text"
+                      value={cat.name}
+                      onChange={e => handleUpdateCategoryName(cat.id, e.target.value)}
+                      placeholder="Название категории"
+                      draggable={false}
+                      onDragStart={e => e.preventDefault()}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        padding: "6px 8px",
+                        border: "1px solid #e0e0e0",
+                        borderRadius: 6,
+                        fontSize: 14,
+                        fontWeight: 600
+                      }}
+                    />
+                  ) : (
+                    <span style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0 }}>{cat.name}</span>
+                  )}
                   {isUserCreated && (
                     <button
                       onClick={() => handleRemoveCategory(cat.id)}
-                      style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 18 }}
+                      style={{ background: "none", border: "none", color: "#999", cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
                       title="Удалить категорию"
                     >
-                      ×
+                      <Trash2 size={16} />
                     </button>
                   )}
                 </div>
@@ -1771,6 +1987,9 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
                     categoryCards.map(card => (
                       <div
                         key={card.id}
+                        draggable
+                        onDragStart={e => handleDragStart(e, card)}
+                        onDragEnd={handleDragEnd}
                         style={{
                           padding: "10px 12px",
                           background: "#f7f7f5",
@@ -1779,7 +1998,8 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
                           display: "flex",
                           justifyContent: "space-between",
                           alignItems: "center",
-                          gap: 8
+                          gap: 8,
+                          cursor: "grab"
                         }}
                       >
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, minWidth: 0 }}>
@@ -1789,7 +2009,9 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.title}</span>
                         </div>
                         <button
+                          type="button"
                           onClick={() => handleReturnCard(card, cat.id)}
+                          onMouseDown={e => e.stopPropagation()}
                           style={{ background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 16, flexShrink: 0 }}
                           title="Вернуть карточку"
                         >
@@ -1803,8 +2025,8 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
             );
           })}
           
-          {/* Create new category zone (only for open sorting) */}
-          {config.sortingType === "open" && (
+          {/* Create new category zone (only when dragging, open sorting) */}
+          {config.sortingType === "open" && draggingCard !== null && (
             <div
               onDragOver={e => { 
                 e.preventDefault(); 
@@ -1817,6 +2039,8 @@ function CardSortingBlock({ config, onSubmit }: CardSortingBlockProps) {
                 borderRadius: 12,
                 border: showCreateCategoryZone ? "2px dashed #007AFF" : "2px dashed #ccc",
                 minHeight: 200,
+                minWidth: 220,
+                flex: "1 1 220px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1952,7 +2176,7 @@ function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
       {showImageModal && config.imageUrl && (
         <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
       )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
         <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
           {config.imageUrl && (
             <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
@@ -2022,11 +2246,6 @@ function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
           </div>
           
           <div style={{ display: "flex", gap: 12 }}>
-            {config.optional && (
-              <button onClick={handleSkip} disabled={submitting} style={{ flex: 1, padding: "12px 24px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: "8px", fontSize: "16px", cursor: submitting ? "not-allowed" : "pointer" }}>
-                Пропустить
-              </button>
-            )}
             <button onClick={handleSubmit} disabled={(!hasAnswer && !config.optional) || submitting} style={{ flex: 1, padding: "12px 24px", background: (hasAnswer || config.optional) && !submitting ? "#007AFF" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: 600, cursor: (hasAnswer || config.optional) && !submitting ? "pointer" : "not-allowed" }}>
               {submitting ? "Сохранение..." : "Далее →"}
             </button>
@@ -2209,7 +2428,7 @@ function AgreementBlock({ config, onSubmit, onSkip }: AgreementBlockProps) {
           </div>
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", background: "#f5f5f7" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
         <div style={{ maxWidth: "900px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
           <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333" }}>
             {config.title || "Пожалуйста, ознакомьтесь и примите условия участия в исследовании"}
@@ -2320,8 +2539,9 @@ function ThankYouPage() {
 
 // ============= Основной компонент =============
 export default function StudyRunView() {
-  const params = useParams<{ token: string }>();
-  const token = params.token || null;
+  const params = useParams();
+  // Токен может содержать слэш (например base64url), поэтому берём весь путь после /run/ или /share/
+  const token = (params["*"] ?? params.token ?? "").replace(/^\/+/, "") || null;
 
   // Store selectors
   const {
@@ -2347,12 +2567,19 @@ export default function StudyRunView() {
   const [allResponses, setAllResponses] = useState<Record<string, any>>({});
 
   useEffect(() => {
+    console.log("StudyRunView: useEffect triggered", { token, studyRunLoading, studyRunError, studyData: !!studyData, runId });
+    
     if (!token) {
+      console.error("StudyRunView: Token is missing in URL");
       setStudyRunError("Токен не указан в URL");
       setStudyRunLoading(false);
       return;
     }
-    loadStudyAndStartRun(token);
+    
+    console.log("StudyRunView: Calling loadStudyAndStartRun with token:", token);
+    loadStudyAndStartRun(token).catch((err) => {
+      console.error("StudyRunView: Error in loadStudyAndStartRun:", err);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]); // Functions from store are stable
 
@@ -2361,26 +2588,56 @@ export default function StudyRunView() {
     if (!runId) return;
     
     const loadResponses = async () => {
-      const { data, error } = await supabase
-        .from("study_block_responses")
-        .select("block_id, answer")
-        .eq("run_id", runId);
-      
-      if (!error && data) {
-        const responsesMap: Record<string, any> = {};
-        data.forEach(r => {
-          responsesMap[r.block_id] = r.answer;
-        });
-        setAllResponses(responsesMap);
+      try {
+        const { data, error } = await supabase
+          .from("study_block_responses")
+          .select("block_id, answer")
+          .eq("run_id", runId);
+        
+        if (error) {
+          console.error("Error loading responses:", error);
+          return;
+        }
+        
+        if (data) {
+          const responsesMap: Record<string, any> = {};
+          data.forEach(r => {
+            responsesMap[r.block_id] = r.answer;
+          });
+          setAllResponses(responsesMap);
+        }
+      } catch (err) {
+        console.error("Unexpected error loading responses:", err);
       }
     };
     
     loadResponses();
   }, [runId]);
 
-  // Функция проверки условия логики
-  const checkLogicCondition = useCallback((condition: any, blockId: string): boolean => {
-    const answer = allResponses[blockId];
+  // Нормализация ответа к тексту и числу (для choice/scale и др.)
+  const getAnswerTextAndNumeric = useCallback((answer: any): { text: string; numeric?: number } => {
+    if (answer == null) return { text: "" };
+    if (typeof answer === "string") return { text: answer };
+    if (answer.text) return { text: answer.text };
+    if (Array.isArray(answer.selected)) return { text: answer.selected.join(", ") };
+    if (answer.selected !== undefined) return { text: String(answer.selected) };
+    if (typeof answer.value === "number") return { text: String(answer.value), numeric: answer.value };
+    if (answer.selections) return { text: JSON.stringify(answer.selections) };
+    return { text: JSON.stringify(answer) };
+  }, []);
+
+  // Функция проверки условия логики (responsesOverride — для только что отправленного ответа)
+  const checkLogicCondition = useCallback((condition: any, blockId: string, responsesOverride?: Record<string, any>): boolean => {
+    const responses = responsesOverride ?? allResponses;
+    const answer = responses[blockId];
+
+    if (condition.operator === "has_answer") {
+      if (answer == null) return false;
+      if (typeof answer === "string") return answer.trim().length > 0;
+      const { text, numeric } = getAnswerTextAndNumeric(answer);
+      return numeric != null || (text.length > 0 && text !== "{}");
+    }
+
     if (!answer) return false;
 
     // Для прототипов проверяем финальный экран
@@ -2393,26 +2650,10 @@ export default function StudyRunView() {
       }
     }
 
-    // Для остальных операторов извлекаем текст ответа
-    let answerText = "";
-    if (typeof answer === "string") {
-      answerText = answer;
-    } else if (answer.text) {
-      answerText = answer.text;
-    } else if (Array.isArray(answer.selected)) {
-      // Для choice блока с множественным выбором
-      answerText = answer.selected.join(", ");
-    } else if (answer.selected) {
-      // Для choice блока с одиночным выбором
-      answerText = String(answer.selected);
-    } else if (answer.selections) {
-      // Для matrix блока
-      answerText = JSON.stringify(answer.selections);
-    } else {
-      answerText = JSON.stringify(answer);
-    }
-
+    const { text: answerText, numeric: answerNumeric } = getAnswerTextAndNumeric(answer);
     const value = (condition.value || "").toLowerCase();
+    const condNum = Number(condition.value);
+
     switch (condition.operator) {
       case "contains":
         return answerText.toLowerCase().includes(value);
@@ -2422,26 +2663,54 @@ export default function StudyRunView() {
         return answerText === condition.value;
       case "not_equals":
         return answerText !== condition.value;
+      case "less_than":
+        return answerNumeric != null && !Number.isNaN(condNum) && answerNumeric < condNum;
+      case "greater_than":
+        return answerNumeric != null && !Number.isNaN(condNum) && answerNumeric > condNum;
       default:
         return false;
     }
-  }, [allResponses]);
+  }, [allResponses, getAnswerTextAndNumeric]);
 
-  // Функция проверки "Показать при условии"
-  const shouldShowBlock = useCallback((block: any): boolean => {
+  // Вычисление цепочки условий с комбинаторами И/Или (combinators[i] между condition[i] и condition[i+1])
+  // defaultCombinator: при отсутствии combinators — "and" для showOnCondition, "or" для правил перехода
+  const evaluateConditions = useCallback(
+    (
+      conditions: any[],
+      combinators: ("and" | "or")[] | undefined,
+      checkOne: (cond: any) => boolean,
+      defaultCombinator: "and" | "or" = "and"
+    ): boolean => {
+      if (conditions.length === 0) return true;
+      if (conditions.length === 1) return checkOne(conditions[0]);
+      let result = checkOne(conditions[0]);
+      const combs = combinators ?? [];
+      for (let i = 1; i < conditions.length; i++) {
+        const next = checkOne(conditions[i]);
+        const op = combs[i - 1] ?? defaultCombinator;
+        result = op === "and" ? result && next : result || next;
+      }
+      return result;
+    },
+    []
+  );
+
+  // Функция проверки "Показать при условии" (responsesOverride — merged с только что отправленным)
+  const shouldShowBlock = useCallback((block: any, responsesOverride?: Record<string, any>): boolean => {
     const logic = block.config?.logic;
     if (!logic?.showOnCondition?.enabled) return true;
 
-    const { conditions, action } = logic.showOnCondition;
+    const { conditions, combinators, action } = logic.showOnCondition;
     if (conditions.length === 0) return true;
 
-    // Проверяем все условия (связаны через AND)
-    const allConditionsMet = conditions.every(cond => 
-      checkLogicCondition(cond, cond.blockId)
+    const allConditionsMet = evaluateConditions(
+      conditions,
+      combinators,
+      (cond: any) => checkLogicCondition(cond, cond.blockId, responsesOverride)
     );
 
     return action === "show" ? allConditionsMet : !allConditionsMet;
-  }, [checkLogicCondition]);
+  }, [checkLogicCondition, evaluateConditions]);
 
   // Функция получения следующего блока с учетом логики
   const getNextBlockWithLogic = useCallback((currentBlock: any, currentAnswer: any): number | "end" => {
@@ -2458,38 +2727,53 @@ export default function StudyRunView() {
     // Обновляем ответ для текущего блока перед проверкой
     const updatedResponses = { ...allResponses, [currentBlock.id]: currentAnswer };
 
-    // Проверяем каждое правило
-    for (const rule of rules) {
-      // Условия в правиле связаны через OR
-      const anyConditionMet = rule.conditions.some(cond => {
-        // Для логического перехода проверяем ответ на текущий блок
-        if (cond.blockId === currentBlock.id) {
-          const tempAnswer = updatedResponses[currentBlock.id];
-          if (!tempAnswer) return false;
-          const answerText = typeof tempAnswer === "string" 
-            ? tempAnswer 
-            : tempAnswer.text || JSON.stringify(tempAnswer);
-          const value = (cond.value || "").toLowerCase();
-          switch (cond.operator) {
-            case "contains":
-              return answerText.toLowerCase().includes(value);
-            case "not_contains":
-              return !answerText.toLowerCase().includes(value);
-            case "equals":
-              return answerText === cond.value;
-            case "not_equals":
-              return answerText !== cond.value;
-            default:
-              return false;
-          }
+    const checkOneRuleCondition = (cond: any): boolean => {
+      if (cond.blockId === currentBlock.id) {
+        const tempAnswer = updatedResponses[currentBlock.id];
+        if (cond.operator === "has_answer") {
+          if (tempAnswer == null) return false;
+          if (typeof tempAnswer === "string") return tempAnswer.trim().length > 0;
+          const { text, numeric } = getAnswerTextAndNumeric(tempAnswer);
+          return numeric != null || (text.length > 0 && text !== "{}");
         }
-        // Или проверяем ответ на другой блок
-        return checkLogicCondition(cond, cond.blockId);
-      });
+        if (!tempAnswer) return false;
+        const { text: answerText, numeric: answerNumeric } = getAnswerTextAndNumeric(tempAnswer);
+        const value = (cond.value || "").toLowerCase();
+        const condNum = Number(cond.value);
+        switch (cond.operator) {
+          case "contains":
+            return answerText.toLowerCase().includes(value);
+          case "not_contains":
+            return !answerText.toLowerCase().includes(value);
+          case "equals":
+            return answerText === cond.value;
+          case "not_equals":
+            return answerText !== cond.value;
+          case "less_than":
+            return answerNumeric != null && !Number.isNaN(condNum) && answerNumeric < condNum;
+          case "greater_than":
+            return answerNumeric != null && !Number.isNaN(condNum) && answerNumeric > condNum;
+          default:
+            return false;
+        }
+      }
+      return checkLogicCondition(cond, cond.blockId, updatedResponses);
+    };
+
+    for (const rule of rules) {
+      const anyConditionMet = evaluateConditions(
+        rule.conditions,
+        rule.combinators,
+        checkOneRuleCondition,
+        "or"
+      );
 
       if (anyConditionMet) {
         if (rule.goToBlockId === "__end__") {
           return "end";
+        }
+        if (rule.goToBlockId === "__next__") {
+          return currentBlockIndex + 1;
         }
         const targetIndex = studyData.blocks.findIndex(b => b.id === rule.goToBlockId);
         if (targetIndex !== undefined && targetIndex >= 0) {
@@ -2503,6 +2787,9 @@ export default function StudyRunView() {
       if (elseGoToBlockId === "__end__") {
         return "end";
       }
+      if (elseGoToBlockId === "__next__") {
+        return currentBlockIndex + 1;
+      }
       const targetIndex = studyData.blocks.findIndex(b => b.id === elseGoToBlockId);
       if (targetIndex !== undefined && targetIndex >= 0) {
         return targetIndex;
@@ -2511,13 +2798,16 @@ export default function StudyRunView() {
 
     // По умолчанию - следующий блок
     return currentBlockIndex + 1;
-  }, [studyData, currentBlockIndex, allResponses, checkLogicCondition]);
+  }, [studyData, currentBlockIndex, allResponses, checkLogicCondition, getAnswerTextAndNumeric, evaluateConditions]);
 
   const handleNextBlock = useCallback(async (submittedAnswer?: any) => {
     if (!studyData || !runId) return;
 
     const currentBlock = studyData.blocks[currentBlockIndex];
     if (!currentBlock) return;
+
+    // Объединённые ответы: только что отправленный сразу учитывается при проверке видимости блоков
+    const nextResponses = { ...allResponses, [currentBlock.id]: submittedAnswer };
 
     // Обновляем ответы после сохранения
     if (submittedAnswer) {
@@ -2541,11 +2831,11 @@ export default function StudyRunView() {
     }
 
     if (typeof nextBlockIndex === "number") {
-      // Пропускаем блоки, которые должны быть скрыты
+      // Пропускаем блоки, которые должны быть скрыты (используем nextResponses, чтобы видеть только что отправленный ответ)
       let actualNextIndex = nextBlockIndex;
       while (actualNextIndex < studyData.blocks.length) {
         const nextBlock = studyData.blocks[actualNextIndex];
-        if (shouldShowBlock(nextBlock)) {
+        if (shouldShowBlock(nextBlock, nextResponses)) {
           break;
         }
         actualNextIndex++;
@@ -2720,12 +3010,27 @@ export default function StudyRunView() {
   };
 
   // Рендеринг
+  console.log("StudyRunView: Render state", { 
+    studyRunLoading, 
+    studyRunError, 
+    finished, 
+    hasStudyData: !!studyData, 
+    runId, 
+    currentBlockIndex,
+    blocksCount: studyData?.blocks?.length,
+    currentBlockType: studyData?.blocks?.[currentBlockIndex]?.type,
+    currentBlockId: studyData?.blocks?.[currentBlockIndex]?.id,
+    currentBlockSessionId,
+    token
+  });
 
   if (studyRunLoading) {
+    console.log("StudyRunView: Rendering loading state");
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontSize: "18px", color: "#666" }}>Загрузка теста...</div>;
   }
 
   if (studyRunError) {
+    console.log("StudyRunView: Rendering error state", { studyRunError });
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px" }}>
         <div style={{ maxWidth: "500px", padding: "24px", background: "#ffebee", color: "#c62828", borderRadius: "8px", textAlign: "center" }}>
@@ -2736,21 +3041,44 @@ export default function StudyRunView() {
     );
   }
 
-  if (finished) return <ThankYouPage />;
+  if (finished) {
+    console.log("StudyRunView: Rendering finished state");
+    return <ThankYouPage />;
+  }
 
   if (!studyData || !runId) {
+    console.warn("StudyRunView: Missing studyData or runId", { hasStudyData: !!studyData, runId });
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontSize: "18px", color: "#666" }}>Тест не найден</div>;
   }
 
   const currentBlock = studyData.blocks[currentBlockIndex];
+  console.log("StudyRunView: Current block check", { 
+    currentBlockIndex, 
+    blocksCount: studyData.blocks.length,
+    hasCurrentBlock: !!currentBlock,
+    currentBlockType: currentBlock?.type,
+    currentBlockId: currentBlock?.id,
+    allBlockTypes: studyData.blocks.map(b => ({ type: b.type, id: b.id }))
+  });
+  
   if (!currentBlock) {
+    console.error("StudyRunView: Current block is null!", { currentBlockIndex, blocksCount: studyData.blocks.length });
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontSize: "18px", color: "#666" }}>Блок не найден</div>;
   }
+  
+  console.log("StudyRunView: Rendering block", { type: currentBlock.type, id: currentBlock.id });
 
   const progress = ((currentBlockIndex + 1) / studyData.blocks.length) * 100;
 
+  const prototypeConfig = (currentBlock.config || {}) as {
+    eye_tracking_enabled?: boolean;
+    record_screen?: boolean;
+    record_camera?: boolean;
+    record_audio?: boolean;
+  };
+
   return (
-    <div style={{ position: "relative", minHeight: "100vh" }}>
+    <div style={{ position: "relative", width: "100%", minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
       {/* Progress bar */}
       <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: "4px", background: "#e0e0e0", zIndex: 1000 }}>
         <div style={{ height: "100%", width: `${progress}%`, background: "#007AFF", transition: "width 0.3s ease" }} />
@@ -2763,17 +3091,37 @@ export default function StudyRunView() {
 
       {/* Render current block */}
       {currentBlock.type === "prototype" ? (
-        <PrototypeBlockWrapper
-          prototypeId={currentBlock.prototype_id!}
-          instructions={currentBlock.instructions}
-          sessionId={currentBlockSessionId}
-          runId={runId}
-          blockId={currentBlock.id}
-          studyId={studyData.study.id}
-          onComplete={handlePrototypeComplete}
-        />
+        (() => {
+          console.log("StudyRunView: Rendering prototype block", { 
+            prototypeId: currentBlock.prototype_id, 
+            currentBlockSessionId,
+            hasSessionId: !!currentBlockSessionId,
+            recordScreen: !!prototypeConfig.record_screen,
+            recordCamera: !!prototypeConfig.record_camera,
+            recordAudio: !!prototypeConfig.record_audio,
+            eyeTracking: !!prototypeConfig.eye_tracking_enabled,
+            config: prototypeConfig
+          });
+          return (
+            <PrototypeBlockWrapper
+              key={currentBlock.id}
+              prototypeId={currentBlock.prototype_id!}
+              instructions={currentBlock.instructions}
+              sessionId={currentBlockSessionId}
+              runId={runId}
+              blockId={currentBlock.id}
+              studyId={studyData.study.id}
+              enableEyeTracking={!!prototypeConfig.eye_tracking_enabled}
+              recordScreen={!!prototypeConfig.record_screen}
+              recordCamera={!!prototypeConfig.record_camera}
+              recordAudio={!!prototypeConfig.record_audio}
+              onComplete={handlePrototypeComplete}
+            />
+          );
+        })()
       ) : currentBlock.type === "open_question" ? (
         <OpenQuestionBlock
+          key={currentBlock.id}
           question={currentBlock.config?.question || "Вопрос"}
           optional={currentBlock.config?.optional}
           imageUrl={currentBlock.config?.imageUrl}
@@ -2782,58 +3130,68 @@ export default function StudyRunView() {
         />
       ) : currentBlock.type === "choice" ? (
         <ChoiceBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleChoiceSubmit}
           onSkip={handleNextBlock}
         />
       ) : currentBlock.type === "context" ? (
         <ContextBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onNext={handleNextBlock}
         />
       ) : currentBlock.type === "scale" ? (
         <ScaleBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleScaleSubmit}
           onSkip={handleNextBlock}
         />
       ) : currentBlock.type === "preference" ? (
         <PreferenceBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handlePreferenceSubmit}
         />
       ) : currentBlock.type === "five_seconds" ? (
         <FiveSecondsBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onComplete={handleNextBlock}
         />
       ) : currentBlock.type === "umux_lite" ? (
-        <UmuxLiteBlock onSubmit={handleUmuxLiteSubmit} />
+        <UmuxLiteBlock key={currentBlock.id} onSubmit={handleUmuxLiteSubmit} />
       ) : currentBlock.type === "card_sorting" ? (
         <CardSortingBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleCardSortingSubmit}
         />
       ) : currentBlock.type === "matrix" ? (
         <MatrixBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleMatrixSubmit}
           onSkip={currentBlock.config?.optional ? handleNextBlock : undefined}
         />
       ) : currentBlock.type === "agreement" ? (
         <AgreementBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleAgreementSubmit}
           onSkip={handleNextBlock}
         />
       ) : currentBlock.type === "tree_testing" ? (
         <TreeTestingBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleTreeTestingSubmit}
           onSkip={handleNextBlock}
         />
       ) : currentBlock.type === "first_click" ? (
         <FirstClickBlock
+          key={currentBlock.id}
           config={currentBlock.config}
           onSubmit={handleFirstClickSubmit}
         />
@@ -2850,12 +3208,37 @@ interface PrototypeBlockWrapperProps {
   runId: string;
   blockId: string;
   studyId: string;
+  enableEyeTracking: boolean;
+  recordScreen: boolean;
+  recordCamera: boolean;
+  recordAudio: boolean;
   onComplete: () => void;
 }
 
-function PrototypeBlockWrapper({ prototypeId, instructions, sessionId, runId, blockId, studyId, onComplete }: PrototypeBlockWrapperProps) {
+function PrototypeBlockWrapper({
+  prototypeId,
+  instructions,
+  sessionId,
+  runId,
+  blockId,
+  studyId,
+  enableEyeTracking,
+  recordScreen,
+  recordCamera,
+  recordAudio,
+  onComplete,
+}: PrototypeBlockWrapperProps) {
+  console.log("PrototypeBlockWrapper: Rendering", { 
+    prototypeId, 
+    sessionId, 
+    runId, 
+    blockId, 
+    studyId,
+    hasSessionId: !!sessionId 
+  });
+  
   return (
-    <div style={{ position: "relative", minHeight: "100vh" }}>
+    <div style={{ position: "relative", width: "100%", minHeight: "100vh" }}>
       <TestView 
         sessionId={sessionId}
         prototypeIdOverride={prototypeId}
@@ -2863,6 +3246,10 @@ function PrototypeBlockWrapper({ prototypeId, instructions, sessionId, runId, bl
         runIdOverride={runId}
         blockIdOverride={blockId}
         studyIdOverride={studyId}
+        enableEyeTracking={enableEyeTracking}
+        recordScreen={recordScreen}
+        recordCamera={recordCamera}
+        recordAudio={recordAudio}
         onComplete={onComplete}
       />
     </div>

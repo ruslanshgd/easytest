@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { isValidUUID } from "./utils/validation";
+import { styleColors, chartColors } from "./lib/styleUtils";
 
 // Используем те же интерфейсы из Analytics
 interface Session {
@@ -848,7 +849,7 @@ export default function PrototypePage() {
   };
 
   const sessionCardStyle = {
-    background: "#ffffff",
+    background: "var(--color-background)",
     borderRadius: 8,
     padding: 16,
     marginBottom: 12,
@@ -868,14 +869,14 @@ export default function PrototypePage() {
     fontFamily: "monospace",
     fontSize: 14,
     fontWeight: "bold",
-    color: "#333"
+    color: "var(--color-foreground)"
   };
 
   const metricsStyle = {
     display: "flex",
     gap: 16,
     fontSize: 12,
-    color: "#666"
+    color: "var(--color-muted-foreground)"
   };
 
   const badgeStyle = (completed: boolean, aborted: boolean = false, closed: boolean = false) => ({
@@ -883,8 +884,8 @@ export default function PrototypePage() {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: "bold",
-    background: completed ? "#4caf50" : closed ? "#f44336" : aborted ? "#ff9800" : "#9e9e9e",
-    color: "white"
+    background: completed ? "var(--color-success)" : closed ? "var(--color-destructive)" : aborted ? "var(--color-warning)" : "var(--color-muted-foreground)",
+    color: completed ? "var(--color-success-foreground)" : closed ? "var(--color-destructive-foreground)" : aborted ? "var(--color-warning-foreground)" : "var(--color-background)"
   });
 
   if (loading) {
@@ -900,7 +901,7 @@ export default function PrototypePage() {
     return (
       <div style={containerStyle}>
         <h2>Аналитика прототипа</h2>
-        <p style={{ color: "red" }}>Ошибка: {error}</p>
+        <p style={{ color: "var(--color-destructive)" }}>Ошибка: {error}</p>
         <button onClick={() => navigate("/")} style={{ marginTop: 16, padding: "8px 16px" }}>
           Вернуться к списку
         </button>
@@ -912,7 +913,7 @@ export default function PrototypePage() {
     return (
       <div style={containerStyle}>
         <h2>Аналитика прототипа</h2>
-        <p style={{ color: "red" }}>Неверный ID прототипа</p>
+        <p style={{ color: "var(--color-destructive)" }}>Неверный ID прототипа</p>
         <button onClick={() => navigate("/")} style={{ marginTop: 16, padding: "8px 16px" }}>
           Вернуться к списку
         </button>
@@ -948,47 +949,41 @@ export default function PrototypePage() {
       {/* Заголовок с кнопкой назад */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h2 style={{ margin: "0 0 8px 0", fontSize: 24, fontWeight: 600, color: "#333" }}>
+          <h2 className="m-0 mb-2 text-2xl font-semibold text-foreground">
             {taskDescription || `Прототип ${prototypeId.substring(0, 8)}...`}
           </h2>
-          <div style={{ 
-            display: "grid", 
-            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", 
-            gap: 12,
-            fontSize: 12,
-            color: "#666"
-          }}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 text-xs text-muted-foreground">
             <div>
-              <span style={{ color: "#999" }}>Запущено: </span>
-              <span style={{ fontWeight: "bold" }}>{metrics.total}</span>
+              <span className="text-muted-foreground/70">Запущено: </span>
+              <span className="font-bold">{metrics.total}</span>
             </div>
             <div>
-              <span style={{ color: "#999" }}>Пройдено: </span>
-              <span style={{ fontWeight: "bold", color: "#4caf50" }}>{metrics.completed}</span>
+              <span className="text-muted-foreground/70">Пройдено: </span>
+              <span className="font-bold text-success">{metrics.completed}</span>
             </div>
             <div>
-              <span style={{ color: "#999" }}>Прервано (сдался): </span>
-              <span style={{ fontWeight: "bold", color: "#ff9800" }}>{metrics.aborted}</span>
+              <span className="text-muted-foreground/70">Прервано (сдался): </span>
+              <span className="font-bold text-warning">{metrics.aborted}</span>
             </div>
             <div>
-              <span style={{ color: "#999" }}>Закрыто: </span>
-              <span style={{ fontWeight: "bold", color: "#f44336" }}>{metrics.closed}</span>
+              <span className="text-muted-foreground/70">Закрыто: </span>
+              <span className="font-bold text-destructive">{metrics.closed}</span>
             </div>
             <div>
-              <span style={{ color: "#999" }}>Всего брошено: </span>
-              <span style={{ fontWeight: "bold", color: "#ff5722" }}>{metrics.totalAbandoned}</span>
+              <span className="text-muted-foreground/70">Всего брошено: </span>
+              <span className="font-bold text-destructive">{metrics.totalAbandoned}</span>
             </div>
             <div>
-              <span style={{ color: "#999" }}>Конверсия: </span>
-              <span style={{ fontWeight: "bold", color: "#2196f3" }}>{metrics.conversionRate}%</span>
+              <span className="text-muted-foreground/70">Конверсия: </span>
+              <span className="font-bold text-primary">{metrics.conversionRate}%</span>
             </div>
             {metrics.avgUmuxLite !== null && metrics.avgUmuxLite !== undefined && (
               <div>
-                <span style={{ color: "#999" }}>UMUX Lite (среднее): </span>
-                <span style={{ fontWeight: "bold", color: "#9c27b0" }}>
+                <span className="text-muted-foreground/70">UMUX Lite (среднее): </span>
+                <span className="font-bold" style={{ color: chartColors.accent }}>
                   {metrics.avgUmuxLite.toFixed(1)}
                   {metrics.avgUmuxLiteSus !== null && metrics.avgUmuxLiteSus !== undefined && (
-                    <span style={{ fontSize: 11, color: "#999", marginLeft: 4 }}>
+                    <span className="text-xs text-muted-foreground/70 ml-1">
                       (SUS: {metrics.avgUmuxLiteSus.toFixed(1)})
                     </span>
                   )}
@@ -1001,8 +996,8 @@ export default function PrototypePage() {
           onClick={() => navigate("/")} 
           style={{ 
             padding: "8px 16px",
-            background: "#2196f3",
-            color: "white",
+            background: "var(--color-primary)",
+            color: "var(--color-primary-foreground)",
             border: "none",
             borderRadius: 4,
             cursor: "pointer",
@@ -1030,7 +1025,7 @@ export default function PrototypePage() {
               key={session.id}
               style={{
                 ...sessionCardStyle,
-                border: isSelected ? "2px solid #2196f3" : "none"
+                border: isSelected ? "2px solid var(--color-primary)" : "none"
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.boxShadow = "0 4px 8px rgba(0,0,0,0.15)";
@@ -1067,7 +1062,7 @@ export default function PrototypePage() {
                           </span>
                         )}
                         {(session.umux_lite_score !== null && session.umux_lite_score !== undefined) || (session.umux_lite_item1 !== null && session.umux_lite_item1 !== undefined) ? (
-                          <span style={{ color: "#2196f3", fontWeight: "bold" }}>
+                          <span className="text-primary font-bold">
                             {session.umux_lite_score !== null && session.umux_lite_score !== undefined ? (
                               <>
                                 UMUX Lite: {session.umux_lite_score.toFixed(1)}
@@ -1116,8 +1111,8 @@ export default function PrototypePage() {
                       disabled={deleting}
                       style={{
                         padding: "6px 12px",
-                        background: "#f44336",
-                        color: "white",
+                        background: "var(--color-destructive)",
+                        color: "var(--color-destructive-foreground)",
                         border: "none",
                         borderRadius: 4,
                         cursor: deleting ? "not-allowed" : "pointer",
@@ -1132,25 +1127,19 @@ export default function PrototypePage() {
               </div>
 
               {isExpanded && (
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
+                <div className="mt-4 pt-4 border-t border-border">
                   {session.feedback_text && (
-                    <div style={{ 
-                      marginBottom: 16, 
-                      padding: 12, 
-                      background: "#f5f5f5", 
-                      borderRadius: 4,
-                      borderLeft: "3px solid #2196f3"
-                    }}>
-                      <div style={{ fontSize: 12, fontWeight: "bold", color: "#333", marginBottom: 8 }}>
+                    <div className="mb-4 p-3 bg-muted rounded-md border-l-4 border-primary">
+                      <div className="text-xs font-bold text-foreground mb-2">
                         💬 Фидбэк от респондента:
                       </div>
-                      <div style={{ fontSize: 14, color: "#666", whiteSpace: "pre-wrap" }}>
+                      <div className="text-sm text-muted-foreground whitespace-pre-wrap">
                         {session.feedback_text}
                       </div>
                     </div>
                   )}
                   {events.length === 0 ? (
-                    <p style={{ color: "#999" }}>Загрузка событий...</p>
+                    <p className="text-muted-foreground/70">Загрузка событий...</p>
                   ) : (
                     <div>
                       <h3 style={{ fontSize: 14, marginBottom: 12 }}>
@@ -1159,24 +1148,16 @@ export default function PrototypePage() {
                       <div style={{ maxHeight: "400px", overflow: "auto" }}>
                         <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                           <thead>
-                            <tr style={{ background: "#f5f5f5" }}>
-                              <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                                Время
-                              </th>
-                              <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                                Тип
-                              </th>
-                              <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                                Экран
-                              </th>
-                              <th style={{ padding: "8px", textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                                Область клика
-                              </th>
+                            <tr className="bg-muted">
+                              <th className="p-2 text-left border-b border-input">Время</th>
+                              <th className="p-2 text-left border-b border-input">Тип</th>
+                              <th className="p-2 text-left border-b border-input">Экран</th>
+                              <th className="p-2 text-left border-b border-input">Область клика</th>
                             </tr>
                           </thead>
                           <tbody>
                             {groupClicksByScreen(events, session.id).map((groupedEvent, idx) => (
-                              <tr key={`${groupedEvent.timestamp}-${idx}`} style={{ borderBottom: "1px solid #eee" }}>
+                              <tr key={`${groupedEvent.timestamp}-${idx}`} className="border-b border-border">
                                 <td style={{ padding: "8px" }}>
                                   {new Date(groupedEvent.timestamp).toLocaleTimeString("ru-RU")}
                                 </td>
@@ -1184,15 +1165,15 @@ export default function PrototypePage() {
                                   <span style={{
                                     padding: "2px 6px",
                                     borderRadius: 3,
-                                    background: groupedEvent.event_type === "completed" ? "#4caf50" : 
-                                              groupedEvent.event_type === "clicks" ? "#2196f3" :
-                                              groupedEvent.event_type === "hotspot_click" ? "#2196f3" :
-                                              groupedEvent.event_type === "scroll" ? "#9c27b0" :
-                                              groupedEvent.event_type === "scroll_start" ? "#9c27b0" :
-                                              groupedEvent.event_type === "scroll_end" ? "#9c27b0" :
-                                              groupedEvent.event_type === "closed" ? "#f44336" :
-                                              groupedEvent.event_type === "aborted" ? "#ff9800" : "#ff9800",
-                                    color: "white",
+                                    background: groupedEvent.event_type === "completed" ? "var(--color-success)" : 
+                                              groupedEvent.event_type === "clicks" ? "var(--color-primary)" :
+                                              groupedEvent.event_type === "hotspot_click" ? "var(--color-primary)" :
+                                              groupedEvent.event_type === "scroll" ? chartColors.accent :
+                                              groupedEvent.event_type === "scroll_start" ? chartColors.accent :
+                                              groupedEvent.event_type === "scroll_end" ? chartColors.accent :
+                                              groupedEvent.event_type === "closed" ? "var(--color-destructive)" :
+                                              groupedEvent.event_type === "aborted" ? "var(--color-warning)" : "var(--color-warning)",
+                                    color: "var(--color-primary-foreground)",
                                     fontSize: 11
                                   }}>
                                     {groupedEvent.event_type === "clicks" ? "Клики" : translateEventType(groupedEvent.event_type)}
@@ -1215,11 +1196,11 @@ export default function PrototypePage() {
                         </table>
                       </div>
                       <details style={{ marginTop: 12 }}>
-                        <summary style={{ cursor: "pointer", color: "#666", fontSize: 12 }}>
+                        <summary className="cursor-pointer text-muted-foreground text-xs">
                           Показать JSON
                         </summary>
                         <pre style={{
-                          background: "#f5f5f5",
+                          background: "var(--color-muted)",
                           padding: 12,
                           borderRadius: 4,
                           overflow: "auto",
@@ -1301,12 +1282,12 @@ export default function PrototypePage() {
           <div style={{
             marginTop: 24,
             paddingTop: 24,
-            borderTop: "1px solid #eee"
+            borderTop: "1px solid var(--color-border)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-              <h3 style={{ fontSize: 16, margin: 0, color: "#333" }}>Хитмап кликов</h3>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontSize: 12, color: "#666" }}>
+              <h3 className="text-base m-0 text-foreground">Хитмап кликов</h3>
+              <div className="flex gap-2 items-center flex-wrap">
+                <label className="text-xs text-muted-foreground">
                   Фильтр по сессиям:
                 </label>
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxWidth: "400px" }}>
@@ -1321,11 +1302,11 @@ export default function PrototypePage() {
                     style={{
                       padding: "4px 8px",
                       borderRadius: 4,
-                      border: "1px solid #ddd",
+                      border: "1px solid var(--color-input)",
                       fontSize: 11,
                       cursor: "pointer",
-                      background: taskHeatmapFilterSessions.size === prototypeSessions.length ? "#2196f3" : "white",
-                      color: taskHeatmapFilterSessions.size === prototypeSessions.length ? "white" : "#333"
+                      background: taskHeatmapFilterSessions.size === prototypeSessions.length ? "var(--color-primary)" : "var(--color-background)",
+                      color: taskHeatmapFilterSessions.size === prototypeSessions.length ? "var(--color-primary-foreground)" : "var(--color-foreground)"
                     }}
                   >
                     {taskHeatmapFilterSessions.size === prototypeSessions.length ? "Снять все" : "Выбрать все"}
@@ -1358,11 +1339,11 @@ export default function PrototypePage() {
                         style={{
                           padding: "4px 8px",
                           borderRadius: 4,
-                          border: "1px solid #ddd",
+                          border: "1px solid var(--color-input)",
                           fontSize: 11,
                           cursor: "pointer",
-                          background: isSelected ? "#2196f3" : "white",
-                          color: isSelected ? "white" : "#333",
+                          background: isSelected ? "var(--color-primary)" : "var(--color-background)",
+                          color: isSelected ? "var(--color-primary-foreground)" : "var(--color-foreground)",
                           whiteSpace: "nowrap"
                         }}
                       >
@@ -1372,7 +1353,7 @@ export default function PrototypePage() {
                   })}
                 </div>
                 {taskHeatmapFilterSessions.size > 0 && (
-                  <span style={{ fontSize: 11, color: "#666" }}>
+                  <span className="text-xs text-muted-foreground">
                     Выбрано: {taskHeatmapFilterSessions.size} из {prototypeSessions.length}
                   </span>
                 )}
@@ -1415,10 +1396,10 @@ export default function PrototypePage() {
                       position: "relative", 
                       display: "inline-block", 
                       border: shouldHighlight && taskAbandonedScreens.closedScreens.has(screen.id) 
-                        ? "1px solid #f44336" 
+                        ? "1px solid var(--color-destructive)" 
                         : shouldHighlight && taskAbandonedScreens.abortedScreens.has(screen.id)
-                        ? "1px solid #ff9800"
-                        : "2px solid #ddd", 
+                        ? "1px solid var(--color-warning)"
+                        : "2px solid var(--color-border)", 
                       borderRadius: 4,
                       width: previewWidth,
                       height: previewHeight,
@@ -1464,14 +1445,14 @@ export default function PrototypePage() {
                       )}
                     </div>
                     {screenTimeData && (
-                      <div style={{ fontSize: 10, color: "#666", marginTop: 4, textAlign: "center" }}>
+                      <div className="text-[10px] text-muted-foreground mt-1 text-center">
                         <div>Всего: {formatTime(screenTimeData.totalTime)}</div>
                         <div>Среднее: {formatTime(Math.floor(screenTimeData.totalTime / screenTimeData.visitCount))}</div>
                         <div>Посещений: {screenTimeData.visitCount}</div>
                       </div>
                     )}
                     {clicks.length === 0 && !isFinalScreen && (
-                      <div style={{ fontSize: 11, color: "#999", marginTop: 4, textAlign: "center" }}>
+                      <div className="text-xs text-muted-foreground/70 mt-1 text-center">
                         Нет кликов
                       </div>
                     )}

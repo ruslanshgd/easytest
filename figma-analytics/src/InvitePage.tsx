@@ -115,10 +115,10 @@ export default function InvitePage() {
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-secondary/30 p-4">
-        <Card className="w-full max-w-md border-[#0f7b6c]/30">
+        <Card className="w-full max-w-md border-success/30">
           <CardHeader className="text-center">
-            <CheckCircle2 className="h-12 w-12 text-[#0f7b6c] mx-auto mb-2" />
-            <CardTitle className="text-[#0f7b6c]">Успешно!</CardTitle>
+            <CheckCircle2 className="h-12 w-12 text-success mx-auto mb-2" />
+            <CardTitle className="text-success">Успешно!</CardTitle>
             <CardDescription>
               Вы успешно присоединились к команде <strong>{teamName}</strong>.
             </CardDescription>
