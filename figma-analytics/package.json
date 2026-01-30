@@ -11,7 +11,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "check:colors": "./scripts/check-hardcoded-colors.sh",
+    "check:colors": "sh scripts/check-hardcoded-colors.sh",
     "install:hooks": "./scripts/install-pre-commit.sh"
   },
   "dependencies": {
