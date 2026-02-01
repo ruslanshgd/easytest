@@ -1,6 +1,16 @@
 // ===== MAIN CODE (Figma plugin) =====
+function sanitizeAccessToken(s) {
+  if (!s || typeof s !== "string") return "";
+  s = s.trim();
+  if (s.startsWith("{")) {
+    try {
+      var parsed = JSON.parse(s);
+      if (parsed.access_token) s = String(parsed.access_token).trim();
+    } catch (_) {}
+  }
+  return s.replace(/\s+/g, "");
+}
 // Текущая конфигурация (будет загружена из clientStorage)
-// При первом запуске все значения пустые - показывается форма онбординга
 let CONFIG = {
   SUPABASE_URL: "",
   SUPABASE_ANON_KEY: "",
@@ -22,8 +32,8 @@ figma.showUI(__html__, { width: 400, height: 500 });
         SUPABASE_ANON_KEY: savedConfig.SUPABASE_ANON_KEY || "",
         VIEWER_URL: savedConfig.VIEWER_URL || "",
         ANALYTICS_URL: savedConfig.ANALYTICS_URL || "",
-        ACCESS_TOKEN: savedConfig.ACCESS_TOKEN || "",
-        FIGMA_ACCESS_TOKEN: savedConfig.FIGMA_ACCESS_TOKEN || ""
+        ACCESS_TOKEN: sanitizeAccessToken(savedConfig.ACCESS_TOKEN),
+        FIGMA_ACCESS_TOKEN: (savedConfig.FIGMA_ACCESS_TOKEN || "").trim().replace(/[^\x20-\x7E]/g, "")
       };
       console.log("Loaded config from storage:", CONFIG);
     } else {
@@ -44,10 +54,9 @@ figma.showUI(__html__, { width: 400, height: 500 });
 
 // Обработка сообщений от UI
 figma.ui.onmessage = async (msg) => {
-  if (msg.type === "SAVE_CONFIG") {
+    if (msg.type === "SAVE_CONFIG") {
     try {
-      // Очищаем токены от невидимых символов перед сохранением
-      var cleanAccessToken = (msg.config.ACCESS_TOKEN || "").trim();
+      var cleanAccessToken = sanitizeAccessToken(msg.config.ACCESS_TOKEN);
       var cleanFigmaToken = (msg.config.FIGMA_ACCESS_TOKEN || "").trim().replace(/[^\x20-\x7E]/g, '');
       
       var cleanConfig = {

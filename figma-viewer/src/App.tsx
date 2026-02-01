@@ -7,6 +7,7 @@ import { isValidUUID } from "./utils/validation";
 import TestView from "./TestView.tsx";
 import Finished from "./Finished.tsx";
 import StudyRunView from "./StudyRunView.tsx";
+import CameraPreviewPopup from "./components/CameraPreviewPopup.tsx";
 
 function App() {
   const location = useLocation();
@@ -359,6 +360,7 @@ function App() {
         <Route path="/prototype/:prototypeId" element={<TestView sessionId={sessionId} />} />
         <Route path="/run/*" element={<StudyRunView />} />
         <Route path="/share/*" element={<StudyRunView />} />
+        <Route path="/camera-preview" element={<CameraPreviewPopup />} />
         <Route path="/:sessionId" element={<TestView sessionId={sessionId} />} />
         <Route path="/finished/:sessionId?" element={<Finished />} />
       </Routes>

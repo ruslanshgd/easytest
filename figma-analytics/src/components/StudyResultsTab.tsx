@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
-import { getBlockTypeConfig, type BlockType } from "../lib/block-icons";
+import { getBlockTypeConfig, getBlockDisplayName, type BlockType } from "../lib/block-icons";
 import { cn } from "../lib/utils";
 import { chartColors, styleColors } from "../lib/styleUtils";
 import { Card, CardContent } from "./ui/card";
@@ -24,10 +24,17 @@ import {
   Info,
   Map as MapIcon,
   Play,
+  Pause,
   Flag,
   Trash2,
   MessageSquare,
   CirclePlay,
+  Minimize2,
+  Maximize2,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { Checkbox } from "./ui/checkbox";
@@ -38,6 +45,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -128,6 +145,524 @@ interface Session {
   completed?: boolean;
   aborted?: boolean;
   recording_url?: string | null;
+  recording_screen_url?: string | null;
+  recording_deleted_at?: string | null;
+}
+
+export type RecordingModalUrls = { camera: string | null; screen: string | null };
+
+export type RecordingModalData = {
+  urls: RecordingModalUrls;
+  sessionId: string;
+  sessionStartedAt?: string;
+  sessionGazePoints?: GazePointRow[];
+};
+
+function extractStoragePathFromPublicUrl(publicUrl: string, bucketId: string): string | null {
+  try {
+    const urlWithoutQuery = publicUrl.split("?")[0];
+    const match = urlWithoutQuery.match(new RegExp(`/object/public/${bucketId}/(.+)$`));
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getGazeAtTime(
+  gazePoints: GazePointRow[],
+  tMs: number
+): { xNorm: number; yNorm: number } | null {
+  if (!gazePoints.length) return null;
+  const sorted = [...gazePoints].sort((a, b) => a.ts_ms - b.ts_ms);
+  if (tMs <= sorted[0].ts_ms) return { xNorm: sorted[0].x_norm, yNorm: sorted[0].y_norm };
+  if (tMs >= sorted[sorted.length - 1].ts_ms) return { xNorm: sorted[sorted.length - 1].x_norm, yNorm: sorted[sorted.length - 1].y_norm };
+  let i = 0;
+  while (i < sorted.length - 1 && sorted[i + 1].ts_ms < tMs) i++;
+  const a = sorted[i];
+  const b = sorted[i + 1];
+  const d = b.ts_ms - a.ts_ms;
+  const f = d > 0 ? (tMs - a.ts_ms) / d : 0;
+  return {
+    xNorm: a.x_norm + (b.x_norm - a.x_norm) * f,
+    yNorm: a.y_norm + (b.y_norm - a.y_norm) * f
+  };
+}
+
+function RecordingModalContent({
+  recordingModalUrls,
+  sessionId,
+  sessionStartedAt,
+  sessionGazePoints = [],
+  onClose,
+  onDeleted,
+}: {
+  recordingModalUrls: RecordingModalUrls;
+  sessionId: string | null;
+  sessionStartedAt?: string;
+  sessionGazePoints?: GazePointRow[];
+  onClose: () => void;
+  onDeleted?: () => void;
+}) {
+  const screenVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pipSize, setPipSize] = useState<"normal" | "small">("normal");
+  const [voiceVolume, setVoiceVolume] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [voiceVolumeOpen, setVoiceVolumeOpen] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [activeTab, setActiveTab] = useState<"video" | "gaze">("video");
+  const durationSyncedRef = useRef(false);
+
+  const hasGazeData = sessionGazePoints.length > 0 && sessionStartedAt;
+  const tMs = sessionStartedAt ? new Date(sessionStartedAt).getTime() + currentTime * 1000 : 0;
+  const gazeAtTime = hasGazeData ? getGazeAtTime(sessionGazePoints, tMs) : null;
+  const showTabs = true;
+
+  const pipW = pipSize === "small" ? 64 : 120;
+  const pipH = pipW;
+  // Показываем регулятор громкости если есть камера ИЛИ экран (т.к. аудио микрофона может быть встроено в запись экрана)
+  const hasVoiceTrack = Boolean(recordingModalUrls.camera) || Boolean(recordingModalUrls.screen);
+
+  useEffect(() => {
+    // Применяем громкость к основному видео (экран или камера)
+    // Если есть и экран, и камера — громкость применяем к камере (там голос), экран беззвучный
+    // Если только экран — громкость к экрану (там может быть встроенный голос)
+    const primaryVideoEl = screenVideoRef.current;
+    const pipVideoEl = cameraVideoRef.current;
+    
+    if (recordingModalUrls.screen && recordingModalUrls.camera) {
+      // Экран + камера: звук из камеры, экран muted
+      if (pipVideoEl) pipVideoEl.volume = voiceVolume;
+      if (primaryVideoEl) primaryVideoEl.muted = true;
+    } else if (recordingModalUrls.screen) {
+      // Только экран: звук может быть встроен в экран
+      if (primaryVideoEl) {
+        primaryVideoEl.volume = voiceVolume;
+        primaryVideoEl.muted = false;
+      }
+    } else if (recordingModalUrls.camera) {
+      // Только камера: звук из камеры
+      if (primaryVideoEl) primaryVideoEl.volume = voiceVolume;
+    }
+  }, [voiceVolume, recordingModalUrls.screen, recordingModalUrls.camera]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    const el = videoContainerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await el.requestFullscreen();
+    }
+  }, []);
+
+  const handlePlayPause = useCallback(() => {
+    const v = screenVideoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      v.play().then(() => setIsPlaying(true)).catch(() => {});
+      cameraVideoRef.current?.play().catch(() => {});
+    } else {
+      v.pause();
+      cameraVideoRef.current?.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const handleTimeUpdate = useCallback(() => {
+    const v = screenVideoRef.current;
+    if (v) {
+      setCurrentTime(v.currentTime);
+      // Handle Infinity duration in timeupdate as well
+      if (v.duration === Infinity && !durationSyncedRef.current) {
+        // Use current time as a fallback for duration while playing
+        // This gives us at least a moving timeline
+        if (v.currentTime > 0) {
+          // Don't set duration yet, but log it
+          console.log("RecordingModal: handleTimeUpdate - duration is Infinity, currentTime:", v.currentTime);
+        }
+      } else if (Number.isFinite(v.duration) && v.duration > 0) {
+        if (!durationSyncedRef.current) {
+          console.log("RecordingModal: duration synced from handleTimeUpdate:", v.duration);
+        }
+        setDuration(v.duration);
+        durationSyncedRef.current = true;
+      }
+    }
+  }, []);
+
+  // Синхронизация duration при открытии модалки и когда видео готово
+  // Supabase Storage и некоторые CDN отдают duration только после частичной буферизации
+  useEffect(() => {
+    const videoUrl = recordingModalUrls.screen || recordingModalUrls.camera;
+    if (!videoUrl) {
+      durationSyncedRef.current = false;
+      setDuration(0);
+      setCurrentTime(0);
+      return;
+    }
+    durationSyncedRef.current = false;
+    console.log("RecordingModal: video URL changed, starting duration sync:", videoUrl.slice(0, 80));
+    
+    const syncFromVideo = () => {
+      const v = screenVideoRef.current;
+      if (!v) return false;
+      
+      // Log video state for debugging
+      console.log("RecordingModal: syncFromVideo check", {
+        readyState: v.readyState,
+        duration: v.duration,
+        networkState: v.networkState,
+        paused: v.paused,
+        currentTime: v.currentTime,
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudyResultsTab.tsx:RecordingModal:syncFromVideo',message:'Video sync check',data:{readyState:v.readyState,duration:v.duration,networkState:v.networkState,paused:v.paused,currentTime:v.currentTime,isInfinity:v.duration===Infinity,isNaN:Number.isNaN(v.duration),videoSrc:v.src?.slice(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+      
+      // Handle Infinity duration (common for WebM streams from MediaRecorder)
+      // In this case, we need to seek to the end to get the actual duration
+      if (v.duration === Infinity && v.readyState >= 1) {
+        console.log("RecordingModal: duration is Infinity, attempting workaround");
+        // Try seeking to a large value to force the browser to determine actual duration
+        const originalTime = Number.isFinite(v.currentTime) ? v.currentTime : 0;
+        v.currentTime = Number.MAX_SAFE_INTEGER;
+        // Wait for seeked event to get real duration
+        const onSeeked = () => {
+          v.removeEventListener('seeked', onSeeked);
+          const realDuration = v.currentTime;
+          console.log("RecordingModal: Infinity workaround - real duration:", realDuration);
+          // Восстанавливаем позицию только если это конечное число
+          if (Number.isFinite(originalTime)) {
+            v.currentTime = originalTime;
+          } else {
+            v.currentTime = 0;
+          }
+          if (Number.isFinite(realDuration) && realDuration > 0) {
+            setDuration(realDuration);
+            durationSyncedRef.current = true;
+          }
+        };
+        v.addEventListener('seeked', onSeeked);
+        return false; // Will be resolved by the seeked event
+      }
+      
+      if (Number.isFinite(v.duration) && v.duration > 0) {
+        console.log("RecordingModal: duration synced from polling:", v.duration);
+        setDuration(v.duration);
+        setCurrentTime(v.currentTime);
+        durationSyncedRef.current = true;
+        return true;
+      }
+      return false;
+    };
+    
+    // Aggressive polling: try multiple times with increasing intervals
+    const timers: number[] = [];
+    const pollIntervals = [100, 300, 500, 1000, 2000, 3000, 5000];
+    pollIntervals.forEach((delay) => {
+      timers.push(window.setTimeout(() => {
+        if (!durationSyncedRef.current) syncFromVideo();
+      }, delay));
+    });
+    
+    return () => timers.forEach(clearTimeout);
+  }, [recordingModalUrls.screen, recordingModalUrls.camera]);
+
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = screenVideoRef.current;
+    const c = cameraVideoRef.current;
+    const t = Number(e.target.value);
+    if (v) v.currentTime = t;
+    if (c) c.currentTime = t;
+    setCurrentTime(t);
+  }, []);
+
+  const formatTime = (s: number) => {
+    if (!Number.isFinite(s) || s < 0) return "0:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const syncCameraToScreen = useCallback(() => {
+    const screen = screenVideoRef.current;
+    const camera = cameraVideoRef.current;
+    if (!screen || !camera) return;
+    camera.currentTime = screen.currentTime;
+    if (!screen.paused) camera.play().catch(() => {});
+    else camera.pause();
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!sessionId || deleting) return;
+    setDeleting(true);
+    try {
+      const paths: string[] = [];
+      if (recordingModalUrls.screen) {
+        const p = extractStoragePathFromPublicUrl(recordingModalUrls.screen, "recordings");
+        if (p) paths.push(p);
+      }
+      if (recordingModalUrls.camera) {
+        const p = extractStoragePathFromPublicUrl(recordingModalUrls.camera, "recordings");
+        if (p) paths.push(p);
+      }
+      if (paths.length > 0) {
+        const { error: removeError } = await supabase.storage.from("recordings").remove(paths);
+        if (removeError) throw removeError;
+      }
+      const { error: updateError } = await supabase
+        .from("sessions")
+        .update({
+          recording_url: null,
+          recording_screen_url: null,
+        })
+        .eq("id", sessionId);
+      if (updateError) throw updateError;
+      setDeleteDialogOpen(false);
+      onDeleted?.();
+      onClose();
+    } catch (err) {
+      console.error("RecordingModalContent: delete failed", err);
+      alert("Не удалось удалить записи. Проверьте политики RLS для Storage (DELETE) и таблицы sessions.");
+    } finally {
+      setDeleting(false);
+    }
+  }, [sessionId, recordingModalUrls, deleting, onClose, onDeleted]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-card rounded-lg max-w-4xl w-full max-h-[90vh] overflow-auto p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-semibold">Запись сессии</h3>
+          <button type="button" onClick={onClose} className="p-2 hover:bg-muted rounded">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {showTabs && (
+          <div className="flex gap-1 mb-3 border-b border-border">
+            <button
+              type="button"
+              onClick={() => setActiveTab("video")}
+              className={cn(
+                "px-3 py-2 text-sm font-medium rounded-t-md transition-colors",
+                activeTab === "video" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Видео
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("gaze")}
+              className={cn(
+                "px-3 py-2 text-sm font-medium rounded-t-md transition-colors",
+                activeTab === "gaze" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Движение глаз
+            </button>
+          </div>
+        )}
+        <div
+          ref={videoContainerRef}
+          className="relative w-full bg-black rounded-lg overflow-hidden"
+          style={{ aspectRatio: "16/10" }}
+        >
+          {recordingModalUrls.screen ? (
+            <video
+              ref={screenVideoRef}
+              src={recordingModalUrls.screen}
+              crossOrigin="anonymous"
+              preload="metadata"
+              className="w-full h-full object-contain"
+              onPlay={() => { setIsPlaying(true); syncCameraToScreen(); }}
+              onPause={() => { setIsPlaying(false); syncCameraToScreen(); }}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={() => { console.log("RecordingModal: onLoadedMetadata fired"); handleTimeUpdate(); }}
+              onDurationChange={() => { console.log("RecordingModal: onDurationChange fired"); handleTimeUpdate(); }}
+              onCanPlay={() => { console.log("RecordingModal: onCanPlay fired"); handleTimeUpdate(); }}
+              onCanPlayThrough={() => { console.log("RecordingModal: onCanPlayThrough fired"); handleTimeUpdate(); }}
+              onLoadedData={() => { console.log("RecordingModal: onLoadedData fired"); handleTimeUpdate(); syncCameraToScreen(); }}
+              onSeeked={() => { handleTimeUpdate(); syncCameraToScreen(); }}
+              onError={(e) => console.error("RecordingModal: video error", e)}
+            />
+          ) : recordingModalUrls.camera ? (
+            <video
+              ref={screenVideoRef}
+              src={recordingModalUrls.camera}
+              crossOrigin="anonymous"
+              preload="metadata"
+              className="w-full h-full object-contain"
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={() => { console.log("RecordingModal: onLoadedMetadata fired (camera)"); handleTimeUpdate(); }}
+              onDurationChange={() => { console.log("RecordingModal: onDurationChange fired (camera)"); handleTimeUpdate(); }}
+              onCanPlay={() => { console.log("RecordingModal: onCanPlay fired (camera)"); handleTimeUpdate(); }}
+              onCanPlayThrough={() => { console.log("RecordingModal: onCanPlayThrough fired (camera)"); handleTimeUpdate(); }}
+              onLoadedData={() => { console.log("RecordingModal: onLoadedData fired (camera)"); handleTimeUpdate(); }}
+              onError={(e) => console.error("RecordingModal: video error (camera)", e)}
+            />
+          ) : null}
+          {recordingModalUrls.camera && recordingModalUrls.screen && (
+            <div
+              className="group absolute left-3 bottom-14 z-10 overflow-hidden border-2 border-white/80 shadow-lg rounded-[20px] bg-black"
+              style={{ width: pipW, height: pipH, borderRadius: pipSize === "small" ? 12 : 20 }}
+            >
+              <video
+                ref={cameraVideoRef}
+                src={recordingModalUrls.camera}
+                className="w-full h-full object-cover"
+                playsInline
+              />
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setPipSize((s) => s === "normal" ? "small" : "normal"); }}
+                className="absolute top-1 right-1 z-20 w-8 h-8 flex items-center justify-center rounded-full bg-white text-black shadow-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/90"
+                aria-label={pipSize === "normal" ? "Уменьшить веб-камеру" : "Вернуть размер веб-камеры"}
+              >
+                {pipSize === "normal" ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
+            </div>
+          )}
+          {activeTab === "gaze" && hasGazeData && gazeAtTime && (
+            <div
+              className="absolute inset-0 z-[15] pointer-events-none"
+              aria-hidden
+            >
+              <div
+                className="absolute w-6 h-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-red-500/80 shadow-lg"
+                style={{
+                  left: `${gazeAtTime.xNorm * 100}%`,
+                  top: `${gazeAtTime.yNorm * 100}%`
+                }}
+              />
+            </div>
+          )}
+          {activeTab === "gaze" && !hasGazeData && (
+            <div className="absolute inset-0 z-[15] flex items-center justify-center bg-black/50 pointer-events-none">
+              <p className="text-white/90 text-sm text-center px-4 max-w-md">
+                Нет данных о движении глаз для этой сессии. Возможные причины: браузер не поддерживает экспериментальную функцию, скрипт WebGazer не загрузился (проверьте консоль), не было выдано разрешение на камеру или запись не сохранилась. Функция экспериментальная.
+              </p>
+            </div>
+          )}
+          {/* Единая панель управления: Play/Pause, таймлайн, громкость, полноэкран */}
+          <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-1 bg-black/70 px-2 py-2 pointer-events-auto">
+            <input
+              type="range"
+              min={0}
+              max={duration > 0 && Number.isFinite(duration) ? duration : 1}
+              step={0.1}
+              value={Math.min(currentTime, duration > 0 && Number.isFinite(duration) ? duration : 1)}
+              onChange={handleSeek}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full h-1.5 accent-white cursor-pointer"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handlePlayPause(); }}
+                className="p-1.5 rounded text-white hover:bg-white/20 transition-colors"
+                aria-label={isPlaying ? "Пауза" : "Воспроизведение"}
+              >
+                {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+              </button>
+              <span className="text-white text-sm tabular-nums min-w-[4.5rem]">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+              <div className="flex-1" />
+              {hasVoiceTrack && (
+                <div
+                  className="flex items-center gap-1"
+                  onMouseEnter={() => setVoiceVolumeOpen(true)}
+                  onMouseLeave={() => setVoiceVolumeOpen(false)}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setVoiceVolumeOpen((v) => !v)}
+                    className="p-1.5 rounded text-white hover:bg-white/20 transition-colors"
+                    aria-label="Громкость голоса"
+                  >
+                    {voiceVolume === 0 ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                  </button>
+                  {voiceVolumeOpen && (
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={voiceVolume}
+                      onChange={(e) => setVoiceVolume(Number(e.target.value))}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-20 h-1.5 accent-white"
+                    />
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+                className="p-1.5 rounded text-white hover:bg-white/20 transition-colors"
+                aria-label={isFullscreen ? "Выйти из полноэкранного режима" : "На весь экран"}
+              >
+                {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mt-4">
+          {sessionId && (
+            <button
+              type="button"
+              onClick={() => setDeleteDialogOpen(true)}
+              disabled={deleting}
+              className="text-sm border border-destructive/50 bg-destructive/10 hover:bg-destructive/20 text-destructive rounded-md px-3 py-1.5 font-medium disabled:opacity-50"
+            >
+              Удалить видео
+            </button>
+          )}
+        </div>
+      </div>
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить записи из хранилища?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это освободит место и в отчёте будет показано «Удалено» в колонке «Запись».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Нет, оставить</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDeleteConfirm(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Удаление…" : "Да, удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
 }
 
 interface StudyBlockResponse {
@@ -142,6 +677,8 @@ interface StudyBlockResponse {
 interface StudyResultsTabProps {
   studyId: string;
   blocks: StudyBlock[];
+  studyStatus?: "draft" | "published" | "stopped";
+  onBlockDeleted?: (blockId: string) => void;
 }
 
 type ReportViewMode = "summary" | "responses";
@@ -150,7 +687,7 @@ type TreeTestingView = "common_paths" | "first_clicks" | "final_points";
 type HeatmapView = "heatmap" | "clicks" | "image";
 type HeatmapTab = "by_screens" | "by_respondents";
 
-export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProps) {
+export default function StudyResultsTab({ studyId, blocks, studyStatus, onBlockDeleted }: StudyResultsTabProps) {
   const [runs, setRuns] = useState<StudyRun[]>([]);
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -205,7 +742,17 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
   const [showHiddenCategories, setShowHiddenCategories] = useState(false);
   const [onlyFirstClicks, setOnlyFirstClicks] = useState(false);
   const [showClickOrder, setShowClickOrder] = useState(false);
-  const [recordingModalUrl, setRecordingModalUrl] = useState<string | null>(null);
+  const [recordingModal, setRecordingModal] = useState<RecordingModalData | null>(null);
+  const [deleteRespondentRunId, setDeleteRespondentRunId] = useState<string | null>(null);
+  const [deletingRespondent, setDeletingRespondent] = useState(false);
+  /** Модалка подтверждения удаления сессий prototype-блока (вместо системного confirm) */
+  const [deleteSessionsDialog, setDeleteSessionsDialog] = useState<{
+    blockId: string;
+    runIdOrSessionId: string | null;
+    targetRunIds: string[];
+    sessionsInDB: number;
+    runIdsText: string;
+  } | null>(null);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -254,9 +801,9 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
       for (const batch of chunk(runIds, BATCH_SIZE)) {
         const { data, error: sessionsError } = await supabase
           .from("sessions")
-          .select("id, run_id, block_id, study_id, prototype_id, started_at, completed, aborted")
-          .in("run_id", batch)
-          .not("run_id", "is", null);
+          .select("id, run_id, block_id, study_id, prototype_id, started_at, completed, aborted, recording_url, recording_screen_url")
+          /* omit recording_deleted_at until migration is run: ADD COLUMN recording_deleted_at timestamptz */
+          .in("run_id", batch);
         if (sessionsError) {
           console.error("Error loading sessions:", sessionsError);
           return;
@@ -269,8 +816,7 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         const { data, error: eventsError } = await supabase
           .from("events")
           .select("*")
-          .in("run_id", batch)
-          .not("run_id", "is", null);
+          .in("run_id", batch);
         if (eventsError) {
           console.error("Error loading events:", eventsError);
           return;
@@ -303,9 +849,13 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
           const closedTime = closedIdx >= 0 ? new Date(sortedEvents[closedIdx].timestamp).getTime() : 0;
           
           isCompleted = completedTime >= abortedTime && completedTime >= closedTime;
-          isAborted = !isCompleted && (hasAbortedEvent || hasClosedEvent);
-        } else if (hasAbortedEvent || hasClosedEvent) {
+          // «Сдался» только при событии aborted; «Закрыл прототип» — при closed (не смешиваем)
+          isAborted = !isCompleted && hasAbortedEvent;
+        } else if (hasAbortedEvent) {
           isAborted = true;
+        } else if (hasClosedEvent) {
+          // Только closed, без aborted — не ставим aborted, чтобы closedCount и карточка «Закрыли прототип» считали корректно
+          isAborted = false;
         } else {
           isCompleted = session.completed === true;
           isAborted = session.aborted === true;
@@ -328,9 +878,11 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
       setEvents(eventsData || []);
 
       // Логирование для диагностики
+      const eventsCount = eventsData?.length || 0;
+      const sessionsCount = sessionsWithMetrics.length;
       console.log("StudyResultsTab: Loaded sessions and events:", {
-        sessions_count: sessionsWithMetrics.length,
-        events_count: eventsData?.length || 0,
+        sessions_count: sessionsCount,
+        events_count: eventsCount,
         sessions_with_block_id: sessionsWithMetrics.filter(s => s.block_id).length,
         sessions_without_block_id: sessionsWithMetrics.filter(s => !s.block_id).length,
         events_with_block_id: (eventsData || []).filter(e => e.block_id).length,
@@ -344,6 +896,9 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
           study_id: sessionsWithMetrics[0].study_id
         } : null
       });
+      if (sessionsCount > 0 && eventsCount === 0) {
+        console.warn("StudyResultsTab: Есть сессии, но событий 0. Проверьте RLS на таблице events и что у событий заполнен run_id.");
+      }
 
       // Load prototypes
       const prototypeIdsFromBlocks = Array.from(new Set(
@@ -544,53 +1099,26 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         });
         
         if (sessionsInDB === 0) {
-          alert("В базе данных нет сессий для удаления для этого prototype блока в выбранных runs");
+          const isDraft = studyStatus === "draft";
+          if (isDraft && onBlockDeleted) {
+            if (confirm("В выбранных runs нет данных по этому prototype блоку. Удалить блок из теста?")) {
+              onBlockDeleted(blockId);
+            }
+          } else {
+            alert("В выбранных runs нет данных по этому prototype блоку. " + (isDraft ? "Для удаления блока используйте вкладку «Конструктор»." : "Блок можно удалить только в режиме черновика."));
+          }
           return;
         }
         
-        const confirmText = runIdOrSessionId 
-          ? `Удалить ${sessionsInDB} сессий для этого prototype блока для выбранного респондента? Это также удалит связанные события и данные.`
-          : `Удалить ${sessionsInDB} сессий для этого prototype блока в выбранных ${runIdsText}? Это также удалит связанные события и данные.`;
-        
-        if (!confirm(confirmText)) return;
-        
-        // Удалить сессии (связанные события удалятся каскадно через foreign key)
-        const { error: deleteSessionsError } = await supabase
-          .from("sessions")
-          .delete()
-          .eq("block_id", blockId)
-          .in("run_id", targetRunIds);
-        
-        if (deleteSessionsError) {
-          console.error("Error deleting sessions:", deleteSessionsError);
-          alert("Ошибка при удалении сессий: " + deleteSessionsError.message);
-          return;
-        }
-        
-        // Проверить результат удаления
-        const { data: verifySessions, error: verifySessionsError } = await supabase
-          .from("sessions")
-          .select("id")
-          .eq("block_id", blockId)
-          .in("run_id", targetRunIds);
-        
-        const remainingSessions = verifySessions?.length || 0;
-        const actuallyDeleted = sessionsInDB - remainingSessions;
-        
-        console.log(`Delete sessions result: found ${sessionsInDB} before, ${remainingSessions} after, deleted ${actuallyDeleted} sessions`);
-        
-        if (actuallyDeleted > 0) {
-          console.log(`Successfully deleted ${actuallyDeleted} sessions for prototype block ${blockId}`);
-          // Обновить локальное состояние
-          setSessions(prev => prev.filter(s => !(s.block_id === blockId && targetRunIds.includes(s.run_id))));
-          setEvents(prev => prev.filter(e => !(e.block_id === blockId && targetRunIds.includes(e.run_id))));
-          // Перезагрузить данные
-          await loadSessionsAndEvents();
-          // КРИТИЧНО: Перезагрузить ответы, так как они могут быть связаны с удаленными сессиями
-          await loadResponses();
-        } else {
-          alert("Сессии не были удалены. Возможно, проблема с правами доступа (RLS политика).");
-        }
+        // Показать модалку подтверждения вместо системного confirm
+        setDeleteSessionsDialog({
+          blockId,
+          runIdOrSessionId: runIdOrSessionId ?? null,
+          targetRunIds,
+          sessionsInDB,
+          runIdsText,
+        });
+        return;
       } else {
         // Для не-prototype блоков удаляем ответы из study_block_responses
         const { data: checkData, error: checkError } = await supabase
@@ -614,7 +1142,14 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         });
         
         if (responsesInDB === 0) {
-          alert("В базе данных нет ответов для удаления для этого блока в выбранных runs");
+          const isDraft = studyStatus === "draft";
+          if (isDraft && onBlockDeleted) {
+            if (confirm("В выбранных runs нет данных по этому блоку. Удалить блок из теста?")) {
+              onBlockDeleted(blockId);
+            }
+          } else {
+            alert("В выбранных runs нет данных по этому блоку. " + (isDraft ? "Для удаления блока используйте вкладку «Конструктор»." : "Блок можно удалить только в режиме черновика."));
+          }
           return;
         }
         
@@ -665,11 +1200,111 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
       console.error("Error deleting responses:", err);
       alert("Ошибка при удалении: " + (err instanceof Error ? err.message : String(err)));
     }
-  }, [selectedRuns, loadResponses, loadSessionsAndEvents, responses, sessions, blocks]);
+  }, [selectedRuns, loadResponses, loadSessionsAndEvents, responses, sessions, blocks, studyStatus, onBlockDeleted]);
 
+  const performDeleteRespondent = useCallback(async (runId: string) => {
+    if (!runId) return;
+    setDeletingRespondent(true);
+    try {
+      const { error: sessionsError } = await supabase
+        .from("sessions")
+        .delete()
+        .eq("run_id", runId);
+      if (sessionsError) {
+        console.error("Error deleting sessions:", sessionsError);
+        alert("Ошибка при удалении сессий: " + sessionsError.message);
+        setDeletingRespondent(false);
+        return;
+      }
+      const { error: responsesError } = await supabase
+        .from("study_block_responses")
+        .delete()
+        .eq("run_id", runId);
+      if (responsesError) {
+        console.error("Error deleting responses:", responsesError);
+        alert("Ошибка при удалении ответов: " + responsesError.message);
+        setDeletingRespondent(false);
+        return;
+      }
+      const { error: runsError } = await supabase
+        .from("study_runs")
+        .delete()
+        .eq("id", runId);
+      if (runsError) {
+        console.error("Error deleting run:", runsError);
+        alert("Ошибка при удалении записи респондента: " + runsError.message);
+        setDeletingRespondent(false);
+        return;
+      }
+      setSessions(prev => prev.filter(s => s.run_id !== runId));
+      setEvents(prev => prev.filter(e => e.run_id !== runId));
+      setResponses(prev => prev.filter(r => r.run_id !== runId));
+      if (selectedSessionId) {
+        const session = sessions.find(s => s.id === selectedSessionId);
+        if (session?.run_id === runId) setSelectedSessionId(null);
+      }
+      await loadRuns();
+      await loadSessionsAndEvents();
+      await loadResponses();
+      setDeleteRespondentRunId(null);
+    } catch (err) {
+      console.error("Error deleting run responses:", err);
+      alert("Ошибка при удалении: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setDeletingRespondent(false);
+    }
+  }, [loadRuns, loadSessionsAndEvents, loadResponses, sessions, selectedSessionId]);
+
+  const deleteAllResponsesForRun = useCallback((runId: string) => {
+    if (!runId) return;
+    setDeleteRespondentRunId(runId);
+  }, []);
+
+  /** Выполнить удаление сессий prototype-блока после подтверждения в модалке */
+  const confirmDeleteSessionsForBlock = useCallback(async (payload: { blockId: string; targetRunIds: string[] }) => {
+    const { blockId, targetRunIds } = payload;
+    setDeleteSessionsDialog(null);
+    try {
+      const { error: deleteSessionsError } = await supabase
+        .from("sessions")
+        .delete()
+        .eq("block_id", blockId)
+        .in("run_id", targetRunIds);
+
+      if (deleteSessionsError) {
+        console.error("Error deleting sessions:", deleteSessionsError);
+        alert("Ошибка при удалении сессий: " + deleteSessionsError.message);
+        return;
+      }
+
+      const { data: verifySessions } = await supabase
+        .from("sessions")
+        .select("id")
+        .eq("block_id", blockId)
+        .in("run_id", targetRunIds);
+
+      const remainingSessions = verifySessions?.length || 0;
+
+      setSessions(prev => prev.filter(s => !(s.block_id === blockId && targetRunIds.includes(s.run_id))));
+      setEvents(prev => prev.filter(e => !(e.block_id === blockId && targetRunIds.includes(e.run_id))));
+      await loadSessionsAndEvents();
+      await loadResponses();
+
+      if (remainingSessions > 0) {
+        alert("Сессии не были удалены. Возможно, проблема с правами доступа (RLS политика).");
+      }
+    } catch (err) {
+      console.error("Error deleting sessions:", err);
+      alert("Ошибка при удалении: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }, [loadSessionsAndEvents, loadResponses]);
+
+  // При открытии вкладки «Результаты» загружаем runs для этого теста
   useEffect(() => {
-    loadRuns();
-  }, [loadRuns]);
+    if (studyId) {
+      loadRuns();
+    }
+  }, [studyId, loadRuns]);
 
   useEffect(() => {
     if (selectedRuns.size > 0) {
@@ -687,8 +1322,9 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
   // Auto-select first block or first session
   useEffect(() => {
     if (viewMode === "summary") {
-      if (blocks.length > 0 && !selectedBlockId) {
-        setSelectedBlockId(blocks[0].id);
+      const visible = blocks.filter(b => !b.deleted_at);
+      if (visible.length > 0 && !selectedBlockId) {
+        setSelectedBlockId(visible[0].id);
       }
     } else if (viewMode === "responses") {
       if (sessions.length > 0 && !selectedSessionId) {
@@ -721,8 +1357,13 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
     return 0;
   })();
 
-  // Get selected block
-  const selectedBlock = blocks.find(b => b.id === selectedBlockId) || blocks[0] || null;
+  const visibleBlocks = useMemo(() => blocks.filter(b => !b.deleted_at), [blocks]);
+  const selectedBlock = visibleBlocks.find(b => b.id === selectedBlockId) || visibleBlocks[0] || null;
+  useEffect(() => {
+    if (selectedBlockId && !visibleBlocks.some(b => b.id === selectedBlockId)) {
+      setSelectedBlockId(visibleBlocks[0]?.id ?? null);
+    }
+  }, [visibleBlocks, selectedBlockId]);
   const selectedRun = runs.find(r => r.id === selectedRunId) || null;
 
   // Parse user agent to get OS and browser
@@ -765,8 +1406,8 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-muted-foreground">Загрузка результатов...</div>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground">
+        <h1 className="m-0 text-2xl font-semibold text-foreground">Загрузка результатов...</h1>
       </div>
     );
   }
@@ -829,34 +1470,49 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
         {/* Block List or Sessions List */}
         <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
           {viewMode === "summary" ? (
-            // Show blocks in summary mode
-            blocks.map((block, index) => {
+            // Show blocks in summary mode (filter out soft-deleted)
+            visibleBlocks.map((block, index) => {
               const blockConfig = getBlockTypeConfig(block.type);
               const IconComponent = blockConfig.icon;
               const isSelected = selectedBlockId === block.id;
               
               return (
-                <button
+                <div
                   key={block.id}
-                  onClick={() => setSelectedBlockId(block.id)}
                   className={cn(
-                    "w-full flex items-center gap-2 p-2 rounded-xl transition-all text-left",
+                    "group w-full flex items-center gap-2 p-2 rounded-xl transition-all",
                     isSelected
                       ? "bg-primary text-white shadow-md"
                       : "bg-card border border-border hover:border-primary/30"
                   )}
                 >
-                  <span className="text-sm font-medium">{index + 1}.</span>
-                  <div className={cn(
-                    "w-5 h-5 rounded flex items-center justify-center flex-shrink-0",
-                    isSelected ? "bg-white/20" : "bg-muted"
-                  )}>
-                    <IconComponent size={14} className={isSelected ? "text-white" : "text-muted-foreground"} />
-                  </div>
-                  <span className="flex-1 text-sm font-medium truncate">
-                    {blockConfig.label}
-                  </span>
-                </button>
+                  <button
+                    onClick={() => setSelectedBlockId(block.id)}
+                    className="flex-1 flex items-center gap-2 text-left min-w-0"
+                  >
+                    <span className="text-sm font-medium">{index + 1}.</span>
+                    <div className={cn(
+                      "w-5 h-5 rounded flex items-center justify-center flex-shrink-0",
+                      isSelected ? "bg-white/20" : "bg-muted"
+                    )}>
+                      <IconComponent size={14} className={isSelected ? "text-white" : "text-muted-foreground"} />
+                    </div>
+                    <span className="flex-1 text-sm font-medium truncate">
+                      {getBlockDisplayName(block)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); deleteBlockResponses(block.id); }}
+                    className={cn(
+                      "opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-destructive/10 transition-opacity",
+                      isSelected ? "text-white hover:text-white/90" : "text-muted-foreground hover:text-destructive"
+                    )}
+                    title="Удалить отчёт по блоку"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               );
             })
           ) : (
@@ -891,36 +1547,51 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
                   const date = new Date(session.started_at);
                   
                   return (
-                    <button
+                    <div
                       key={session.id}
-                      onClick={() => setSelectedSessionId(session.id)}
                       className={cn(
-                        "w-full flex flex-col gap-1 p-3 rounded-xl transition-all text-left",
+                        "group w-full flex items-center gap-2 p-3 rounded-xl transition-all",
                         isSelected
                           ? "bg-primary text-white shadow-md"
                           : "bg-card border border-border hover:border-primary/30"
                       )}
                     >
-                      <div className={cn("text-sm font-medium", isSelected ? "text-white" : "text-foreground")}>
-                        {date.toLocaleDateString("ru-RU", { 
-                          day: "2-digit", 
-                          month: "short", 
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        }).replace(" г.,", ",")}
-                      </div>
-                      <div className={cn("flex items-center gap-1 text-xs", isSelected ? "text-white/80" : "text-muted-foreground")}>
-                        <span>{os}</span>
-                        <span>*</span>
-                        <span>{browser}</span>
-                        {responsesCount > 0 && (
-                          <>
-                            <span>•</span>
-                            <span>{responsesCount} {responsesCount === 1 ? "ответ" : responsesCount < 5 ? "ответа" : "ответов"}</span>
-                          </>
+                      <button
+                        onClick={() => setSelectedSessionId(session.id)}
+                        className="flex-1 flex flex-col gap-1 text-left min-w-0"
+                      >
+                        <div className={cn("text-sm font-medium", isSelected ? "text-white" : "text-foreground")}>
+                          {date.toLocaleDateString("ru-RU", { 
+                            day: "2-digit", 
+                            month: "short", 
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          }).replace(" г.,", ",")}
+                        </div>
+                        <div className={cn("flex items-center gap-1 text-xs", isSelected ? "text-white/80" : "text-muted-foreground")}>
+                          <span>{os}</span>
+                          <span>*</span>
+                          <span>{browser}</span>
+                          {responsesCount > 0 && (
+                            <>
+                              <span>•</span>
+                              <span>{responsesCount} {responsesCount === 1 ? "ответ" : responsesCount < 5 ? "ответа" : "ответов"}</span>
+                            </>
+                          )}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); deleteAllResponsesForRun(session.run_id); }}
+                        className={cn(
+                          "opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-destructive/10 transition-opacity",
+                          isSelected ? "text-white hover:text-white/90" : "text-muted-foreground hover:text-destructive"
                         )}
-                      </div>
-                    </button>
+                        title="Удалить все ответы респондента"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   );
                 });
               }
@@ -965,38 +1636,51 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
                   const date = run ? new Date(run.started_at) : new Date();
                   
                   return (
-                    <button
+                    <div
                       key={runId}
-                      onClick={() => {
-                        setSelectedSessionId(runId);
-                      }}
                       className={cn(
-                        "w-full flex flex-col gap-1 p-3 rounded-xl transition-all text-left",
+                        "group w-full flex items-center gap-2 p-3 rounded-xl transition-all",
                         isSelected
                           ? "bg-primary text-white shadow-md"
                           : "bg-card border border-border hover:border-primary/30"
                       )}
                     >
-                      <div className={cn("text-sm font-medium", isSelected ? "text-white" : "text-foreground")}>
-                        {date.toLocaleDateString("ru-RU", { 
-                          day: "2-digit", 
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        }).replace(" г.,", ",")}
-                      </div>
-                      <div className={cn("flex items-center gap-1 text-xs", isSelected ? "text-white/80" : "text-muted-foreground")}>
-                        <span>{os}</span>
-                        <span>*</span>
-                        <span>{browser}</span>
-                        {responsesCount > 0 && (
-                          <>
-                            <span>•</span>
-                            <span>{responsesCount} {responsesCount === 1 ? "ответ" : responsesCount < 5 ? "ответа" : "ответов"}</span>
-                          </>
+                      <button
+                        onClick={() => setSelectedSessionId(runId)}
+                        className="flex-1 flex flex-col gap-1 text-left min-w-0"
+                      >
+                        <div className={cn("text-sm font-medium", isSelected ? "text-white" : "text-foreground")}>
+                          {date.toLocaleDateString("ru-RU", { 
+                            day: "2-digit", 
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          }).replace(" г.,", ",")}
+                        </div>
+                        <div className={cn("flex items-center gap-1 text-xs", isSelected ? "text-white/80" : "text-muted-foreground")}>
+                          <span>{os}</span>
+                          <span>*</span>
+                          <span>{browser}</span>
+                          {responsesCount > 0 && (
+                            <>
+                              <span>•</span>
+                              <span>{responsesCount} {responsesCount === 1 ? "ответ" : responsesCount < 5 ? "ответа" : "ответов"}</span>
+                            </>
+                          )}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); deleteAllResponsesForRun(runId); }}
+                        className={cn(
+                          "opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-destructive/10 transition-opacity",
+                          isSelected ? "text-white hover:text-white/90" : "text-muted-foreground hover:text-destructive"
                         )}
-                      </div>
-                    </button>
+                        title="Удалить все ответы респондента"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   );
                 });
               }
@@ -1025,9 +1709,16 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
               );
             }
 
-            // Для prototype: события по session_id (чтобы не терять события без block_id). Иначе — по block_id.
+            // Для prototype: события по session_id + fallback по run_id+block_id, чтобы тепловые карты/клики включали все события по блоку.
+            const runIdsFromSessions = new Set(filteredSessions.map(s => s.run_id));
+            // Доп. fallback: если сессий нет по block_id, но есть события по выбранным runs — включаем их по run_id + block_id
+            const runIdsForEvents =
+              runIdsFromSessions.size > 0 ? runIdsFromSessions : new Set(selectedRuns);
             const filteredEvents = selectedBlock.type === "prototype"
-              ? events.filter(e => filteredSessions.some(s => s.id === e.session_id))
+              ? events.filter(e =>
+                  filteredSessions.some(s => s.id === e.session_id) ||
+                  (e.run_id && runIdsForEvents.has(e.run_id) && (e.block_id === selectedBlock.id || !e.block_id))
+                )
               : events.filter(e => e.block_id === selectedBlock.id);
 
             // КРИТИЧНО: Для prototype блоков ответы могут не иметь прямого block_id
@@ -1121,6 +1812,9 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
               showClickOrder={showClickOrder}
               setShowClickOrder={setShowClickOrder}
               setModalJustOpened={setModalJustOpened}
+              recordingModal={recordingModal ?? null}
+              setRecordingModal={setRecordingModal ?? (() => {})}
+              gazePoints={gazePoints}
               onDeleteResponses={viewMode === "responses" ? (blockId: string) => {
                 // КРИТИЧНО: В режиме "ответы" передаем runId/sessionId для удаления только конкретного респондента
                 const runIdOrSessionId = selectedSessionId;
@@ -1147,9 +1841,11 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
                     sessions={sessions.filter(s => s.run_id === sessionRunId)}
                     events={events.filter(e => e.run_id === sessionRunId)}
                     prototypes={prototypes}
+                    gazePoints={gazePoints}
                     onDeleteResponses={(blockId: string) => {
                       return deleteBlockResponses(blockId, sessionRunId);
                     }}
+                    onRecordingDeleted={loadSessionsAndEvents}
                   />
                 );
               } else if (selectedRuns.has(selectedSessionId)) {
@@ -1167,9 +1863,11 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
                       sessions={[]}
                       events={events.filter(e => e.run_id === runId)}
                       prototypes={prototypes}
+                      gazePoints={gazePoints}
                       onDeleteResponses={(blockId: string) => {
                         return deleteBlockResponses(blockId, runId);
                       }}
+                      onRecordingDeleted={loadSessionsAndEvents}
                     />
                   );
                 }
@@ -1185,6 +1883,79 @@ export default function StudyResultsTab({ studyId, blocks }: StudyResultsTabProp
           </div>
         </div>
       </div>
+
+      {/* Modal: экран — основной плеер, камера — PiP слева внизу */}
+      {recordingModal && (recordingModal.urls.camera || recordingModal.urls.screen) && createPortal(
+        <RecordingModalContent
+          recordingModalUrls={recordingModal.urls}
+          sessionId={recordingModal.sessionId}
+          sessionStartedAt={recordingModal.sessionStartedAt}
+          sessionGazePoints={recordingModal.sessionGazePoints}
+          onClose={() => setRecordingModal(null)}
+          onDeleted={loadSessionsAndEvents}
+        />,
+        document.body
+      )}
+
+      {/* Модальное окно: удалить все ответы респондента */}
+      <AlertDialog open={deleteRespondentRunId !== null} onOpenChange={(open) => !open && setDeleteRespondentRunId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить все ответы этого респондента?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Сессии и ответы будут удалены безвозвратно.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingRespondent}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteRespondentRunId) performDeleteRespondent(deleteRespondentRunId);
+              }}
+              disabled={deletingRespondent}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingRespondent ? "Удаление…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Модальное окно: удалить сессии prototype-блока (вместо системного confirm) */}
+      <AlertDialog open={deleteSessionsDialog !== null} onOpenChange={(open) => !open && setDeleteSessionsDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteSessionsDialog
+                ? deleteSessionsDialog.runIdOrSessionId
+                  ? `Удалить ${deleteSessionsDialog.sessionsInDB} сессий для этого prototype блока для выбранного респондента?`
+                  : `Удалить ${deleteSessionsDialog.sessionsInDB} сессий для этого prototype блока в выбранных ${deleteSessionsDialog.runIdsText}?`
+                : ""}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Это также удалит связанные события и данные.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Нет, оставить</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteSessionsDialog) {
+                  confirmDeleteSessionsForBlock({
+                    blockId: deleteSessionsDialog.blockId,
+                    targetRunIds: deleteSessionsDialog.targetRunIds,
+                  });
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Да, удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1227,8 +1998,9 @@ interface BlockReportViewProps {
   showClickOrder: boolean;
   setShowClickOrder: (show: boolean) => void;
   setModalJustOpened: (value: boolean) => void;
-  recordingModalUrl?: string | null;
-  setRecordingModalUrl?: (url: string | null) => void;
+  recordingModal?: RecordingModalData | null;
+  setRecordingModal?: (data: RecordingModalData | null) => void;
+  gazePoints?: GazePointRow[];
   onDeleteResponses?: (blockId: string) => Promise<void>;
 }
 
@@ -1239,6 +2011,7 @@ function BlockReportView({
   sessions,
   events,
   prototypes,
+  gazePoints = [],
   viewMode,
   cardSortingView,
   setCardSortingView,
@@ -1269,8 +2042,8 @@ function BlockReportView({
   showClickOrder,
   setShowClickOrder,
   setModalJustOpened,
-  recordingModalUrl,
-  setRecordingModalUrl,
+  recordingModal,
+  setRecordingModal,
   onDeleteResponses
 }: BlockReportViewProps) {
   // Вычисляем индекс блока
@@ -1348,8 +2121,10 @@ function BlockReportView({
           showClickOrder={showClickOrder}
           setShowClickOrder={setShowClickOrder}
           setModalJustOpened={setModalJustOpened}
-          recordingModalUrl={recordingModalUrl ?? null}
-          setRecordingModalUrl={setRecordingModalUrl ?? (() => {})}
+          recordingModal={recordingModal ?? null}
+          setRecordingModal={setRecordingModal ?? (() => {})}
+          gazePoints={gazePoints}
+          responses={responses}
           onDeleteResponses={onDeleteResponses}
         />
       );
@@ -1366,7 +2141,7 @@ function BlockReportView({
         <div className="max-w-full">
           <Card className={`p-6 ${viewMode === "responses" ? "border-0 shadow-none" : ""}`}>
             <div className="text-lg font-semibold mb-4">
-              {getBlockTypeConfig(block.type).label}
+              {getBlockDisplayName(block)}
             </div>
             <div className="text-muted-foreground">
               Визуализация для этого типа блока пока не реализована.
@@ -1413,7 +2188,7 @@ function OpenQuestionView({ block, blockIndex, responses, viewMode, onDeleteResp
               <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                 <IconComponent size={14} className="text-muted-foreground" />
               </div>
-              <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+              <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
             </div>
             {viewMode === "responses" && onDeleteResponses && (
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1432,7 +2207,6 @@ function OpenQuestionView({ block, blockIndex, responses, viewMode, onDeleteResp
 
           {/* Поля контента */}
           <div className="space-y-3 p-5">
-            <p className="text-base mb-4">{question}</p>
             {imageUrl && (
               <div className="mb-4">
                 <img 
@@ -1523,7 +2297,7 @@ function ScaleView({ block, blockIndex, responses, viewMode, onDeleteResponses }
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1539,7 +2313,6 @@ function ScaleView({ block, blockIndex, responses, viewMode, onDeleteResponses }
                 </div>
               )}
             </div>
-            <p className="text-base px-4 py-3">{question}</p>
             {imageUrl && (
               <div className="mb-4 px-4">
                 <img 
@@ -1694,7 +2467,7 @@ function ChoiceView({ block, blockIndex, responses, viewMode, onDeleteResponses 
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1791,6 +2564,83 @@ function ChoiceView({ block, blockIndex, responses, viewMode, onDeleteResponses 
   );
 }
 
+// Preference Summary Row (сводный: картинка + прогресс-бар + % в одну строку, клик по картинке — модалка)
+function PreferenceSummaryRow({
+  imageUrl,
+  letter,
+  percentage,
+  count
+}: { imageUrl: string; letter: string; percentage: number; count: number }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  return (
+    <>
+      <div className="flex items-center gap-4 w-full">
+        {imageUrl && (
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border hover:opacity-90 transition-opacity"
+          >
+            <img src={imageUrl} alt={letter} className="w-full h-full object-cover" />
+          </button>
+        )}
+        <span className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium">{letter}</span>
+        <div className="flex-1 min-w-0 bg-[var(--color-progress-bg)] rounded-full h-2 overflow-hidden">
+          <div className="bg-primary h-full transition-all" style={{ width: `${percentage}%` }} />
+        </div>
+        <span className="flex-shrink-0 text-sm text-muted-foreground">{percentage.toFixed(0)}% ({count})</span>
+      </div>
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-3xl p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Просмотр варианта {letter}</DialogTitle>
+          <img src={imageUrl} alt={letter} className="w-full h-auto max-h-[80vh] object-contain" />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// Preference Respondent Answers (только вопрос + превью выбранного, клик — модалка)
+function PreferenceRespondentAnswers({
+  question,
+  responses,
+  optionImages
+}: { question: string; responses: StudyBlockResponse[]; optionImages: string[] }) {
+  const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
+  return (
+    <div className="space-y-4">
+      {responses.map((r, idx) => {
+        const answer = r.answer;
+        const selectedIdx = typeof answer === "object" && answer.selectedIndex !== undefined ? answer.selectedIndex : null;
+        const raw = selectedIdx != null ? optionImages[selectedIdx] : null;
+        const imgUrl = raw != null ? (typeof raw === "string" ? raw : (raw as { url?: string })?.url) : null;
+        const letter = selectedIdx != null ? String.fromCharCode(65 + selectedIdx) : "—";
+        return (
+          <div key={r.id || idx} className="flex items-center gap-3">
+            {imgUrl ? (
+              <button
+                type="button"
+                onClick={() => setModalImageUrl(imgUrl)}
+                className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-border hover:opacity-90 transition-opacity"
+              >
+                <img src={imgUrl} alt={letter} className="w-full h-full object-cover" />
+              </button>
+            ) : (
+              <span className="text-muted-foreground text-sm">—</span>
+            )}
+          </div>
+        );
+      })}
+      <Dialog open={!!modalImageUrl} onOpenChange={(open) => !open && setModalImageUrl(null)}>
+        <DialogContent className="max-w-3xl p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Просмотр выбранного варианта</DialogTitle>
+          {modalImageUrl && <img src={modalImageUrl} alt="" className="w-full h-auto max-h-[80vh] object-contain" />}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // Preference View
 interface PreferenceViewProps {
   block: StudyBlock;
@@ -1847,7 +2697,7 @@ function PreferenceView({ block, blockIndex, responses, viewMode, onDeleteRespon
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1875,40 +2725,39 @@ function PreferenceView({ block, blockIndex, responses, viewMode, onDeleteRespon
             )}
           </div>
 
-          {/* Results Section - Always visible in summary mode */}
+          {/* Results Section */}
           {(viewMode === "summary" || viewMode === "responses") && (
             <div className="border-t border-border pt-6">
               <h3 className="text-lg font-semibold mb-4">Результаты</h3>
-              <div className="space-y-4">
-                {(optionImages.length > 0 ? optionImages : images).map((imageUrl: string, idx: number) => {
-                  const count = optionCounts[idx] || 0;
-                  const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
-                  const letter = String.fromCharCode(65 + idx); // A, B, C, etc.
-                  
-                  return (
-                    <div key={`pref-${block.id}-${idx}-${imageUrl}`} className="space-y-2">
-                      {imageUrl && (
-                        <img 
-                          src={imageUrl} 
-                          alt={`Option ${letter}`}
-                          className="w-full h-auto max-h-48 object-cover rounded-lg border border-border"
-                        />
-                      )}
-                      <div className="w-full bg-[var(--color-progress-bg)] rounded-full h-2 overflow-hidden">
-                        <div
-                          className="bg-primary h-full transition-all"
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="font-medium">{letter}</span>
-                        <span className="text-muted-foreground">
-                          {percentage.toFixed(0)}% ({count})
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+              {viewMode === "responses" ? (
+                /* Ответы респондента: только вопрос + превью выбранного */
+                responses.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">Нет ответов</div>
+                ) : (
+                  <PreferenceRespondentAnswers
+                    question={question}
+                    responses={responses}
+                    optionImages={optionImages.length > 0 ? optionImages : images}
+                  />
+                )
+              ) : (
+                /* Сводный: горизонтально картинка + прогресс-бар + % */
+                <div className="space-y-4">
+                  {(optionImages.length > 0 ? optionImages : images).map((img: string | { url?: string }, idx: number) => {
+                    const imgUrl = typeof img === "string" ? img : img?.url || "";
+                    const count = optionCounts[idx] || 0;
+                    const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                    const letter = String.fromCharCode(65 + idx);
+                    return (
+                      <PreferenceSummaryRow
+                        key={`pref-${block.id}-${idx}-${imgUrl}`}
+                        imageUrl={imgUrl}
+                        letter={letter}
+                        percentage={percentage}
+                        count={count}
+                      />
+                    );
+                  })}
                 
                 {(optionImages.length === 0 && images.length === 0) && (
                   <div className="text-center text-muted-foreground py-8">
@@ -1921,6 +2770,7 @@ function PreferenceView({ block, blockIndex, responses, viewMode, onDeleteRespon
                   </div>
                 )}
               </div>
+            )}
             </div>
           )}
         </div>
@@ -1984,7 +2834,7 @@ function MatrixView({ block, blockIndex, responses, viewMode, onDeleteResponses 
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2123,7 +2973,7 @@ function AgreementView({ block, blockIndex, responses, viewMode, onDeleteRespons
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2703,7 +3553,7 @@ function CardSortingViewComponent({
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2777,6 +3627,65 @@ function CardSortingViewComponent({
   );
 }
 
+// Tree Testing Respondent Table (путь, длительность, клики — без прогресс-бара)
+function TreeTestingRespondentTable({
+  question,
+  responses
+}: { question: string; responses: StudyBlockResponse[] }) {
+  return (
+    <div className="space-y-4">
+      {responses.length === 0 ? (
+        <div className="text-center text-muted-foreground py-8">Нет ответов</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className="border border-border p-2 text-left font-medium">Путь</th>
+                <th className="border border-border p-2 text-left font-medium">Длительность, с</th>
+                <th className="border border-border p-2 text-left font-medium">Клики</th>
+              </tr>
+            </thead>
+            <tbody>
+              {responses.map((r, idx) => {
+                const answer = r.answer;
+                const clickHistoryNames = (typeof answer === "object" && answer.clickHistoryNames && Array.isArray(answer.clickHistoryNames)) 
+                  ? answer.clickHistoryNames as string[] 
+                  : [];
+                const pathNames = (typeof answer === "object" && answer.pathNames && Array.isArray(answer.pathNames)) 
+                  ? answer.pathNames as string[] 
+                  : [];
+                const pathText = clickHistoryNames.length > 0 
+                  ? clickHistoryNames.join(" › ") 
+                  : pathNames.join(" › ") || (typeof answer === "object" && (answer as { dontKnow?: boolean }).dontKnow ? "Не знаю" : "—");
+                const durationSec = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(1) : "—";
+                const clickHistory = (typeof answer === "object" && answer.clickHistory && Array.isArray(answer.clickHistory)) 
+                  ? answer.clickHistory as unknown[] 
+                  : [];
+                const clicks = clickHistory.length > 0 ? clickHistory.length : pathNames.length;
+                return (
+                  <tr key={r.id || idx}>
+                    <td className="border border-border p-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        {(typeof answer === "object" && (answer as { isCorrect?: boolean }).isCorrect) && (
+                          <CircleCheck className="h-4 w-4 text-green-600 flex-shrink-0" />
+                        )}
+                        <span>{pathText || (answer?.dontKnow ? "Не знаю" : "—")}</span>
+                      </div>
+                    </td>
+                    <td className="border border-border p-2 text-sm">{durationSec}</td>
+                    <td className="border border-border p-2 text-sm">{clicks}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Tree Testing View
 interface TreeTestingViewProps {
   block: StudyBlock;
@@ -2797,10 +3706,28 @@ function TreeTestingView({
   setTreeTestingView,
   onDeleteResponses
 }: TreeTestingViewProps) {
-  const question = block.config?.question || "Вопрос";
-  const correctPath = block.config?.correctPath || [];
+  const question = block.config?.question || block.config?.task || "Вопрос";
+  const correctAnswers = block.config?.correctAnswers || block.config?.correctPath || [];
+  const tree = block.config?.tree || [];
   const blockConfig = getBlockTypeConfig(block.type);
   const IconComponent = blockConfig.icon;
+
+  const findPathToNode = (nodes: { id: string; name: string; children?: unknown[] }[], targetId: string, currentPath: string[] = []): string[] | null => {
+    for (const node of nodes) {
+      const newPath = [...currentPath, node.id];
+      if (node.id === targetId) return newPath;
+      if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+        const found = findPathToNode(node.children as { id: string; name: string; children?: unknown[] }[], targetId, newPath);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  const correctFirstClickIds = new Set<string>();
+  correctAnswers.forEach((correctId: string) => {
+    const path = findPathToNode(tree as { id: string; name: string; children?: unknown[] }[], correctId);
+    if (path && path.length >= 1) correctFirstClickIds.add(path[0]);
+  });
 
   // Calculate metrics
   let successCount = 0;
@@ -2828,9 +3755,15 @@ function TreeTestingView({
         // Пока пропускаем такие случаи
       }
       
-      const path = answer.pathNames || answer.selectedPath || [];
-      const pathArray = Array.isArray(path) ? path : [path];
+      const clickHistoryNames = (typeof answer === "object" && answer.clickHistoryNames && Array.isArray(answer.clickHistoryNames)) 
+        ? answer.clickHistoryNames as string[] 
+        : [];
+      const pathNames = (typeof answer === "object" && answer.pathNames && Array.isArray(answer.pathNames)) 
+        ? answer.pathNames as string[] 
+        : [];
+      const pathArray = clickHistoryNames.length > 0 ? clickHistoryNames : pathNames;
       
+      // Самые частые пути — полный путь (история кликов) или путь к финалу
       if (pathArray.length > 0) {
         const pathStr = pathArray.join(" › ");
         const existing = paths.find(p => p.path.join(" › ") === pathStr);
@@ -2845,7 +3778,10 @@ function TreeTestingView({
         }
       }
       
-      // Первый клик - первый элемент пути
+      // Первый клик — первый узел, по которому кликнул пользователь (из истории)
+      const clickHistoryIds = (typeof answer === "object" && answer.clickHistory && Array.isArray(answer.clickHistory)) 
+        ? answer.clickHistory as string[] 
+        : [];
       if (pathArray.length > 0) {
         const firstClickPath = [pathArray[0]];
         const firstClickStr = firstClickPath.join(" › ");
@@ -2853,8 +3789,8 @@ function TreeTestingView({
         if (existingFirstClick) {
           existingFirstClick.count++;
         } else {
-          // Проверяем, правильный ли путь (если первый элемент совпадает с первым элементом правильного пути)
-          const isCorrect = correctPath.length > 0 && pathArray[0] === correctPath[0];
+          const firstClickId = clickHistoryIds[0];
+          const isCorrect = correctFirstClickIds.size > 0 && firstClickId != null && correctFirstClickIds.has(firstClickId);
           firstClicks.push({
             path: firstClickPath,
             count: 1,
@@ -2863,9 +3799,9 @@ function TreeTestingView({
         }
       }
       
-      // Финальная точка - последний элемент пути
-      if (pathArray.length > 0) {
-        const finalPointPath = pathArray;
+      // Финальная точка — путь к финальному узлу (pathNames)
+      if (pathNames.length > 0) {
+        const finalPointPath = pathNames;
         const finalPointStr = finalPointPath.join(" › ");
         const existingFinalPoint = finalPoints.find(fp => fp.path.join(" › ") === finalPointStr);
         if (existingFinalPoint) {
@@ -2923,7 +3859,7 @@ function TreeTestingView({
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2944,6 +3880,49 @@ function TreeTestingView({
 
           {/* Results Section */}
           <div className="border-t border-border pt-6">
+            {viewMode === "responses" ? (
+              /* Ответы респондента: вопрос + таблица (путь, длительность, клики) */
+              <TreeTestingRespondentTable
+                question={question}
+                responses={responses}
+              />
+            ) : (
+              <>
+            <div className="flex gap-2 mb-6">
+              <button
+                onClick={() => setTreeTestingView("common_paths")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  treeTestingView === "common_paths"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                Самые частые пути
+              </button>
+              <button
+                onClick={() => setTreeTestingView("first_clicks")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  treeTestingView === "first_clicks"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                Первые клики
+              </button>
+              <button
+                onClick={() => setTreeTestingView("final_points")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                  treeTestingView === "final_points"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                Финальные точки
+              </button>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div>
             <div className="text-sm text-muted-foreground mb-1">Процент успеха</div>
@@ -2952,12 +3931,18 @@ function TreeTestingView({
           <div>
             <div className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
               Прямота
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-popover border border-border rounded shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                  Измерять, насколько эффективно респонденты добирались до цели. Больше процент означает, что респонденты сделали меньше ненужных шагов
-                </div>
-              </div>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex cursor-help">
+                      <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-64">
+                    Измерять, насколько эффективно респонденты добирались до цели. Больше процент означает, что респонденты сделали меньше ненужных шагов
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
             <div className="text-2xl font-bold">{directnessRate.toFixed(0)}%</div>
           </div>
@@ -2972,36 +3957,41 @@ function TreeTestingView({
         </div>
 
         <div className="space-y-4">
-              {sortedPaths.map((pathData, idx) => {
-                const percentage = totalResponses > 0 ? (pathData.count / totalResponses) * 100 : 0;
-                const pathText = pathData.path.join(" › ");
-                return (
-                  <div key={`path-${block.id}-${idx}-${pathText}`} className="space-y-2">
-                    <div className="w-full bg-[var(--color-progress-bg)] rounded-full h-2 overflow-hidden">
-                      <div
-                        className={`${pathData.isCorrect ? "bg-success" : "bg-primary"} h-full transition-all`}
-                        style={{ 
-                          width: `${Math.max(percentage, 0)}%`, 
-                          minWidth: percentage > 0 ? '2px' : '0'
-                        }}
-                      />
-                    </div>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 text-sm">
-                          {pathData.isCorrect && (
-                            <CircleCheck className="h-4 w-4 text-green-600 flex-shrink-0" />
-                          )}
-                          <span className="font-medium text-sm">{pathText}</span>
-                        </div>
+              {(() => {
+                const data = treeTestingView === "common_paths" ? sortedPaths 
+                  : treeTestingView === "first_clicks" ? sortedFirstClicks 
+                  : sortedFinalPoints;
+                return data.map((pathData: { path: string[]; count: number; isCorrect?: boolean; isUnsuccessful?: boolean }, idx: number) => {
+                  const percentage = totalResponses > 0 ? (pathData.count / totalResponses) * 100 : 0;
+                  const pathText = pathData.path.length > 0 ? pathData.path.join(" › ") : (pathData as { isUnsuccessful?: boolean }).isUnsuccessful ? "Неуспешно" : "—";
+                  return (
+                    <div key={`${treeTestingView}-${block.id}-${idx}-${pathText}`} className="space-y-2">
+                      <div className="w-full bg-[var(--color-progress-bg)] rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`${pathData.isCorrect ? "bg-success" : (pathData as { isUnsuccessful?: boolean }).isUnsuccessful ? "bg-destructive/50" : "bg-primary"} h-full transition-all`}
+                          style={{ 
+                            width: `${Math.max(percentage, 0)}%`, 
+                            minWidth: percentage > 0 ? '2px' : '0'
+                          }}
+                        />
                       </div>
-                      <span className="text-sm text-muted-foreground whitespace-nowrap">
-                        {percentage.toFixed(0)}% ({pathData.count})
-                      </span>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 text-sm">
+                            {pathData.isCorrect && (
+                              <CircleCheck className="h-4 w-4 text-green-600 flex-shrink-0" />
+                            )}
+                            <span className="font-medium text-sm">{pathText}</span>
+                          </div>
+                        </div>
+                        <span className="text-sm text-muted-foreground whitespace-nowrap">
+                          {percentage.toFixed(0)}% ({pathData.count})
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
 
           {totalResponses === 0 && (
             <div className="text-center text-muted-foreground py-8">
@@ -3009,6 +3999,8 @@ function TreeTestingView({
             </div>
           )}
         </div>
+            </>
+            )}
           </div>
         </div>
       </Card>
@@ -3067,7 +4059,7 @@ function UmuxLiteView({ block, blockIndex, responses, viewMode, onDeleteResponse
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3191,7 +4183,7 @@ function ContextView({ block, blockIndex, responses, viewMode, onDeleteResponses
               <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                 <IconComponent size={14} className="text-muted-foreground" />
               </div>
-              <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+              <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
             </div>
           </div>
           <div className="px-4 py-3">
@@ -3237,7 +4229,7 @@ function FiveSecondsView({ block, blockIndex, responses, viewMode, onDeleteRespo
               <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                 <IconComponent size={14} className="text-muted-foreground" />
               </div>
-              <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+              <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
             </div>
             {viewMode === "responses" && onDeleteResponses && (
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3347,7 +4339,7 @@ function FirstClickView({ block, blockIndex, responses, viewMode, onDeleteRespon
                 <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                   <IconComponent size={14} className="text-muted-foreground" />
                 </div>
-                <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+                <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
               </div>
               {viewMode === "responses" && onDeleteResponses && (
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3552,6 +4544,7 @@ function FirstClickView({ block, blockIndex, responses, viewMode, onDeleteRespon
 // Prototype View
 interface PrototypeViewProps {
   block: StudyBlock;
+  blockIndex?: number;
   sessions: Session[];
   events: any[];
   prototypes: Record<string, Proto>;
@@ -3571,14 +4564,16 @@ interface PrototypeViewProps {
   showClickOrder: boolean;
   setShowClickOrder: (show: boolean) => void;
   setModalJustOpened: (value: boolean) => void;
-  recordingModalUrl: string | null;
-  setRecordingModalUrl: (url: string | null) => void;
+  recordingModal: RecordingModalData | null;
+  setRecordingModal: (data: RecordingModalData | null) => void;
+  gazePoints?: GazePointRow[];
+  responses?: StudyBlockResponse[];
   onDeleteResponses?: (blockId: string) => Promise<void>;
 }
 
 function PrototypeView({
   block,
-  blockIndex,
+  blockIndex = 0,
   sessions,
   events,
   prototypes,
@@ -3598,8 +4593,10 @@ function PrototypeView({
   showClickOrder,
   setShowClickOrder,
   setModalJustOpened,
-  recordingModalUrl,
-  setRecordingModalUrl,
+  recordingModal,
+  setRecordingModal,
+  gazePoints = [],
+  responses = [],
   onDeleteResponses
 }: PrototypeViewProps) {
   const protoId = block.prototype_id;
@@ -3611,37 +4608,57 @@ function PrototypeView({
   // Состояние для попапа с информацией о ноде
   const [selectedNode, setSelectedNode] = useState<{ screen: Screen; stepNumber: number; visitorsCount: number; totalSessions: number; position: { x: number; y: number } } | null>(null);
 
-  // Константа таймаута неактивности (в мс), синхронизирована с figma-viewer
+  // Константа таймаута неактивности (в мс), синхронизирована с figma-viewer. После этого времени без событий считаем «Закрыл прототип».
   const SESSION_INACTIVITY_TIMEOUT_MS =
-    (Number(import.meta.env.VITE_SESSION_INACTIVITY_TIMEOUT_SECONDS || "300") || 300) * 1000;
+    (Number(import.meta.env.VITE_SESSION_INACTIVITY_TIMEOUT_SECONDS || "60") || 60) * 1000;
 
   // Calculate metrics
   const completedCount = sessions.filter(s => s.completed).length;
   const abortedCount = sessions.filter(s => s.aborted).length;
   const closedCount = sessions.filter(s => {
+    if (s.completed || s.aborted) return false;
     const sessionEvents = events.filter(e => e.session_id === s.id);
-    return sessionEvents.some(e => e.event_type === "closed");
+    if (sessionEvents.some(e => e.event_type === "closed")) return true;
+    if (sessionEvents.length === 0) return false;
+    const sorted = [...sessionEvents].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    const lastTime = new Date(sorted[sorted.length - 1].timestamp).getTime();
+    return (Date.now() - lastTime) >= SESSION_INACTIVITY_TIMEOUT_MS;
   }).length;
 
-  // Calculate average and median time
-  const sessionTimes: number[] = [];
-  sessions.forEach(session => {
-    const sessionEvents = events.filter(e => e.session_id === session.id);
-    if (sessionEvents.length > 0) {
-      const sortedEvents = [...sessionEvents].sort((a, b) => 
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
-      const startTime = new Date(sortedEvents[0].timestamp).getTime();
-      const endTime = new Date(sortedEvents[sortedEvents.length - 1].timestamp).getTime();
-      sessionTimes.push((endTime - startTime) / 1000); // in seconds
-    }
-  });
-
-  const avgTime = sessionTimes.length > 0
-    ? sessionTimes.reduce((a, b) => a + b, 0) / sessionTimes.length
+  // Среднее и медианное время: для prototype блоков вычисляем из sessions/events,
+  // так как prototype блоки НЕ создают записи в study_block_responses
+  const sessionDurationsSec = sessions
+    .filter(s => s.completed) // Только завершенные сессии
+    .map(session => {
+      const sessionEvents = events
+        .filter(e => e.session_id === session.id)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      
+      if (sessionEvents.length === 0) return null;
+      
+      // Ищем первый screen_load и событие completed
+      const firstScreenLoad = sessionEvents.find(e => e.event_type === "screen_load");
+      const completedEvent = sessionEvents.find(e => e.event_type === "completed");
+      
+      if (!firstScreenLoad) return null;
+      
+      // Используем completed event или последний event как конец
+      const endEvent = completedEvent || sessionEvents[sessionEvents.length - 1];
+      
+      const startTime = new Date(firstScreenLoad.timestamp).getTime();
+      const endTime = new Date(endEvent.timestamp).getTime();
+      const durationMs = endTime - startTime;
+      
+      return durationMs > 0 ? durationMs / 1000 : null;
+    })
+    .filter((d): d is number => d != null);
+  
+  const nDurations = sessionDurationsSec.length;
+  const avgTime = nDurations > 0
+    ? sessionDurationsSec.reduce((a, b) => a + b, 0) / nDurations
     : 0;
-  const medianTime = sessionTimes.length > 0
-    ? [...sessionTimes].sort((a, b) => a - b)[Math.floor(sessionTimes.length / 2)]
+  const medianTime = nDurations > 0
+    ? [...sessionDurationsSec].sort((a, b) => a - b)[Math.floor(nDurations / 2)]!
     : 0;
 
   // Get screens for prototype
@@ -3782,7 +4799,7 @@ function PrototypeView({
             ? 'var(--color-muted)' // Подложка для стартового экрана
             : 'transparent'
         }}>
-          {isStart && !finalStatuses.aborted && <Play className="h-3 w-3 flex-shrink-0" />}
+          {isStart && !finalStatuses.aborted && !finalStatuses.closed && <Play className="h-3 w-3 flex-shrink-0" />}
           {isFinal && (
             <>
               {finalStatuses.completed && <UserRoundCheck className="h-3 w-3 flex-shrink-0 text-success" />}
@@ -3876,22 +4893,24 @@ function PrototypeView({
       const sessionEvents = events
         .filter(e => e.session_id === session.id)
         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      
+
       const screenLoads = sessionEvents.filter(e => e.event_type === "screen_load");
       const completedEvent = sessionEvents.find(e => e.event_type === "completed");
       const abortedEvent = sessionEvents.find(e => e.event_type === "aborted");
       const closedEvent = sessionEvents.find(e => e.event_type === "closed");
-      
-      // Определяем финальный статус
+      const lastEventTime = sessionEvents.length > 0 ? new Date(sessionEvents[sessionEvents.length - 1].timestamp).getTime() : 0;
+      const inactiveForMs = lastEventTime > 0 ? Date.now() - lastEventTime : 0;
+      const isInactiveClosed = !completedEvent && !abortedEvent && !closedEvent && sessionEvents.length > 0 && inactiveForMs >= SESSION_INACTIVITY_TIMEOUT_MS;
+
       let status: 'completed' | 'aborted' | 'closed' | 'in_progress' = 'in_progress';
       let finalEventType: 'completed' | 'aborted' | 'closed' | undefined = undefined;
       let finalScreen: string | null = null;
-      
+
       if (completedEvent) {
         const completedTime = new Date(completedEvent.timestamp).getTime();
         const abortedTime = abortedEvent ? new Date(abortedEvent.timestamp).getTime() : 0;
         const closedTime = closedEvent ? new Date(closedEvent.timestamp).getTime() : 0;
-        
+
         if (completedTime >= abortedTime && completedTime >= closedTime) {
           status = 'completed';
           finalEventType = 'completed';
@@ -3906,6 +4925,9 @@ function PrototypeView({
         status = 'aborted';
         finalEventType = 'aborted';
       } else if (closedEvent) {
+        status = 'closed';
+        finalEventType = 'closed';
+      } else if (isInactiveClosed) {
         status = 'closed';
         finalEventType = 'closed';
       }
@@ -4217,29 +5239,56 @@ function PrototypeView({
     );
 
     const clickMap: Record<string, { x: number; y: number; count: number }> = {};
+    const sessionFirstClicks = new Set<string>();
     screenEvents.forEach(e => {
       if (onlyFirstClicks) {
-        // Only count first click per session
-        const sessionFirstClicks = new Set<string>();
-        const sessionId = e.session_id;
-        if (!sessionFirstClicks.has(sessionId)) {
-          sessionFirstClicks.add(sessionId);
-          const key = `${Math.floor(e.x! / 10) * 10}_${Math.floor(e.y! / 10) * 10}`;
-          if (!clickMap[key]) {
-            clickMap[key] = { x: e.x!, y: e.y!, count: 0 };
-          }
-          clickMap[key].count += 1;
-        }
-      } else {
-        const key = `${Math.floor(e.x! / 10) * 10}_${Math.floor(e.y! / 10) * 10}`;
-        if (!clickMap[key]) {
-          clickMap[key] = { x: e.x!, y: e.y!, count: 0 };
-        }
-        clickMap[key].count += 1;
+        const sessionId = e.session_id ?? e.run_id ?? "";
+        if (sessionFirstClicks.has(sessionId)) return;
+        sessionFirstClicks.add(sessionId);
       }
+      const key = `${Math.floor(e.x! / 10) * 10}_${Math.floor(e.y! / 10) * 10}`;
+      if (!clickMap[key]) {
+        clickMap[key] = { x: e.x!, y: e.y!, count: 0 };
+      }
+      clickMap[key].count += 1;
     });
 
     return Object.values(clickMap);
+  };
+
+  // Сырые клики по экрану: по одной точке на каждый клик (для вкладки «Клики» в сводном отчёте).
+  // События без x/y (старые записи) получают fallback — центр экрана, чтобы число маркеров совпадало с «Всего кликов».
+  const getRawClicksForScreen = (screenId: string): Array<{ x: number; y: number; count: number; isFallback?: boolean }> => {
+    const screenEvents = events.filter(e =>
+      e.screen_id === screenId &&
+      (e.event_type === "click" || e.event_type === "hotspot_click")
+    );
+    const screenMeta = screenMap.get(screenId);
+    const fallbackX = screenMeta ? (screenMeta.width ?? 375) / 2 : 200;
+    const fallbackY = screenMeta ? (screenMeta.height ?? 812) / 2 : 200;
+
+    const toPoint = (e: (typeof events)[0]) => {
+      const hasCoords = e.x !== undefined && e.y !== undefined;
+      return {
+        x: hasCoords ? e.x! : fallbackX,
+        y: hasCoords ? e.y! : fallbackY,
+        count: 1,
+        ...(hasCoords ? {} : { isFallback: true as const }),
+      };
+    };
+
+    if (onlyFirstClicks) {
+      const seen = new Set<string>();
+      return screenEvents
+        .filter(e => {
+          const id = e.session_id ?? e.run_id ?? "";
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
+        .map(toPoint);
+    }
+    return screenEvents.map(toPoint);
   };
 
   // Calculate gaze-based heatmap data (using normalized coordinates)
@@ -4313,7 +5362,7 @@ function PrototypeView({
               <div className="w-5 h-5 rounded bg-border flex items-center justify-center flex-shrink-0">
                 <IconComponent size={14} className="text-muted-foreground" />
               </div>
-              <span className="text-[15px] font-medium leading-6">{blockConfig.label}</span>
+              <span className="text-[15px] font-medium leading-6">{getBlockDisplayName(block)}</span>
             </div>
             {viewMode === "responses" && onDeleteResponses && (
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4328,9 +5377,6 @@ function PrototypeView({
                 </Button>
               </div>
             )}
-          </div>
-          <div className="px-4 py-3">
-            <p className="text-base">{taskDescription}</p>
           </div>
           <div className="px-4 pb-4">
             {/* Metrics */}
@@ -4481,11 +5527,11 @@ function PrototypeView({
               </button>
             </div>
           </>
-        ) : (
+        ) : viewMode !== "responses" ? (
           <h3 className="text-lg font-semibold mb-4">
             Респонденты
           </h3>
-        )}
+        ) : null}
 
         {viewMode === "summary" && heatmapTab === "by_screens" && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -4530,30 +5576,23 @@ function PrototypeView({
               </thead>
               <tbody>
                 {sessions.map((session) => {
-                  const sessionEvents = events
-                    .filter(e => e.session_id === session.id && e.event_type === "screen_load")
+                  const sessionAllEvents = events
+                    .filter(e => e.session_id === session.id)
                     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                  
+                  const sessionEvents = sessionAllEvents.filter(e => e.event_type === "screen_load");
                   const screenIds = sessionEvents.map(e => e.screen_id).filter(Boolean);
-                  
-                  // Вычисляем время прохождения и статус
+
                   let sessionTime = 0;
                   let status: string = "В процессе";
-                  if (sessionEvents.length > 0) {
-                    const startTime = new Date(sessionEvents[0].timestamp).getTime();
-                    const lastEventTime = new Date(
-                      sessionEvents[sessionEvents.length - 1].timestamp
-                    ).getTime();
+                  if (sessionAllEvents.length > 0) {
+                    // Время считаем с момента нажатия «Начать» (started_at обновляется в viewer при клике)
+                    const startTime = session.started_at
+                      ? new Date(session.started_at).getTime()
+                      : new Date(sessionAllEvents[0].timestamp).getTime();
+                    const lastEventTime = new Date(sessionAllEvents[sessionAllEvents.length - 1].timestamp).getTime();
                     const now = Date.now();
                     const inactiveForMs = now - lastEventTime;
-
-                    // Определяем статус через события
-                    const sessionAllEvents = events.filter(
-                      (e) => e.session_id === session.id
-                    );
-                    const hasClosed = sessionAllEvents.some(
-                      (e) => e.event_type === "closed"
-                    );
+                    const hasClosed = sessionAllEvents.some(e => e.event_type === "closed");
 
                     if (session.completed) {
                       status = "Успешно";
@@ -4562,7 +5601,6 @@ function PrototypeView({
                     } else if (hasClosed) {
                       status = "Закрыл прототип";
                     } else if (inactiveForMs >= SESSION_INACTIVITY_TIMEOUT_MS) {
-                      // Нет явного closed, но сессия давно неактивна — считаем, что прототип закрыли
                       status = "Закрыл прототип";
                     } else {
                       status = "В процессе";
@@ -4601,18 +5639,28 @@ function PrototypeView({
                       </td>
                       <td className="p-3 text-sm">{sessionTime.toFixed(1)} с</td>
                       <td className="p-3 text-sm">
-                        {session.recording_url ? (
-                          <button
+                        {session.recording_deleted_at ? (
+                          <span className="text-xs text-muted-foreground">Удалено</span>
+                        ) : (session.recording_url || session.recording_screen_url) ? (
+                            <button
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              if (setRecordingModalUrl) {
-                                setRecordingModalUrl(session.recording_url!);
+                              if (setRecordingModal) {
+                                setRecordingModal({
+                                  urls: {
+                                    camera: session.recording_url ?? null,
+                                    screen: session.recording_screen_url ?? null
+                                  },
+                                  sessionId: session.id,
+                                  sessionStartedAt: session.started_at,
+                                  sessionGazePoints: gazePoints.filter((p) => p.session_id === session.id)
+                                });
                               }
                             }}
-                            className="text-xs text-accent hover:underline flex items-center gap-1"
+                            className="text-xs border border-border bg-muted/60 hover:bg-muted text-foreground rounded px-2 py-1 flex items-center gap-1 font-medium"
                           >
-                            <CirclePlay className="h-3 w-3" />
+                            <CirclePlay className="h-3 w-3 shrink-0" />
                             Да
                           </button>
                         ) : (
@@ -4620,40 +5668,44 @@ function PrototypeView({
                         )}
                       </td>
                       <td className="p-3">
-                        <div className="flex gap-2 flex-wrap">
-                          {screenIds.map((screenId, screenIdx) => {
-                            const screen = screenMap.get(screenId);
-                            if (!screen || !proto) return null;
-                            return (
-                              <button
-                                key={screenIdx}
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const screenData = {
-                                    screen,
-                                    proto,
-                                    session,
-                                    screenIndex: screenIdx + 1,
-                                    totalScreens: screenIds.length
-                                  };
-                                  setSelectedRespondentScreen(screenData);
-                                }}
-                                className="relative border-0 bg-transparent p-0 cursor-pointer"
-                                type="button"
-                              >
-                                <img
-                                  src={screen.image}
-                                  alt={screen.name}
-                                  className="w-16 h-12 object-cover rounded border border-border hover:border-primary transition-colors"
-                                  draggable="false"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).style.display = 'none';
+                        <div className="flex gap-2 flex-wrap items-center">
+                          {screenIds.length === 0 && (status === "Закрыл прототип" || status === "Сдался") ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            screenIds.map((screenId, screenIdx) => {
+                              const screen = screenMap.get(screenId);
+                              if (!screen || !proto) return null;
+                              return (
+                                <button
+                                  key={screenIdx}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const screenData = {
+                                      screen,
+                                      proto,
+                                      session,
+                                      screenIndex: screenIdx + 1,
+                                      totalScreens: screenIds.length
+                                    };
+                                    setSelectedRespondentScreen(screenData);
                                   }}
-                                />
-                              </button>
-                            );
-                          })}
+                                  className="relative border-0 bg-transparent p-0 cursor-pointer"
+                                  type="button"
+                                >
+                                  <img
+                                    src={screen.image}
+                                    alt={screen.name}
+                                    className="w-16 h-12 object-cover rounded border pointer-events-none transition-colors border-border hover:border-primary"
+                                    draggable="false"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                </button>
+                              );
+                            })
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -4666,51 +5718,35 @@ function PrototypeView({
         
         {/* Таблица для режима "ответы" */}
         {viewMode === "responses" && (
-          <>
-            {/* Задание */}
-            {taskDescription && taskDescription !== "Задание" && (
-              <div className="mb-4 p-4 bg-muted/30 rounded-lg">
-                <h4 className="text-sm font-semibold mb-2">Задание:</h4>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{taskDescription}</p>
-              </div>
-            )}
-            
-            <div className="overflow-x-auto">
+          <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-left p-3 font-medium text-sm">Дата</th>
                     <th className="text-left p-3 font-medium text-sm">Статус</th>
                     <th className="text-left p-3 font-medium text-sm">Время</th>
+                    <th className="text-left p-3 font-medium text-sm">Запись</th>
                     <th className="text-left p-3 font-medium text-sm">Путь</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sessions.map((session) => {
-                    const sessionEvents = events
-                      .filter(e => e.session_id === session.id && e.event_type === "screen_load")
+                    const sessionAllEventsForProto = events
+                      .filter(e => e.session_id === session.id)
                       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                    
+                    const sessionEvents = sessionAllEventsForProto.filter(e => e.event_type === "screen_load");
                     const screenIds = sessionEvents.map(e => e.screen_id).filter(Boolean);
-                    
-                    // Вычисляем время прохождения и статус
+
                     let sessionTime = 0;
                     let status: string = "В процессе";
-                    if (sessionEvents.length > 0) {
-                      const startTime = new Date(sessionEvents[0].timestamp).getTime();
-                      const lastEventTime = new Date(
-                        sessionEvents[sessionEvents.length - 1].timestamp
-                      ).getTime();
+                    if (sessionAllEventsForProto.length > 0) {
+                      const startTime = session.started_at
+                        ? new Date(session.started_at).getTime()
+                        : new Date(sessionAllEventsForProto[0].timestamp).getTime();
+                      const lastEventTime = new Date(sessionAllEventsForProto[sessionAllEventsForProto.length - 1].timestamp).getTime();
                       const now = Date.now();
                       const inactiveForMs = now - lastEventTime;
-
-                      // Определяем статус через события
-                      const sessionAllEventsForProto = events.filter(
-                        (e) => e.session_id === session.id
-                      );
-                      const hasClosedForProto = sessionAllEventsForProto.some(
-                        (e) => e.event_type === "closed"
-                      );
+                      const hasClosedForProto = sessionAllEventsForProto.some(e => e.event_type === "closed");
 
                       if (session.completed) {
                         status = "Успешно";
@@ -4756,41 +5792,74 @@ function PrototypeView({
                           {status}
                         </td>
                         <td className="p-3 text-sm">{sessionTime.toFixed(1)} с</td>
+                        <td className="p-3 text-sm">
+                          {session.recording_deleted_at ? (
+                            <span className="text-xs text-muted-foreground">Удалено</span>
+                          ) : (session.recording_url || session.recording_screen_url) ? (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (setRecordingModal) {
+                                  setRecordingModal({
+                                    urls: {
+                                      camera: session.recording_url ?? null,
+                                      screen: session.recording_screen_url ?? null
+                                    },
+                                    sessionId: session.id,
+                                    sessionStartedAt: session.started_at,
+                                    sessionGazePoints: gazePoints.filter((p) => p.session_id === session.id)
+                                  });
+                                }
+                              }}
+                              className="text-xs border border-border bg-muted/60 hover:bg-muted text-foreground rounded px-2 py-1 flex items-center gap-1 font-medium"
+                            >
+                              <CirclePlay className="h-3 w-3 shrink-0" />
+                              Да
+                            </button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Нет</span>
+                          )}
+                        </td>
                         <td className="p-3">
-                          <div className="flex gap-2 flex-wrap">
-                            {screenIds.map((screenId, screenIdx) => {
-                              const screen = screenMap.get(screenId);
-                              if (!screen || !proto) return null;
-                              return (
-                                <button
-                                  key={screenIdx}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    const screenData = {
-                                      screen,
-                                      proto,
-                                      session,
-                                      screenIndex: screenIdx + 1,
-                                      totalScreens: screenIds.length
-                                    };
-                                    setModalJustOpened(true);
-                                    setSelectedRespondentScreen(screenData);
-                                  }}
-                                  className="relative border-0 bg-transparent p-0 cursor-pointer"
-                                  type="button"
-                                >
-                                  <img
-                                    src={screen.image}
-                                    alt={screen.name}
-                                    className="w-16 h-12 object-cover rounded border border-border hover:border-primary transition-colors pointer-events-none"
+                          <div className="flex gap-2 flex-wrap items-center">
+                            {screenIds.length === 0 && (status === "Закрыл прототип" || status === "Сдался") ? (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            ) : (
+                              screenIds.map((screenId, screenIdx) => {
+                                const screen = screenMap.get(screenId);
+                                if (!screen || !proto) return null;
+                                return (
+                                  <button
+                                    key={screenIdx}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const screenData = {
+                                        screen,
+                                        proto,
+                                        session,
+                                        screenIndex: screenIdx + 1,
+                                        totalScreens: screenIds.length
+                                      };
+                                      setModalJustOpened(true);
+                                      setSelectedRespondentScreen(screenData);
+                                    }}
+                                    className="relative border-0 bg-transparent p-0 cursor-pointer"
+                                    type="button"
+                                  >
+                                    <img
+                                      src={screen.image}
+                                      alt={screen.name}
+                                      className="w-16 h-12 object-cover rounded border pointer-events-none transition-colors border-border hover:border-primary"
                                     onError={(e) => {
                                       (e.target as HTMLImageElement).style.display = 'none';
                                     }}
                                   />
                                 </button>
                               );
-                            })}
+                            })
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -4799,7 +5868,6 @@ function PrototypeView({
                 </tbody>
               </table>
             </div>
-          </>
         )}
       </Card>
 
@@ -4810,10 +5878,10 @@ function PrototypeView({
           onClick={() => setSelectedHeatmapScreen(null)}
         >
           <div
-            className="bg-card rounded-lg max-w-6xl w-full max-h-[90vh] overflow-auto p-6"
+            className="bg-card rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col overflow-hidden p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h3 className="text-xl font-semibold">
                 {selectedHeatmapScreen.screen.name} ({selectedHeatmapScreen.screenIndex} из {selectedHeatmapScreen.totalScreens})
               </h3>
@@ -4825,7 +5893,7 @@ function PrototypeView({
               </button>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-shrink-0">
               <button
                 onClick={() => setHeatmapView("heatmap")}
                 className={cn(
@@ -4861,14 +5929,17 @@ function PrototypeView({
               </button>
             </div>
 
-            <div className="flex gap-6">
-              <div className="flex-1">
-                <div className="relative border border-border rounded-lg overflow-hidden bg-black">
+            <div className="flex gap-6 flex-1 min-h-0">
+              <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center">
+                <div
+                  className="relative rounded-lg overflow-hidden bg-black border border-border max-h-full max-w-full"
+                  style={{ aspectRatio: `${selectedHeatmapScreen.screen.width} / ${selectedHeatmapScreen.screen.height}` }}
+                >
                   {heatmapView === "image" && (
                     <img
                       src={selectedHeatmapScreen.screen.image}
                       alt={selectedHeatmapScreen.screen.name}
-                      className="w-full h-auto"
+                      className="w-full h-full object-contain"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = 'none';
@@ -4883,13 +5954,15 @@ function PrototypeView({
                     const heatmapData = getHeatmapData(selectedHeatmapScreen.screen.id);
                     const maxCount = Math.max(...heatmapData.map(c => c.count), 1);
                     return (
-                      <HeatmapRenderer
-                        data={heatmapData}
-                        width={selectedHeatmapScreen.screen.width}
-                        height={selectedHeatmapScreen.screen.height}
-                        imageUrl={selectedHeatmapScreen.screen.image}
-                        max={maxCount}
-                      />
+                      <div className="w-full h-full">
+                        <HeatmapRenderer
+                          data={heatmapData}
+                          width={selectedHeatmapScreen.screen.width}
+                          height={selectedHeatmapScreen.screen.height}
+                          imageUrl={selectedHeatmapScreen.screen.image}
+                          max={maxCount}
+                        />
+                      </div>
                     );
                   })()}
                   {heatmapView === "clicks" && (
@@ -4897,7 +5970,7 @@ function PrototypeView({
                       <img
                         src={selectedHeatmapScreen.screen.image}
                         alt={selectedHeatmapScreen.screen.name}
-                        className="w-full h-auto"
+                        className="w-full h-full object-contain block"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';
@@ -4908,33 +5981,28 @@ function PrototypeView({
                         }}
                       />
                       <div className="absolute inset-0 pointer-events-none">
-                        {getHeatmapData(selectedHeatmapScreen.screen.id).map((click, idx) => {
-                          const maxCount = Math.max(...getHeatmapData(selectedHeatmapScreen.screen.id).map(c => c.count), 1);
-                          const opacity = Math.min(0.8, 0.3 + (click.count / maxCount) * 0.5);
-                          const size = Math.max(8, Math.min(32, 8 + (click.count / maxCount) * 24));
-                          return (
-                            <div
-                              key={`heatmap-click-${click.x}-${click.y}-${idx}`}
-                              className="absolute rounded-full bg-red-500 border-2 border-white"
-                              style={{
-                                left: `${(click.x / selectedHeatmapScreen.screen.width) * 100}%`,
-                                top: `${(click.y / selectedHeatmapScreen.screen.height) * 100}%`,
-                                width: `${size}px`,
-                                height: `${size}px`,
-                                transform: 'translate(-50%, -50%)',
-                                opacity
-                              }}
-                              title={`${click.count} клик${click.count > 1 ? 'ов' : ''}`}
-                            />
-                          );
-                        })}
+                        {getRawClicksForScreen(selectedHeatmapScreen.screen.id).map((click, idx) => (
+                          <div
+                            key={`summary-click-${click.x}-${click.y}-${idx}`}
+                            className="absolute rounded-full bg-red-500 border-2 border-white"
+                            style={{
+                              left: `${(click.x / selectedHeatmapScreen.screen.width) * 100}%`,
+                              top: `${(click.y / selectedHeatmapScreen.screen.height) * 100}%`,
+                              width: '16px',
+                              height: '16px',
+                              transform: 'translate(-50%, -50%)',
+                              opacity: click.isFallback ? 0.5 : 0.9
+                            }}
+                            title={click.isFallback ? 'Координаты не записаны' : (click.count > 1 ? `${click.count} кликов` : 'Клик')}
+                          />
+                        ))}
                       </div>
                     </>
                   )}
                 </div>
               </div>
 
-              <div className="w-64 space-y-4">
+              <div className="w-64 space-y-4 flex-shrink-0 overflow-auto">
                 {(() => {
                   const stats = getScreenStats(selectedHeatmapScreen.screen.id);
                   return (
@@ -4989,7 +6057,7 @@ function PrototypeView({
         }
         return createPortal(
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
           onClick={(e) => {
             // Prevent closing if modal was just opened (prevents click event from button bubbling)
             if (modalJustOpened) {
@@ -5001,10 +6069,10 @@ function PrototypeView({
           }}
         >
           <div
-            className="bg-card rounded-lg max-w-6xl w-full max-h-[90vh] overflow-auto p-6"
+            className="bg-card rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col overflow-hidden p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h3 className="text-xl font-semibold">
                 {selectedRespondentScreen.screen.name} ({selectedRespondentScreen.screenIndex} из {selectedRespondentScreen.totalScreens})
               </h3>
@@ -5019,7 +6087,7 @@ function PrototypeView({
               </button>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-shrink-0">
               <button
                 onClick={() => setRespondentHeatmapView("heatmap")}
                 className={cn(
@@ -5055,14 +6123,17 @@ function PrototypeView({
               </button>
             </div>
 
-            <div className="flex gap-6">
-              <div className="flex-1">
-                <div className="relative border border-border rounded-lg overflow-hidden bg-black">
+            <div className="flex gap-6 flex-1 min-h-0">
+              <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center">
+                <div
+                  className="relative rounded-lg overflow-hidden bg-black border border-border max-h-full max-w-full"
+                  style={{ aspectRatio: `${selectedRespondentScreen.screen.width} / ${selectedRespondentScreen.screen.height}` }}
+                >
                   {respondentHeatmapView === "image" && (
                     <img
                       src={selectedRespondentScreen.screen.image}
                       alt={selectedRespondentScreen.screen.name}
-                      className="w-full h-auto"
+                      className="w-full h-full object-contain"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = 'none';
@@ -5096,13 +6167,15 @@ function PrototypeView({
                     const maxCount = Math.max(...heatmapData.map(c => c.count), 1);
                     
                     return (
-                      <HeatmapRenderer
-                        data={heatmapData}
-                        width={selectedRespondentScreen.screen.width}
-                        height={selectedRespondentScreen.screen.height}
-                        imageUrl={selectedRespondentScreen.screen.image}
-                        max={maxCount}
-                      />
+                      <div className="w-full h-full">
+                        <HeatmapRenderer
+                          data={heatmapData}
+                          width={selectedRespondentScreen.screen.width}
+                          height={selectedRespondentScreen.screen.height}
+                          imageUrl={selectedRespondentScreen.screen.image}
+                          max={maxCount}
+                        />
+                      </div>
                     );
                   })()}
                   {respondentHeatmapView === "clicks" && (
@@ -5110,7 +6183,7 @@ function PrototypeView({
                       <img
                         src={selectedRespondentScreen.screen.image}
                         alt={selectedRespondentScreen.screen.name}
-                        className="w-full h-auto"
+                        className="w-full h-full object-contain block"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';
@@ -5156,7 +6229,7 @@ function PrototypeView({
                 </div>
               </div>
 
-              <div className="w-64 space-y-4">
+              <div className="w-64 space-y-4 flex-shrink-0 overflow-auto">
                 {(() => {
                   const sessionEvents = events.filter(e => 
                     e.session_id === selectedRespondentScreen.session.id &&
@@ -5222,24 +6295,28 @@ function PrototypeView({
 // All Blocks Report View - shows all blocks in one card with 1px borders
 interface AllBlocksReportViewProps {
   blocks: StudyBlock[];
-  sessionId: string;
+  sessionId: string | undefined;
   runId: string;
   responses: StudyBlockResponse[];
   sessions: Session[];
   events: any[];
   prototypes: Record<string, Proto>;
+  gazePoints?: GazePointRow[];
   onDeleteResponses?: (blockId: string) => Promise<void>;
+  onRecordingDeleted?: () => void;
 }
 
 function AllBlocksReportView({
   blocks,
-  sessionId,
+  sessionId: _sessionId,
   runId,
   responses,
   sessions,
   events,
   prototypes,
-  onDeleteResponses
+  gazePoints = [],
+  onDeleteResponses,
+  onRecordingDeleted
 }: AllBlocksReportViewProps) {
   // State for modal
   const [selectedRespondentScreen, setSelectedRespondentScreen] = useState<{
@@ -5252,7 +6329,7 @@ function AllBlocksReportView({
   const [modalJustOpened, setModalJustOpened] = useState(false);
   const [respondentHeatmapView, setRespondentHeatmapView] = useState<HeatmapView>("heatmap");
   const [showClickOrder, setShowClickOrder] = useState(false);
-  const [recordingModalUrl, setRecordingModalUrl] = useState<string | null>(null);
+  const [recordingModal, setRecordingModal] = useState<RecordingModalData | null>(null);
 
   // Reset modalJustOpened flag after a short delay to prevent immediate backdrop clicks
   useEffect(() => {
@@ -5264,18 +6341,14 @@ function AllBlocksReportView({
     }
   }, [selectedRespondentScreen, modalJustOpened]);
 
-  // Фильтруем блоки, у которых есть ответы
+  // Фильтруем блоки, у которых есть ответы (исключаем soft-deleted)
   // Для блока "Прототип" проверяем наличие sessions, для остальных - responses
   const blocksWithResponses = useMemo(() => {
-    return blocks.filter(block => {
-      if (block.type === "prototype") {
-        // Для прототипа проверяем наличие sessions с block_id
-        return sessions.some(s => s.block_id === block.id);
-      } else {
-        // Для остальных блоков проверяем наличие responses с block_id
-        return responses.some(r => r.block_id === block.id);
-      }
-    });
+    return blocks.filter(block => !block.deleted_at && (
+      block.type === "prototype"
+        ? sessions.some(s => s.block_id === block.id)
+        : responses.some(r => r.block_id === block.id)
+    ));
   }, [blocks, sessions, responses]);
   
   return (
@@ -5328,8 +6401,9 @@ function AllBlocksReportView({
                     showClickOrder={false}
                     setShowClickOrder={() => {}}
                     setModalJustOpened={setModalJustOpened}
-                    recordingModalUrl={recordingModalUrl}
-                    setRecordingModalUrl={setRecordingModalUrl}
+                    recordingModal={recordingModal}
+                    setRecordingModal={setRecordingModal}
+                    gazePoints={gazePoints}
                     onDeleteResponses={onDeleteResponses}
                   />
                 </div>
@@ -5346,7 +6420,7 @@ function AllBlocksReportView({
         }
         return createPortal(
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
           onClick={(e) => {
             // Prevent closing if modal was just opened (prevents click event from button bubbling)
             if (modalJustOpened) {
@@ -5358,10 +6432,10 @@ function AllBlocksReportView({
           }}
         >
           <div
-            className="bg-card rounded-lg max-w-6xl w-full max-h-[90vh] overflow-auto p-6"
+            className="bg-card rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col overflow-hidden p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h3 className="text-xl font-semibold">
                 {selectedRespondentScreen.screen.name} ({selectedRespondentScreen.screenIndex} из {selectedRespondentScreen.totalScreens})
               </h3>
@@ -5376,7 +6450,7 @@ function AllBlocksReportView({
               </button>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-shrink-0">
               <button
                 onClick={() => setRespondentHeatmapView("heatmap")}
                 className={cn(
@@ -5412,14 +6486,17 @@ function AllBlocksReportView({
               </button>
             </div>
 
-            <div className="flex gap-6">
-              <div className="flex-1">
-                <div className="relative border border-border rounded-lg overflow-hidden bg-black">
+            <div className="flex gap-6 flex-1 min-h-0">
+              <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center">
+                <div
+                  className="relative rounded-lg overflow-hidden bg-black border border-border max-h-full max-w-full"
+                  style={{ aspectRatio: `${selectedRespondentScreen.screen.width} / ${selectedRespondentScreen.screen.height}` }}
+                >
                   {respondentHeatmapView === "image" && (
                     <img
                       src={selectedRespondentScreen.screen.image}
                       alt={selectedRespondentScreen.screen.name}
-                      className="w-full h-auto"
+                      className="w-full h-full object-contain"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = 'none';
@@ -5453,13 +6530,15 @@ function AllBlocksReportView({
                     const maxCount = Math.max(...heatmapData.map(c => c.count), 1);
                     
                     return (
-                      <HeatmapRenderer
-                        data={heatmapData}
-                        width={selectedRespondentScreen.screen.width}
-                        height={selectedRespondentScreen.screen.height}
-                        imageUrl={selectedRespondentScreen.screen.image}
-                        max={maxCount}
-                      />
+                      <div className="w-full h-full">
+                        <HeatmapRenderer
+                          data={heatmapData}
+                          width={selectedRespondentScreen.screen.width}
+                          height={selectedRespondentScreen.screen.height}
+                          imageUrl={selectedRespondentScreen.screen.image}
+                          max={maxCount}
+                        />
+                      </div>
                     );
                   })()}
                   {respondentHeatmapView === "clicks" && (
@@ -5467,7 +6546,7 @@ function AllBlocksReportView({
                       <img
                         src={selectedRespondentScreen.screen.image}
                         alt={selectedRespondentScreen.screen.name}
-                        className="w-full h-auto"
+                        className="w-full h-full object-contain block"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';
@@ -5513,7 +6592,7 @@ function AllBlocksReportView({
                 </div>
               </div>
 
-              <div className="w-64 space-y-4">
+              <div className="w-64 space-y-4 flex-shrink-0 overflow-auto">
                 {(() => {
                   const sessionEvents = events.filter(e => 
                     e.session_id === selectedRespondentScreen.session.id &&
@@ -5573,32 +6652,16 @@ function AllBlocksReportView({
         );
       })()}
 
-      {/* Modal for video recording */}
-      {recordingModalUrl && createPortal(
-        <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4"
-          onClick={() => setRecordingModalUrl(null)}
-        >
-          <div
-            className="bg-card rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold">Запись сессии</h3>
-              <button
-                onClick={() => setRecordingModalUrl(null)}
-                className="p-2 hover:bg-muted rounded"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <video
-              src={recordingModalUrl}
-              controls
-              className="w-full max-h-[70vh] bg-black rounded-lg"
-            />
-          </div>
-        </div>,
+      {/* Modal: экран — основной плеер, камера — PiP слева внизу */}
+      {recordingModal && (recordingModal.urls.camera || recordingModal.urls.screen) && createPortal(
+        <RecordingModalContent
+          recordingModalUrls={recordingModal.urls}
+          sessionId={recordingModal.sessionId}
+          sessionStartedAt={recordingModal.sessionStartedAt}
+          sessionGazePoints={recordingModal.sessionGazePoints}
+          onClose={() => setRecordingModal(null)}
+          onDeleted={onRecordingDeleted}
+        />,
         document.body
       )}
     </div>

@@ -743,7 +743,6 @@ export default function ProfilePage() {
                     <Button
                       variant="destructive"
                       onClick={() => setIsDeleteTeamDialogOpen(true)}
-                      className="text-destructive"
                     >
                       <Trash2 className="h-4 w-4 mr-2" />
                       Удалить команду

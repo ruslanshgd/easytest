@@ -25,7 +25,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingTextarea } from "@/components/ui/floating-textarea";
@@ -289,7 +289,7 @@ interface BlockLogic {
 }
 
 const BLOCK_TYPES: { value: BlockType; label: string; Icon: LucideIcon }[] = [
-  { value: "prototype", label: "Прототип", Icon: Layers },
+  { value: "prototype", label: "Figma прототип", Icon: Layers },
   { value: "open_question", label: "Открытый вопрос", Icon: MessageSquare },
   { value: "choice", label: "Выбор", Icon: ListChecks },
   { value: "scale", label: "Шкала", Icon: BarChart3 },
@@ -384,6 +384,9 @@ export default function StudyDetail() {
   const [originalBlocksSnapshot, setOriginalBlocksSnapshot] = useState<string>("");
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [blockIdToDelete, setBlockIdToDelete] = useState<string | null>(null);
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [showStopDialog, setShowStopDialog] = useState(false);
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   
   const isSaving = savingCount > 0;
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -846,6 +849,33 @@ export default function StudyDetail() {
       }
 
       setBlocks(blocksData || []);
+
+      // Прототипы: свои (user_id) + привязанные к блокам текущего теста (для членов команды, просматривающих чужой тест)
+      const prototypeIdsInStudy = (blocksData || [])
+        .filter((b: StudyBlock) => b.prototype_id)
+        .map((b: StudyBlock) => b.prototype_id) as string[];
+      const uniqueIds = [...new Set(prototypeIdsInStudy)];
+
+      const { data: userPrototypes } = await supabase
+        .from("prototypes")
+        .select("id, task_description")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      let prototypesData = userPrototypes || [];
+      if (uniqueIds.length > 0) {
+        const { data: studyPrototypes } = await supabase
+          .from("prototypes")
+          .select("id, task_description")
+          .in("id", uniqueIds);
+        const merged = [...prototypesData];
+        for (const p of studyPrototypes || []) {
+          if (!merged.some((m) => m.id === p.id)) merged.push(p);
+        }
+        prototypesData = merged;
+      }
+
+      setPrototypes(prototypesData);
       
       // Сохраняем snapshot блоков для отслеживания изменений
       if (studyData.status === "published") {
@@ -855,14 +885,6 @@ export default function StudyDetail() {
         setOriginalBlocksSnapshot("");
         setHasUnpublishedChanges(false);
       }
-
-      const { data: prototypesData } = await supabase
-        .from("prototypes")
-        .select("id, task_description")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      setPrototypes(prototypesData || []);
     } catch (err) {
       setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -939,30 +961,62 @@ export default function StudyDetail() {
     }
   }, [blocks, study?.status, originalBlocksSnapshot]);
 
-  const handlePublish = async () => {
+  // Закрыть модалку «Добавить/Редактировать блок» при переходе в статус «Опубликован»
+  useEffect(() => {
+    if (study?.status === "published" && showAddBlockModal) {
+      setShowAddBlockModal(false);
+    }
+  }, [study?.status, showAddBlockModal, setShowAddBlockModal]);
+
+  const handlePublishClick = () => {
     if (!study || !studyId) return;
     if (constructorBlocks.length === 0) {
       setError("Добавьте хотя бы один блок перед публикацией");
       return;
     }
-    if (!confirm("Опубликовать тест? После публикации редактирование блоков будет заблокировано.")) return;
+    setShowPublishDialog(true);
+  };
+
+  const handlePublishConfirm = async () => {
+    if (!study || !studyId) return;
+
+    // Снимок блоков на момент публикации — респонденты видят только его, а не последующие правки
+    const { data: blocksForSnapshot, error: blocksErr } = await supabase
+      .from("study_blocks")
+      .select("id, study_id, type, order_index, prototype_id, instructions, config")
+      .eq("study_id", studyId)
+      .is("deleted_at", null)
+      .order("order_index", { ascending: true });
+
+    if (blocksErr || !blocksForSnapshot?.length) {
+      setError(blocksErr?.message ?? "Нет блоков для публикации");
+      return;
+    }
 
     const { error: updateError } = await supabase
       .from("studies")
-      .update({ status: "published" })
+      .update({
+        status: "published",
+        published_blocks_snapshot: blocksForSnapshot,
+      })
       .eq("id", studyId);
 
     if (updateError) {
       setError(updateError.message);
       return;
     }
+    setShowPublishDialog(false);
     await loadStudy();
   };
 
-  const handleStop = async () => {
+  const handleStopClick = () => {
     if (!study || !studyId) return;
-    if (!confirm("Остановить тестирование? Ссылка перестанет работать.")) return;
+    setShowStopDialog(true);
+  };
 
+  const handleStopConfirm = async () => {
+    if (!study || !studyId) return;
+    // Остановка теста: статус "stopped", редактирование снова доступно; в списке папки отображается "Остановлен".
     const { error: updateError } = await supabase
       .from("studies")
       .update({ status: "stopped" })
@@ -972,12 +1026,20 @@ export default function StudyDetail() {
       setError(updateError.message);
       return;
     }
+    setShowStopDialog(false);
     await loadStudy();
   };
 
-  const handleDuplicate = async () => {
+  /** @deprecated Используйте handleStopClick. Оставлен для обратной совместимости. */
+  const handleStop = handleStopClick;
+
+  const handleDuplicate = () => {
     if (!study || !studyId) return;
-    if (!confirm(`Продублировать тест "${study.title}"?`)) return;
+    setShowDuplicateDialog(true);
+  };
+
+  const handleDuplicateConfirm = async () => {
+    if (!study || !studyId) return;
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -1005,6 +1067,7 @@ export default function StudyDetail() {
       await supabase.from("study_blocks").insert(newBlocks);
     }
 
+    setShowDuplicateDialog(false);
     navigate(`/studies/${newStudy.id}`);
   };
 
@@ -1504,7 +1567,7 @@ export default function StudyDetail() {
 
   // Быстрое добавление блока с дефолтными значениями
   const handleQuickAddBlock = async (blockType: BlockType) => {
-    if (!studyId || study?.status !== "draft") return;
+    if (!studyId || (study?.status !== "draft" && study?.status !== "stopped")) return;
 
     const maxOrderIndex = constructorBlocks.length > 0 ? Math.max(...constructorBlocks.map(b => b.order_index)) : -1;
     
@@ -1797,34 +1860,33 @@ export default function StudyDetail() {
     }
   };
 
-  const isEditable = study?.status === "draft";
-
-  const containerStyle = { padding: "20px", maxWidth: "1104px", margin: "0 auto" };
+  const isEditable = study?.status === "draft" || study?.status === "stopped";
 
   if (loading) {
-    return <div style={containerStyle}><h2>Тест</h2><p>Загрузка...</p></div>;
-  }
-
-  if (error && !study) {
     return (
-      <div style={containerStyle}>
-        <h2>Тест</h2>
-        <p style={{ color: "var(--color-destructive)" }}>Ошибка: {error}</p>
-        <button onClick={() => navigate(-1)} style={{ marginTop: 16, padding: "8px 16px" }}>
-          ← Назад
-        </button>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground">
+        <h1 className="m-0 text-2xl font-semibold text-foreground">Загрузка...</h1>
       </div>
     );
   }
 
-  if (!study) {
+  if (!study && !loading) {
     return (
-      <div style={containerStyle}>
-        <h2>Тест</h2>
-        <p>Тест не найден</p>
-        <button onClick={() => navigate(-1)} style={{ marginTop: 16, padding: "8px 16px" }}>
-          ← Назад
-        </button>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <h1 style={{ margin: 0, marginBottom: 8, fontSize: "24px", fontWeight: 600, color: "var(--text-primary, #1f1f1f)" }}>
+          Страница не найдена
+        </h1>
+        <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary, #6b6b6b)" }}>
+          Простите, здесь ничего нет
+        </p>
       </div>
     );
   }
@@ -1864,8 +1926,7 @@ export default function StudyDetail() {
   const getBlockShortName = (block: StudyBlock, index: number): string => {
     switch (block.type) {
       case "prototype":
-        const proto = prototypes.find(p => p.id === block.prototype_id);
-        return proto?.task_description?.substring(0, 30) || `Прототип`;
+        return block.instructions?.substring(0, 30) || "Figma прототип";
       case "open_question":
         return block.config?.question?.substring(0, 30) || "Открытый вопрос";
       case "umux_lite":
@@ -1987,14 +2048,14 @@ export default function StudyDetail() {
             <Button variant="ghost" size="sm" onClick={handleDuplicate}>
               <Copy className="h-4 w-4" />
             </Button>
-            {study.status === "draft" && (
-              <Button size="sm" onClick={handlePublish}>
+            {(study.status === "draft" || study.status === "stopped") && (
+              <Button size="sm" onClick={handlePublishClick}>
                 <Rocket className="h-4 w-4 mr-2" />
                 Опубликовать
               </Button>
             )}
             {study.status === "published" && (
-              <Button variant="destructive" size="sm" onClick={handleStop}>
+              <Button variant="destructive" size="sm" onClick={handleStopClick}>
                 <StopCircle className="h-4 w-4 mr-2" />
                 Остановить
               </Button>
@@ -2037,25 +2098,31 @@ export default function StudyDetail() {
                     isSelected
                       ? "bg-primary text-white shadow-md"
                       : "bg-card border border-border hover:border-primary/30",
-                    invalid && !isSelected && "border-red-200 bg-red-50/80 hover:border-red-300",
+                    invalid && !isSelected && "border-destructive/40 bg-destructive/10 hover:border-destructive/60 dark:border-destructive/50 dark:bg-destructive/15 dark:hover:border-destructive/70",
                     draggedBlockId === block.id && "opacity-50 border-dashed border-primary"
                   )}
                 >
                   {isEditable && (
                     <GripVertical className={cn(
                       "h-4 w-4 cursor-move",
-                      isSelected ? "text-white/80" : "text-muted-foreground"
+                      isSelected ? "text-white/80" : "text-muted-foreground",
+                      invalid && !isSelected && "dark:text-foreground/80"
                     )} />
                   )}
                   <span className={cn(
                     "text-[15px] font-medium leading-6",
-                    isSelected && "text-white"
+                    isSelected && "text-white",
+                    invalid && !isSelected && "dark:text-foreground"
                   )}>{index + 1}.</span>
                   <div className={cn(
                     "w-5 h-5 rounded flex items-center justify-center flex-shrink-0",
-                    isSelected ? "bg-white/20" : "bg-muted"
+                    isSelected ? "bg-white/20" : "bg-muted",
+                    invalid && !isSelected && "dark:bg-foreground/10"
                   )}>
-                    <IconComponent size={14} className={isSelected ? "text-white" : "text-muted-foreground"} />
+                    <IconComponent size={14} className={cn(
+                      isSelected ? "text-white" : "text-muted-foreground",
+                      invalid && !isSelected && "dark:text-foreground"
+                    )} />
                   </div>
                   <TooltipProvider>
                     <Tooltip>
@@ -2073,7 +2140,8 @@ export default function StudyDetail() {
                         >
                           <div className={cn(
                             "text-[15px] font-medium leading-6 truncate",
-                            isSelected && "text-white"
+                            isSelected && "text-white",
+                            invalid && !isSelected && "dark:text-foreground"
                           )}>
                             {fullBlockName}
                           </div>
@@ -2245,7 +2313,14 @@ export default function StudyDetail() {
               </div>
             )}
 
-            {activeTab === "results" && studyId && <StudyResultsTab studyId={studyId} blocks={blocks} />}
+            {activeTab === "results" && studyId && (
+              <StudyResultsTab
+                studyId={studyId}
+                blocks={blocks}
+                studyStatus={study?.status}
+                onBlockDeleted={study?.status === "draft" || study?.status === "stopped" ? performDeleteBlock : undefined}
+              />
+            )}
             {activeTab === "share" && (
               <div className="max-w-3xl mx-auto pt-6">
                 <StudyShareTab studyId={studyId || ""} studyStatus={study.status} shareToken={study.share_token} />
@@ -2254,6 +2329,65 @@ export default function StudyDetail() {
           </div>
         </div>
       </div>
+
+      {/* Publish Confirmation */}
+      <AlertDialog open={showPublishDialog} onOpenChange={(open) => !open && setShowPublishDialog(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Опубликовать тест?</AlertDialogTitle>
+            <AlertDialogDescription>
+              После публикации редактирование блоков будет заблокировано.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowPublishDialog(false)}>Нет, не публиковать</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); handlePublishConfirm(); }}>
+              Да, опубликовать
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Stop Confirmation */}
+      <AlertDialog open={showStopDialog} onOpenChange={(open) => !open && setShowStopDialog(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Остановить тестирование?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ссылка перестанет работать.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowStopDialog(false)}>Нет, не останавливать</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => { e.preventDefault(); handleStopConfirm(); }}
+            >
+              Да, остановить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Duplicate Confirmation */}
+      <AlertDialog open={showDuplicateDialog} onOpenChange={(open) => !open && setShowDuplicateDialog(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Продублировать тест "{study?.title}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Будет создана копия теста со всеми блоками, настройками и логикой переходов.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowDuplicateDialog(false)}>Нет, копия не нужна</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDuplicateConfirm(); }}
+            >
+              Да, создать копию
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Block Confirmation */}
       <AlertDialog open={!!blockIdToDelete} onOpenChange={(open) => !open && setBlockIdToDelete(null)}>
@@ -2281,8 +2415,14 @@ export default function StudyDetail() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Add Block Modal */}
-      <Dialog open={showAddBlockModal} onOpenChange={setShowAddBlockModal}>
+      {/* Add Block Modal — не открывать при опубликованном тесте; все поля disabled при !isEditable */}
+      <Dialog
+        open={showAddBlockModal}
+        onOpenChange={(open) => {
+          if (open && !isEditable) return;
+          setShowAddBlockModal(open);
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingBlockId ? "Редактировать блок" : "Добавить блок"}</DialogTitle>
@@ -2299,12 +2439,15 @@ export default function StudyDetail() {
                   return (
                     <button
                       key={type.value}
+                      type="button"
+                      disabled={!isEditable}
                       onClick={() => { setNewBlockType(type.value); resetBlockForm(); }}
                       className={cn(
                         "flex items-center gap-3 p-3 rounded-lg border text-left transition-all",
                         isSelected 
                           ? "border-primary bg-primary/5 text-primary" 
-                          : "border-border hover:border-primary/50"
+                          : "border-border hover:border-primary/50",
+                        !isEditable && "opacity-60 pointer-events-none"
                       )}
                     >
                       <IconComponent size={18} className={isSelected ? "text-primary" : "text-muted-foreground"} />
@@ -2316,10 +2459,10 @@ export default function StudyDetail() {
             </div>
 
             <div className="border-t pt-6">
-              {/* Прототип */}
+              {/* Figma прототип */}
               {newBlockType === "prototype" && (
                 <>
-                  <FormField label="Прототип:" className="mb-4">
+                  <FormField label="Figma прототип:" className="mb-4">
                     {prototypes.length === 0 ? (
                       <AlertBox variant="warning">
                         Нет доступных прототипов. Создайте через Figma плагин.
@@ -2333,11 +2476,12 @@ export default function StudyDetail() {
                           handlePrototypeDeleted(id);
                           if (id === selectedPrototypeId) setSelectedPrototypeId("");
                         }}
+                        disabled={!isEditable}
                       />
                     )}
                   </FormField>
                   <FormField label="Инструкции" optional className="mb-4">
-                    <FormTextarea value={newBlockInstructions} onChange={e => setNewBlockInstructions(e.target.value)} placeholder="Введите инструкции" rows={3} />
+                    <FormTextarea value={newBlockInstructions} onChange={e => setNewBlockInstructions(e.target.value)} placeholder="Введите инструкции" rows={3} disabled={!isEditable} />
                   </FormField>
                   <div className="mb-2 p-3 bg-muted rounded-lg space-y-3">
                     <div className="text-sm font-medium">Дополнительные настройки</div>
@@ -2345,22 +2489,26 @@ export default function StudyDetail() {
                       label="Включить отслеживание движений глаз (экспериментально)"
                       checked={newBlockEyeTrackingEnabled}
                       onChange={setNewBlockEyeTrackingEnabled}
+                      disabled={!isEditable}
                     />
                     <div className="grid gap-2 sm:grid-cols-2">
                       <ToggleSwitch
                         label="Запись экрана"
                         checked={prototypeRecordScreen}
                         onChange={setPrototypeRecordScreen}
+                        disabled={!isEditable}
                       />
                       <ToggleSwitch
                         label="Запись камеры"
                         checked={prototypeRecordCamera}
                         onChange={setPrototypeRecordCamera}
+                        disabled={!isEditable}
                       />
                       <ToggleSwitch
                         label="Запись голоса"
                         checked={prototypeRecordAudio}
                         onChange={setPrototypeRecordAudio}
+                        disabled={!isEditable}
                       />
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -2377,11 +2525,12 @@ export default function StudyDetail() {
                     label="Изображение (опционально)"
                     image={openQuestionImage}
                     onImageChange={setOpenQuestionImage}
+                    disabled={!isEditable}
                   />
                   <FormField label="Текст вопроса:" className="mb-4">
-                    <FormTextarea value={openQuestionText} onChange={e => setOpenQuestionText(e.target.value)} placeholder="Введите текст вопроса" rows={3} />
+                    <FormTextarea value={openQuestionText} onChange={e => setOpenQuestionText(e.target.value)} placeholder="Введите текст вопроса" rows={3} disabled={!isEditable} />
                   </FormField>
-                  <ToggleSwitch label="Необязательный вопрос" checked={openQuestionOptional} onChange={setOpenQuestionOptional} />
+                  <ToggleSwitch label="Необязательный вопрос" checked={openQuestionOptional} onChange={setOpenQuestionOptional} disabled={!isEditable} />
                 </>
               )}
 
@@ -2396,67 +2545,58 @@ export default function StudyDetail() {
               {/* Выбор */}
               {newBlockType === "choice" && (
                 <>
-                  <ImageUploader
-                    label="Изображение (опционально)"
-                    image={choiceImage}
-                    onImageChange={setChoiceImage}
-                  />
+                  <ImageUploader label="Изображение (опционально)" image={choiceImage} onImageChange={setChoiceImage} disabled={!isEditable} />
                   <FormField label="Вопрос:" className="mb-4">
-                    <Input type="text" value={choiceQuestion} onChange={e => setChoiceQuestion(e.target.value)} placeholder="Введите текст вопроса" />
+                    <Input type="text" value={choiceQuestion} onChange={e => setChoiceQuestion(e.target.value)} placeholder="Введите текст вопроса" disabled={!isEditable} />
                   </FormField>
                   <FormField label="Описание" optional className="mb-4">
-                    <FormTextarea value={choiceDescription} onChange={e => setChoiceDescription(e.target.value)} placeholder="Введите дополнительные детали" rows={2} />
+                    <FormTextarea value={choiceDescription} onChange={e => setChoiceDescription(e.target.value)} placeholder="Введите дополнительные детали" rows={2} disabled={!isEditable} />
                   </FormField>
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Варианты ответа:</label>
                     {choiceOptions.map((opt, i) => (
                       <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                         <span className="px-3 py-2 bg-muted rounded-md text-sm font-medium">{String.fromCharCode(65 + i)}</span>
-                        <Input type="text" value={opt} onChange={e => { const newOpts = [...choiceOptions]; newOpts[i] = e.target.value; setChoiceOptions(newOpts); }} placeholder="Введите вариант ответа" className="flex-1" />
+                        <Input type="text" value={opt} onChange={e => { const newOpts = [...choiceOptions]; newOpts[i] = e.target.value; setChoiceOptions(newOpts); }} placeholder="Введите вариант ответа" className="flex-1" disabled={!isEditable} />
                         {choiceOptions.length > 2 && (
-                          <Button 
-                            variant="destructive" 
-                            size="sm"
-                            onClick={() => setChoiceOptions(choiceOptions.filter((_, j) => j !== i))}
-                            className="h-8 px-3"
-                          >
+                          <Button variant="destructive" size="sm" onClick={() => setChoiceOptions(choiceOptions.filter((_, j) => j !== i))} className="h-8 px-3" disabled={!isEditable}>
                             ✕
                           </Button>
                         )}
                       </div>
                     ))}
-                    <Button variant="outline" size="sm" onClick={() => setChoiceOptions([...choiceOptions, ""])} className="mt-2">
+                    <Button variant="outline" size="sm" onClick={() => setChoiceOptions([...choiceOptions, ""])} className="mt-2" disabled={!isEditable}>
                       + Вариант ответа
                     </Button>
                   </div>
                   <div className="mb-2 p-3 bg-muted rounded-lg">
                     <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 12 }}>Настройки</div>
-                    <ToggleSwitch label="Разрешить выбор нескольких вариантов" checked={choiceAllowMultiple} onChange={setChoiceAllowMultiple} />
+                    <ToggleSwitch label="Разрешить выбор нескольких вариантов" checked={choiceAllowMultiple} onChange={setChoiceAllowMultiple} disabled={!isEditable} />
                     {choiceAllowMultiple && (
                       <div style={{ marginLeft: 24, marginTop: 8 }}>
-                        <ToggleSwitch label="Ограничить количество вариантов" checked={choiceLimitSelections} onChange={setChoiceLimitSelections} />
+                        <ToggleSwitch label="Ограничить количество вариантов" checked={choiceLimitSelections} onChange={setChoiceLimitSelections} disabled={!isEditable} />
                         {choiceLimitSelections && (
                           <div style={{ marginTop: 8, marginLeft: 24 }}>
-                            <Input type="number" min={1} max={choiceOptions.length} value={choiceMaxSelections} onChange={e => setChoiceMaxSelections(parseInt(e.target.value) || 2)} className="w-[60px] h-8 px-2 text-sm" />
+                            <Input type="number" min={1} max={choiceOptions.length} value={choiceMaxSelections} onChange={e => setChoiceMaxSelections(parseInt(e.target.value) || 2)} className="w-[60px] h-8 px-2 text-sm" disabled={!isEditable} />
                           </div>
                         )}
                       </div>
                     )}
                     <div>
-                      <ToggleSwitch label="Перемешать варианты ответа" checked={choiceShuffle} onChange={setChoiceShuffle} />
+                      <ToggleSwitch label="Перемешать варианты ответа" checked={choiceShuffle} onChange={setChoiceShuffle} disabled={!isEditable} />
                       <p className="text-xs text-muted-foreground mt-1 ml-0">Включите эту опцию, чтобы перемешать ответы. Вы можете закрепить позиции конкретных ответов.</p>
                     </div>
-                    <ToggleSwitch label="Разрешить респондентам ввести свой ответ (опция «Другое»)" checked={choiceAllowOther} onChange={setChoiceAllowOther} />
+                    <ToggleSwitch label="Разрешить респондентам ввести свой ответ (опция «Другое»)" checked={choiceAllowOther} onChange={setChoiceAllowOther} disabled={!isEditable} />
                     <div>
-                      <ToggleSwitch label="Добавить опцию «Ничего из вышеперечисленного»" checked={choiceAllowNone} onChange={setChoiceAllowNone} />
+                      <ToggleSwitch label="Добавить опцию «Ничего из вышеперечисленного»" checked={choiceAllowNone} onChange={setChoiceAllowNone} disabled={!isEditable} />
                       <p className="text-xs text-muted-foreground mt-1 ml-0">Эта опция отменяет все остальные опции и появляется в конце списка. Вы можете изменить текст этой опции.</p>
                     </div>
                     {choiceAllowNone && (
                       <div style={{ marginLeft: 24, marginTop: 8 }}>
-                        <Input type="text" value={choiceNoneText} onChange={e => setChoiceNoneText(e.target.value)} placeholder="Введите название опции" className="h-8 text-xs" />
+                        <Input type="text" value={choiceNoneText} onChange={e => setChoiceNoneText(e.target.value)} placeholder="Введите название опции" className="h-8 text-xs" disabled={!isEditable} />
                       </div>
                     )}
-                    <ToggleSwitch label="Необязательный вопрос" checked={choiceOptional} onChange={setChoiceOptional} />
+                    <ToggleSwitch label="Необязательный вопрос" checked={choiceOptional} onChange={setChoiceOptional} disabled={!isEditable} />
                   </div>
                 </>
               )}
@@ -2465,10 +2605,10 @@ export default function StudyDetail() {
               {newBlockType === "context" && (
                 <>
                   <FormField label="Заголовок:" className="mb-4">
-                    <Input type="text" value={contextTitle} onChange={e => setContextTitle(e.target.value)} placeholder="Введите заголовок" />
+                    <Input type="text" value={contextTitle} onChange={e => setContextTitle(e.target.value)} placeholder="Введите заголовок" disabled={!isEditable} />
                   </FormField>
                   <FormField label="Описание" optional className="mb-4">
-                    <FormTextarea value={contextDescription} onChange={e => setContextDescription(e.target.value)} placeholder="Введите описание" rows={4} />
+                    <FormTextarea value={contextDescription} onChange={e => setContextDescription(e.target.value)} placeholder="Введите описание" rows={4} disabled={!isEditable} />
                   </FormField>
                   <AlertBox variant="info" className="p-3 text-sm">
                     ℹ️ Блок «Контекст» отображает текст для ознакомления. Не учитывается в аналитике.
@@ -2479,22 +2619,18 @@ export default function StudyDetail() {
               {/* Шкала */}
               {newBlockType === "scale" && (
                 <>
-                  <ImageUploader
-                    label="Изображение (опционально)"
-                    image={scaleImage}
-                    onImageChange={setScaleImage}
-                  />
+                  <ImageUploader label="Изображение (опционально)" image={scaleImage} onImageChange={setScaleImage} disabled={!isEditable} />
                   <FormField label="Вопрос:" className="mb-4">
-                    <Input type="text" value={scaleQuestion} onChange={e => setScaleQuestion(e.target.value)} placeholder="Введите текст вопроса" />
+                    <Input type="text" value={scaleQuestion} onChange={e => setScaleQuestion(e.target.value)} placeholder="Введите текст вопроса" disabled={!isEditable} />
                   </FormField>
                   <FormField label="Описание" optional className="mb-4">
-                    <FormTextarea value={scaleDescription} onChange={e => setScaleDescription(e.target.value)} placeholder="Введите дополнительные детали" rows={2} />
+                    <FormTextarea value={scaleDescription} onChange={e => setScaleDescription(e.target.value)} placeholder="Введите дополнительные детали" rows={2} disabled={!isEditable} />
                   </FormField>
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Тип шкалы:</label>
                     <div style={{ display: "flex", gap: 8 }}>
                       {[{ v: "numeric", l: "Числовой" }, { v: "emoji", l: "Эмодзи" }, { v: "stars", l: "Звезды" }].map(t => (
-                        <button key={t.v} onClick={() => setScaleType(t.v as any)} className={cn("flex-1 p-2.5 rounded-lg cursor-pointer text-sm border", scaleType === t.v ? "border-warning bg-warning-subtle font-semibold" : "border-input bg-background font-normal")}>
+                        <button key={t.v} type="button" disabled={!isEditable} onClick={() => setScaleType(t.v as any)} className={cn("flex-1 p-2.5 rounded-lg text-sm border", scaleType === t.v ? "border-warning bg-warning-subtle font-semibold" : "border-input bg-background font-normal", isEditable && "cursor-pointer", !isEditable && "opacity-60 pointer-events-none")}>
                           {t.l}
                         </button>
                       ))}
@@ -2504,21 +2640,21 @@ export default function StudyDetail() {
                     <>
                       <div className="flex gap-4 mb-4">
                         <FormField label="От:" className="flex-1">
-                          <FormSelect value={scaleMin} onChange={e => setScaleMin(parseInt(e.target.value))}>
+                          <FormSelect value={scaleMin} onChange={e => setScaleMin(parseInt(e.target.value))} disabled={!isEditable}>
                             {[0, 1].map(v => <option key={v} value={v}>{v}</option>)}
                           </FormSelect>
                         </FormField>
                         <FormField label="До:" className="flex-1">
-                          <FormSelect value={scaleMax} onChange={e => setScaleMax(parseInt(e.target.value))}>
+                          <FormSelect value={scaleMax} onChange={e => setScaleMax(parseInt(e.target.value))} disabled={!isEditable}>
                             {[3, 4, 5, 6, 7, 8, 9, 10].map(v => <option key={v} value={v}>{v}</option>)}
                           </FormSelect>
                         </FormField>
                       </div>
                       <FormField label="Подпись в начале шкалы:" className="mb-4">
-                        <Input type="text" value={scaleMinLabel} onChange={e => setScaleMinLabel(e.target.value)} placeholder="Например: Совсем не согласен" />
+                        <Input type="text" value={scaleMinLabel} onChange={e => setScaleMinLabel(e.target.value)} placeholder="Например: Совсем не согласен" disabled={!isEditable} />
                       </FormField>
                       <FormField label="Подпись в конце шкалы:" className="mb-4">
-                        <Input type="text" value={scaleMaxLabel} onChange={e => setScaleMaxLabel(e.target.value)} placeholder="Например: Полностью согласен" />
+                        <Input type="text" value={scaleMaxLabel} onChange={e => setScaleMaxLabel(e.target.value)} placeholder="Например: Полностью согласен" disabled={!isEditable} />
                       </FormField>
                     </>
                   )}
@@ -2528,17 +2664,17 @@ export default function StudyDetail() {
                         <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Количество эмодзи:</label>
                         <div style={{ display: "flex", gap: 8 }}>
                           {[3, 5].map(n => (
-                            <button key={n} onClick={() => setScaleEmojiCount(n as 3 | 5)} className={cn("flex-1 p-2.5 rounded-lg cursor-pointer text-sm border", scaleEmojiCount === n ? "border-warning bg-warning-subtle" : "border-input bg-background")}>
+                            <button key={n} type="button" disabled={!isEditable} onClick={() => setScaleEmojiCount(n as 3 | 5)} className={cn("flex-1 p-2.5 rounded-lg text-sm border", scaleEmojiCount === n ? "border-warning bg-warning-subtle" : "border-input bg-background", !isEditable && "opacity-60 pointer-events-none")}>
                               {n === 3 ? "😞 😐 😊" : "😠 😞 😐 😊 😄"}
                             </button>
                           ))}
                         </div>
                       </div>
                       <FormField label="Подпись в начале шкалы:" className="mb-4">
-                        <Input type="text" value={scaleMinLabel} onChange={e => setScaleMinLabel(e.target.value)} placeholder="Например: Совсем не согласен" />
+                        <Input type="text" value={scaleMinLabel} onChange={e => setScaleMinLabel(e.target.value)} placeholder="Например: Совсем не согласен" disabled={!isEditable} />
                       </FormField>
                       <FormField label="Подпись в конце шкалы:" className="mb-4">
-                        <Input type="text" value={scaleMaxLabel} onChange={e => setScaleMaxLabel(e.target.value)} placeholder="Например: Полностью согласен" />
+                        <Input type="text" value={scaleMaxLabel} onChange={e => setScaleMaxLabel(e.target.value)} placeholder="Например: Полностью согласен" disabled={!isEditable} />
                       </FormField>
                     </>
                   )}
@@ -2549,14 +2685,14 @@ export default function StudyDetail() {
                         <div className="text-sm text-muted-foreground mt-2">От 1 до 5 звезд</div>
                       </div>
                       <FormField label="Подпись в начале шкалы:" className="mb-4">
-                        <Input type="text" value={scaleMinLabel} onChange={e => setScaleMinLabel(e.target.value)} placeholder="Например: Совсем не согласен" />
+                        <Input type="text" value={scaleMinLabel} onChange={e => setScaleMinLabel(e.target.value)} placeholder="Например: Совсем не согласен" disabled={!isEditable} />
                       </FormField>
                       <FormField label="Подпись в конце шкалы:" className="mb-4">
-                        <Input type="text" value={scaleMaxLabel} onChange={e => setScaleMaxLabel(e.target.value)} placeholder="Например: Полностью согласен" />
+                        <Input type="text" value={scaleMaxLabel} onChange={e => setScaleMaxLabel(e.target.value)} placeholder="Например: Полностью согласен" disabled={!isEditable} />
                       </FormField>
                     </>
                   )}
-                  <ToggleSwitch label="Необязательный вопрос" checked={scaleOptional} onChange={setScaleOptional} />
+                  <ToggleSwitch label="Необязательный вопрос" checked={scaleOptional} onChange={setScaleOptional} disabled={!isEditable} />
                 </>
               )}
 
@@ -2566,17 +2702,17 @@ export default function StudyDetail() {
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Вопрос:</label>
                     <FormField label="Вопрос:" className="mb-4">
-                      <Input type="text" value={preferenceQuestion} onChange={e => setPreferenceQuestion(e.target.value)} placeholder="Введите текст задания или вопроса" />
+                      <Input type="text" value={preferenceQuestion} onChange={e => setPreferenceQuestion(e.target.value)} placeholder="Введите текст задания или вопроса" disabled={!isEditable} />
                     </FormField>
                   </div>
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Тип сравнения:</label>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => setPreferenceComparisonType("all")} className={cn("flex-1 p-3 rounded-lg cursor-pointer text-left border", preferenceComparisonType === "all" ? "border-primary bg-primary/10" : "border-input bg-background")}>
+                      <button type="button" disabled={!isEditable} onClick={() => setPreferenceComparisonType("all")} className={cn("flex-1 p-3 rounded-lg text-left border", preferenceComparisonType === "all" ? "border-primary bg-primary/10" : "border-input bg-background", !isEditable && "opacity-60 pointer-events-none")}>
                         <div className="font-medium mb-1">Выбор из всех</div>
                         <div className="text-xs text-muted-foreground">Показать все изображения одновременно</div>
                       </button>
-                      <button onClick={() => setPreferenceComparisonType("pairwise")} className={cn("flex-1 p-3 rounded-lg cursor-pointer text-left border", preferenceComparisonType === "pairwise" ? "border-primary bg-primary/10" : "border-input bg-background")}>
+                      <button type="button" disabled={!isEditable} onClick={() => setPreferenceComparisonType("pairwise")} className={cn("flex-1 p-3 rounded-lg text-left border", preferenceComparisonType === "pairwise" ? "border-primary bg-primary/10" : "border-input bg-background", !isEditable && "opacity-60 pointer-events-none")}>
                         <div className="font-medium mb-1">Попарное сравнение</div>
                         <div className="text-xs text-muted-foreground">Показывать только два изображения за раз</div>
                       </button>
@@ -2597,14 +2733,15 @@ export default function StudyDetail() {
                                 size="sm"
                                 onClick={() => { const newImgs = [...preferenceImages]; newImgs[i] = { file: null, url: "", uploading: false }; setPreferenceImages(newImgs); }}
                                 className="h-7 px-2.5 text-xs"
+                                disabled={!isEditable}
                               >
                                 Удалить
                               </Button>
                             </div>
                           ) : (
-                            <label className="flex items-center justify-center p-4 border-2 border-dashed border-input rounded-lg cursor-pointer bg-muted">
+                            <label className={cn("flex items-center justify-center p-4 border-2 border-dashed border-input rounded-lg bg-muted", isEditable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
                               <span className="text-sm text-muted-foreground">📷 Выбрать файл</span>
-                              <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                              <input type="file" accept="image/*" style={{ display: "none" }} disabled={!isEditable} onChange={e => {
                                 const file = e.target.files?.[0];
                                 if (file) {
                                   const newImgs = [...preferenceImages];
@@ -2616,23 +2753,18 @@ export default function StudyDetail() {
                           )}
                         </div>
                         {preferenceImages.length > 2 && (
-                          <Button 
-                            variant="destructive" 
-                            size="sm"
-                            onClick={() => setPreferenceImages(preferenceImages.filter((_, j) => j !== i))}
-                            className="h-8 px-3"
-                          >
+                          <Button variant="destructive" size="sm" onClick={() => setPreferenceImages(preferenceImages.filter((_, j) => j !== i))} className="h-8 px-3" disabled={!isEditable}>
                             ✕
                           </Button>
                         )}
                       </div>
                     ))}
-                    <Button variant="outline" size="sm" onClick={() => setPreferenceImages([...preferenceImages, { file: null, url: "", uploading: false }])} className="mt-2">
+                    <Button variant="outline" size="sm" onClick={() => setPreferenceImages([...preferenceImages, { file: null, url: "", uploading: false }])} className="mt-2" disabled={!isEditable}>
                       + Добавить изображение
                     </Button>
                   </div>
                   {preferenceComparisonType === "all" && (
-                    <ToggleSwitch label="Перемешивать варианты ответа" checked={preferenceShuffle} onChange={setPreferenceShuffle} />
+                    <ToggleSwitch label="Перемешивать варианты ответа" checked={preferenceShuffle} onChange={setPreferenceShuffle} disabled={!isEditable} />
                   )}
                 </>
               )}
@@ -2643,7 +2775,7 @@ export default function StudyDetail() {
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Инструкция:</label>
                     <FormField label="Инструкция:" className="mb-4">
-                      <FormTextarea value={fiveSecondsInstruction} onChange={e => setFiveSecondsInstruction(e.target.value)} placeholder="Введите инструкцию для респондента" rows={2} />
+                      <FormTextarea value={fiveSecondsInstruction} onChange={e => setFiveSecondsInstruction(e.target.value)} placeholder="Введите инструкцию для респондента" rows={2} disabled={!isEditable} />
                     </FormField>
                   </div>
                   <div style={{ marginBottom: 16 }}>
@@ -2653,22 +2785,17 @@ export default function StudyDetail() {
                         <img src={fiveSecondsImage.file ? URL.createObjectURL(fiveSecondsImage.file) : fiveSecondsImage.url} alt="Preview" className="w-[120px] h-20 object-cover rounded-lg border border-input" />
                         <div style={{ flex: 1 }}>
                           <div className="text-sm text-muted-foreground mb-2">{fiveSecondsImage.file?.name || "Загружено"}</div>
-                          <Button 
-                            variant="destructive" 
-                            size="sm"
-                            onClick={() => setFiveSecondsImage({ file: null, url: "", uploading: false })}
-                            className="h-7 px-3 text-xs"
-                          >
+                          <Button variant="destructive" size="sm" onClick={() => setFiveSecondsImage({ file: null, url: "", uploading: false })} className="h-7 px-3 text-xs" disabled={!isEditable}>
                             Удалить
                           </Button>
                         </div>
                       </div>
                     ) : (
-                      <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-input rounded-lg cursor-pointer bg-muted">
+                      <label className={cn("flex flex-col items-center justify-center p-8 border-2 border-dashed border-input rounded-lg bg-muted", isEditable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
                         <span className="text-3xl mb-2">📷</span>
                         <span className="text-sm text-muted-foreground">Выберите изображение</span>
                         <span className="text-xs text-muted-foreground/70 mt-1">JPEG, PNG, GIF, WebP (до 5MB)</span>
-                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                        <input type="file" accept="image/*" style={{ display: "none" }} disabled={!isEditable} onChange={e => {
                           const file = e.target.files?.[0];
                           if (file) {
                             setFiveSecondsImage({ file, url: "", uploading: false });
@@ -2679,7 +2806,7 @@ export default function StudyDetail() {
                   </div>
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Время показа: {fiveSecondsDuration} сек</label>
-                    <input type="range" min={5} max={60} value={fiveSecondsDuration} onChange={e => setFiveSecondsDuration(parseInt(e.target.value))} style={{ width: "100%" }} />
+                    <input type="range" min={5} max={60} value={fiveSecondsDuration} onChange={e => setFiveSecondsDuration(parseInt(e.target.value))} style={{ width: "100%" }} disabled={!isEditable} />
                     <div className="flex justify-between text-xs text-muted-foreground/70">
                       <span>5 сек</span>
                       <span>60 сек</span>
@@ -2694,7 +2821,7 @@ export default function StudyDetail() {
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Инструкция:</label>
                     <FormField label="Задание:" className="mb-4">
-                      <FormTextarea value={firstClickInstruction} onChange={e => setFirstClickInstruction(e.target.value)} placeholder="Введите задание для респондента" rows={2} />
+                      <FormTextarea value={firstClickInstruction} onChange={e => setFirstClickInstruction(e.target.value)} placeholder="Введите задание для респондента" rows={2} disabled={!isEditable} />
                     </FormField>
                   </div>
                   <div style={{ marginBottom: 16 }}>
@@ -2704,22 +2831,17 @@ export default function StudyDetail() {
                         <img src={firstClickImage.file ? URL.createObjectURL(firstClickImage.file) : firstClickImage.url} alt="Preview" className="w-[120px] h-20 object-cover rounded-lg border border-input" />
                         <div style={{ flex: 1 }}>
                           <div className="text-sm text-muted-foreground mb-2">{firstClickImage.file?.name || "Загружено"}</div>
-                          <Button 
-                            variant="destructive" 
-                            size="sm"
-                            onClick={() => setFirstClickImage({ file: null, url: "", uploading: false })}
-                            className="h-7 px-3 text-xs"
-                          >
+                          <Button variant="destructive" size="sm" onClick={() => setFirstClickImage({ file: null, url: "", uploading: false })} className="h-7 px-3 text-xs" disabled={!isEditable}>
                             Удалить
                           </Button>
                         </div>
                       </div>
                     ) : (
-                      <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-input rounded-lg cursor-pointer bg-muted">
+                      <label className={cn("flex flex-col items-center justify-center p-8 border-2 border-dashed border-input rounded-lg bg-muted", isEditable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
                         <span className="text-3xl mb-2">📷</span>
                         <span className="text-sm text-muted-foreground">Выберите изображение</span>
                         <span className="text-xs text-muted-foreground/70 mt-1">JPEG, PNG, GIF, WebP (до 5MB)</span>
-                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                        <input type="file" accept="image/*" style={{ display: "none" }} disabled={!isEditable} onChange={e => {
                           const file = e.target.files?.[0];
                           if (file) {
                             setFirstClickImage({ file, url: "", uploading: false });
@@ -2740,6 +2862,7 @@ export default function StudyDetail() {
                       onChange={e => setCardSortingTask(e.target.value)} 
                       placeholder="Например: Представьте, что вы совершаете покупки в интернет-магазине и вам нужно найти какую-то информацию. В этом задании приведён список разделов сайта. Ваша задача — разбить их по категориям так, как вам кажется логичным." 
                       rows={3} 
+                      disabled={!isEditable}
                     />
                   </FormField>
 
@@ -2747,20 +2870,26 @@ export default function StudyDetail() {
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Тип сортировки</label>
                     <div style={{ display: "flex", gap: 12 }}>
                       <button
+                        type="button"
+                        disabled={!isEditable}
                         onClick={() => setCardSortingType("closed")}
                         className={cn(
-                          "flex-1 p-4 rounded-lg cursor-pointer text-left border",
-                          cardSortingType === "closed" ? "border-2 border-primary bg-info-subtle" : "border border-input bg-background"
+                          "flex-1 p-4 rounded-lg text-left border",
+                          cardSortingType === "closed" ? "border-2 border-primary bg-info-subtle" : "border border-input bg-background",
+                          !isEditable && "opacity-60 pointer-events-none"
                         )}
                       >
                         <div className="font-semibold mb-1">Закрытая сортировка</div>
                         <div className="text-sm text-muted-foreground">Респонденты группируют карточки в заранее определенные категории.</div>
                       </button>
                       <button
+                        type="button"
+                        disabled={!isEditable}
                         onClick={() => setCardSortingType("open")}
                         className={cn(
-                          "flex-1 p-4 rounded-lg cursor-pointer text-left border",
-                          cardSortingType === "open" ? "border-2 border-primary bg-info-subtle" : "border border-input bg-background"
+                          "flex-1 p-4 rounded-lg text-left border",
+                          cardSortingType === "open" ? "border-2 border-primary bg-info-subtle" : "border border-input bg-background",
+                          !isEditable && "opacity-60 pointer-events-none"
                         )}
                       >
                         <div className="font-semibold mb-1">Открытая сортировка</div>
@@ -2774,14 +2903,14 @@ export default function StudyDetail() {
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Карточки</label>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
                       <span style={{ fontSize: 14 }}>{cardSortingCards.filter(c => c.title.trim()).length} карточек</span>
-                      <Button variant="outline" size="sm" onClick={() => setShowCardSortingCardsModal(true)}>
+                      <Button variant="outline" size="sm" onClick={() => setShowCardSortingCardsModal(true)} disabled={!isEditable}>
                         <Pencil className="h-4 w-4 mr-2" />
                         Редактировать
                       </Button>
                     </div>
                     <div className="p-3 bg-muted rounded-lg">
-                      <ToggleSwitch label="Перемешивать карточки" checked={cardSortingShuffleCards} onChange={setCardSortingShuffleCards} />
-                      <ToggleSwitch label="Разрешить не сортировать все карточки" checked={cardSortingAllowPartialSort} onChange={setCardSortingAllowPartialSort} />
+                      <ToggleSwitch label="Перемешивать карточки" checked={cardSortingShuffleCards} onChange={setCardSortingShuffleCards} disabled={!isEditable} />
+                      <ToggleSwitch label="Разрешить не сортировать все карточки" checked={cardSortingAllowPartialSort} onChange={setCardSortingAllowPartialSort} disabled={!isEditable} />
                       {cardSortingAllowPartialSort && (
                         <div className="ml-14 text-sm text-muted-foreground -mt-1 mb-2">
                           Если эта опция включена, респондент сможет завершить сортировку, даже если не все карточки отсортированы.
@@ -2795,13 +2924,13 @@ export default function StudyDetail() {
                     <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Категории</label>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
                       <span style={{ fontSize: 14 }}>{cardSortingCategories.filter(c => c.name.trim()).length} категорий</span>
-                      <Button variant="outline" size="sm" onClick={() => setShowCardSortingCategoriesModal(true)}>
+                      <Button variant="outline" size="sm" onClick={() => setShowCardSortingCategoriesModal(true)} disabled={!isEditable}>
                         <Pencil className="h-4 w-4 mr-2" />
                         Редактировать
                       </Button>
                     </div>
                     <div className="p-3 bg-muted rounded-lg">
-                      <ToggleSwitch label="Перемешивать категории" checked={cardSortingShuffleCategories} onChange={setCardSortingShuffleCategories} />
+                      <ToggleSwitch label="Перемешивать категории" checked={cardSortingShuffleCategories} onChange={setCardSortingShuffleCategories} disabled={!isEditable} />
                     </div>
                   </div>
 
@@ -2835,16 +2964,13 @@ export default function StudyDetail() {
               {/* Матрица */}
               {newBlockType === "matrix" && (
                 <>
-                  <ImageUploader
-                    label="Изображение (опционально)"
-                    image={matrixImage}
-                    onImageChange={setMatrixImage}
-                  />
+                  <ImageUploader label="Изображение (опционально)" image={matrixImage} onImageChange={setMatrixImage} disabled={!isEditable} />
                   <FormField label="Вопрос:" className="mb-4">
                     <Input 
                       type="text" 
                       value={matrixQuestion} 
-                      onChange={e => setMatrixQuestion(e.target.value)} 
+                      onChange={e => setMatrixQuestion(e.target.value)}
+                      disabled={!isEditable} 
                       placeholder="Введите текст вопроса" 
                     />
                   </FormField>
@@ -2854,6 +2980,7 @@ export default function StudyDetail() {
                       onChange={e => setMatrixDescription(e.target.value)} 
                       placeholder="Введите описание" 
                       rows={2} 
+                      disabled={!isEditable}
                     />
                   </FormField>
 
@@ -2873,29 +3000,29 @@ export default function StudyDetail() {
                             }} 
                             placeholder="Название строки" 
                             className="flex-1 px-3 py-2.5 border border-input rounded-md text-sm bg-muted" 
+                            disabled={!isEditable}
                           />
                           <button 
+                            type="button"
+                            disabled={!isEditable || matrixRows.length <= 1}
                             onClick={() => {
                               if (matrixRows.length > 1) {
                                 setMatrixRows(matrixRows.filter((_, j) => j !== i));
                               }
                             }} 
-                            style={{ padding: 8, background: "transparent", border: "none", cursor: matrixRows.length > 1 ? "pointer" : "not-allowed", opacity: matrixRows.length > 1 ? 1 : 0.3 }}
+                            style={{ padding: 8, background: "transparent", border: "none", cursor: matrixRows.length > 1 && isEditable ? "pointer" : "not-allowed", opacity: matrixRows.length > 1 && isEditable ? 1 : 0.3 }}
                           >
                             <Trash2 size={18} className="text-muted-foreground/70" />
                           </button>
                         </div>
                       ))}
                     </div>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => setMatrixRows([...matrixRows, { id: crypto.randomUUID(), title: "" }])}
-                    >
+                    <Button variant="outline" onClick={() => setMatrixRows([...matrixRows, { id: crypto.randomUUID(), title: "" }])} disabled={!isEditable}>
                       <Plus className="h-4 w-4 mr-2" />
                       Добавить строку
                     </Button>
                     <div className="p-3 bg-muted rounded-lg mt-3">
-                      <ToggleSwitch label="Перемешивать строки" checked={matrixShuffleRows} onChange={setMatrixShuffleRows} />
+                      <ToggleSwitch label="Перемешивать строки" checked={matrixShuffleRows} onChange={setMatrixShuffleRows} disabled={!isEditable} />
                     </div>
                   </div>
 
@@ -2915,50 +3042,42 @@ export default function StudyDetail() {
                             }} 
                             placeholder="Название столбца" 
                             className="flex-1 px-3 py-2.5 border border-input rounded-md text-sm bg-muted" 
+                            disabled={!isEditable}
                           />
                           <button 
+                            type="button"
+                            disabled={!isEditable || matrixColumns.length <= 1}
                             onClick={() => {
                               if (matrixColumns.length > 1) {
                                 setMatrixColumns(matrixColumns.filter((_, j) => j !== i));
                               }
                             }} 
-                            style={{ padding: 8, background: "transparent", border: "none", cursor: matrixColumns.length > 1 ? "pointer" : "not-allowed", opacity: matrixColumns.length > 1 ? 1 : 0.3 }}
+                            style={{ padding: 8, background: "transparent", border: "none", cursor: matrixColumns.length > 1 && isEditable ? "pointer" : "not-allowed", opacity: matrixColumns.length > 1 && isEditable ? 1 : 0.3 }}
                           >
                             <Trash2 size={18} className="text-muted-foreground/70" />
                           </button>
                         </div>
                       ))}
                     </div>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => setMatrixColumns([...matrixColumns, { id: crypto.randomUUID(), title: "" }])}
-                    >
+                    <Button variant="outline" onClick={() => setMatrixColumns([...matrixColumns, { id: crypto.randomUUID(), title: "" }])} disabled={!isEditable}>
                       <Plus className="h-4 w-4 mr-2" />
                       Добавить столбец
                     </Button>
                     <div className="p-3 bg-muted rounded-lg mt-3">
-                      <ToggleSwitch label="Перемешивать колонки" checked={matrixShuffleColumns} onChange={setMatrixShuffleColumns} />
+                      <ToggleSwitch label="Перемешивать колонки" checked={matrixShuffleColumns} onChange={setMatrixShuffleColumns} disabled={!isEditable} />
                     </div>
                   </div>
 
                   {/* Настройки */}
                   <div style={{ marginBottom: 16 }}>
                     <div className="p-3 bg-muted rounded-lg">
-                      <ToggleSwitch 
-                        label="Разрешить выбор нескольких вариантов" 
-                        checked={matrixAllowMultiple} 
-                        onChange={setMatrixAllowMultiple} 
-                      />
+                      <ToggleSwitch label="Разрешить выбор нескольких вариантов" checked={matrixAllowMultiple} onChange={setMatrixAllowMultiple} disabled={!isEditable} />
                       {matrixAllowMultiple && (
                         <div className="ml-14 text-sm text-muted-foreground -mt-1 mb-2">
                           Если вы хотите разрешить респондентам выбирать несколько вариантов в строке, включите эту настройку.
                         </div>
                       )}
-                      <ToggleSwitch 
-                        label="Необязательный вопрос" 
-                        checked={matrixOptional} 
-                        onChange={setMatrixOptional} 
-                      />
+                      <ToggleSwitch label="Необязательный вопрос" checked={matrixOptional} onChange={setMatrixOptional} disabled={!isEditable} />
                     </div>
                   </div>
                 </>
@@ -2975,13 +3094,14 @@ export default function StudyDetail() {
                       onChange={e => setAgreementTitle(e.target.value)} 
                       placeholder="Пожалуйста, ознакомьтесь и примите условия участия в исследовании" 
                       className="w-full px-3 py-2 border border-input rounded-md text-sm" 
+                      disabled={!isEditable}
                     />
                   </div>
 
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ display: "block", marginBottom: 12, fontSize: 14, fontWeight: 500 }}>Тип соглашения:</label>
                     <div style={{ display: "flex", gap: 12 }}>
-                      <label className={cn("flex-1 p-4 rounded-lg cursor-pointer border", agreementType === "standard" ? "border-primary bg-info-subtle" : "border-input bg-background")}>
+                      <label className={cn("flex-1 p-4 rounded-lg border", agreementType === "standard" ? "border-primary bg-info-subtle" : "border-input bg-background", isEditable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                           <input 
                             type="radio" 
@@ -2990,6 +3110,7 @@ export default function StudyDetail() {
                             checked={agreementType === "standard"} 
                             onChange={() => setAgreementType("standard")}
                             style={{ margin: 0 }}
+                            disabled={!isEditable}
                           />
                           <span style={{ fontWeight: 500, fontSize: 14 }}>Сбор персональных данных</span>
                         </div>
@@ -2997,7 +3118,7 @@ export default function StudyDetail() {
                           Стандартное соглашение для сбора и обработки персональных данных
                         </div>
                       </label>
-                      <label className={cn("flex-1 p-4 rounded-lg cursor-pointer border", agreementType === "custom" ? "border-primary bg-info-subtle" : "border-input bg-background")}>
+                      <label className={cn("flex-1 p-4 rounded-lg border", agreementType === "custom" ? "border-primary bg-info-subtle" : "border-input bg-background", isEditable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                           <input 
                             type="radio" 
@@ -3006,6 +3127,7 @@ export default function StudyDetail() {
                             checked={agreementType === "custom"} 
                             onChange={() => setAgreementType("custom")}
                             style={{ margin: 0 }}
+                            disabled={!isEditable}
                           />
                           <span style={{ fontWeight: 500, fontSize: 14 }}>Загрузить свое соглашение</span>
                         </div>
@@ -3038,20 +3160,21 @@ export default function StudyDetail() {
                             )}
                           </div>
                           <button 
+                            type="button"
                             onClick={() => setAgreementPdfFile({ file: null, url: "" })} 
-                            variant="destructive"
-                            size="sm"
-                            className="h-7 px-2.5 text-xs"
+                            disabled={!isEditable}
+                            className="h-7 px-2.5 text-xs rounded bg-destructive text-destructive-foreground"
                           >
                             Удалить
                           </button>
                         </div>
                       ) : (
-                        <label className="flex items-center justify-center p-6 border-2 border-dashed border-input rounded-lg cursor-pointer bg-muted transition-all">
+                        <label className={cn("flex items-center justify-center p-6 border-2 border-dashed border-input rounded-lg bg-muted transition-all", isEditable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
                           <input 
                             type="file" 
                             accept=".pdf" 
                             className="hidden" 
+                            disabled={!isEditable}
                             onChange={e => {
                               const file = e.target.files?.[0];
                               if (file && file.type === "application/pdf") {
@@ -3088,6 +3211,7 @@ export default function StudyDetail() {
                   setAllowSkip={setTreeTestingAllowSkip}
                   expandedNodes={expandedTreeNodes}
                   setExpandedNodes={setExpandedTreeNodes}
+                  disabled={!isEditable}
                 />
               )}
             </div>
@@ -3098,7 +3222,7 @@ export default function StudyDetail() {
             <Button variant="outline" onClick={() => { setShowAddBlockModal(false); resetAllBlockForms(); }}>
               Отмена
             </Button>
-            <Button onClick={handleAddBlock}>
+            <Button onClick={handleAddBlock} disabled={!isEditable}>
               {editingBlockId ? "Сохранить" : "Добавить"}
             </Button>
           </DialogFooter>
@@ -3510,8 +3634,20 @@ function InlineBlockEditor({
   };
 
   // Обновление НЕтекстового конфига (без debounce — сразу сохраняем)
+  // Взаимное исключение: eye_tracking_enabled и record_camera не могут быть включены одновременно,
+  // т.к. WebGazer требует эксклюзивный доступ к камере для анализа движений глаз
   const updateConfig = (key: string, value: any) => {
-    const newConfig = { ...block.config, [key]: value };
+    let newConfig = { ...block.config, [key]: value };
+    
+    // При включении eye_tracking — отключаем запись камеры
+    if (key === "eye_tracking_enabled" && value === true) {
+      newConfig.record_camera = false;
+    }
+    // При включении записи камеры — отключаем eye_tracking
+    if (key === "record_camera" && value === true) {
+      newConfig.eye_tracking_enabled = false;
+    }
+    
     onUpdateBlock(block.id, { config: newConfig });
   };
 
@@ -3606,9 +3742,9 @@ function InlineBlockEditor({
           {block.type === "prototype" && (
             <>
               <div>
-                <Label className="text-[15px] font-medium leading-6 mb-1 block">Прототип</Label>
+                <Label className="text-[15px] font-medium leading-6 mb-1 block">Figma прототип</Label>
                 {prototypes.length === 0 ? (
-                  <div className="text-sm text-warning bg-warning/10 p-2 rounded">
+                  <div className="text-sm text-warning bg-warning/10 dark:bg-warning/15 dark:text-warning p-2 rounded border border-warning/20 dark:border-warning/30">
                     Нет прототипов. Создайте через Figma плагин.
                   </div>
                 ) : (
@@ -3643,6 +3779,11 @@ function InlineBlockEditor({
                   onChange={(checked: boolean) => updateConfig("eye_tracking_enabled", checked)}
                   disabled={!isEditable}
                 />
+                {block.config?.eye_tracking_enabled && (
+                  <p className="text-xs text-muted-foreground -mt-2">
+                    Запись камеры отключена — WebGazer использует камеру для анализа глаз
+                  </p>
+                )}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <ToggleSwitch
                     label="Запись экрана"
@@ -3651,10 +3792,10 @@ function InlineBlockEditor({
                     disabled={!isEditable}
                   />
                   <ToggleSwitch
-                    label="Запись камеры"
+                    label={block.config?.eye_tracking_enabled ? "Запись камеры (откл. при eye tracking)" : "Запись камеры"}
                     checked={!!block.config?.record_camera}
                     onChange={(checked: boolean) => updateConfig("record_camera", checked)}
-                    disabled={!isEditable}
+                    disabled={!isEditable || !!block.config?.eye_tracking_enabled}
                   />
                   <ToggleSwitch
                     label="Запись голоса"
@@ -5416,7 +5557,7 @@ function LogicEditor({ block, allBlocks, onSave }: LogicEditorProps) {
         case "tree_testing":
           return b.config?.task?.substring(0, 50) || "Тестирование дерева";
         case "prototype":
-          return "Прототип";
+          return "Figma прототип";
         default:
           return `Блок ${b.type}`;
       }
@@ -6676,6 +6817,7 @@ interface TreeTestingEditorProps {
   setAllowSkip: (allow: boolean) => void;
   expandedNodes: Set<string>;
   setExpandedNodes: (nodes: Set<string>) => void;
+  disabled?: boolean;
 }
 
 function TreeTestingEditor({
@@ -6690,7 +6832,8 @@ function TreeTestingEditor({
   allowSkip,
   setAllowSkip,
   expandedNodes,
-  setExpandedNodes
+  setExpandedNodes,
+  disabled = false
 }: TreeTestingEditorProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const sensors = useSensors(
@@ -6834,7 +6977,7 @@ function TreeTestingEditor({
         hasChildren={hasChildren}
         isExpanded={isExpanded}
         isCorrect={isCorrect}
-        isEditable={true}
+        isEditable={!disabled}
         expandedNodes={expandedNodes}
         correctAnswers={correctAnswers}
         onToggleExpanded={toggleExpanded}
@@ -6868,7 +7011,7 @@ function TreeTestingEditor({
   };
 
   return (
-    <>
+    <div className={cn(disabled && "pointer-events-none opacity-60")}>
       {/* Задание */}
       <div className="mb-4">
         <FloatingInput
@@ -6990,21 +7133,22 @@ function TreeTestingEditor({
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 
 // Компонент Toggle Switch
 // Компонент для загрузки изображения
-function ImageUploader({ label, image, onImageChange }: { 
+function ImageUploader({ label, image, onImageChange, disabled }: { 
   label: string; 
   image: { file: File | null; url: string }; 
-  onImageChange: (img: { file: File | null; url: string }) => void 
+  onImageChange: (img: { file: File | null; url: string }) => void;
+  disabled?: boolean;
 }) {
   const hasImage = image.file || image.url;
   
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ marginBottom: 16 }} className={cn(disabled && "opacity-60 pointer-events-none")}>
       {hasImage ? (
         <div className="flex items-center gap-3 p-3 bg-muted rounded-lg border border-input">
           <img 
@@ -7015,22 +7159,23 @@ function ImageUploader({ label, image, onImageChange }: {
           <div className="flex-1">
             <div className="text-sm text-muted-foreground mb-1">{image.file?.name || "Загружено"}</div>
             <button 
+              type="button"
               onClick={() => onImageChange({ file: null, url: "" })} 
-              variant="destructive"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
+              disabled={disabled}
+              className="h-7 px-2.5 text-xs rounded bg-destructive text-destructive-foreground"
             >
               Удалить
             </button>
           </div>
         </div>
       ) : (
-        <label className="flex items-center justify-center cursor-pointer group">
+        <label className={cn("flex items-center justify-center group", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
           <ImagePlus size={20} className="text-muted-foreground group-hover:text-primary transition-colors" />
           <input 
             type="file" 
             accept="image/*" 
             style={{ display: "none" }} 
+            disabled={disabled}
             onChange={e => {
               const file = e.target.files?.[0];
               if (file) {
@@ -7045,14 +7190,14 @@ function ImageUploader({ label, image, onImageChange }: {
 }
 
 // Компонент Toggle Switch
-function ToggleSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function ToggleSwitch({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, cursor: "pointer" }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1 }}>
       <div className={cn("w-11 h-6 rounded-full relative transition-colors", checked ? "bg-primary" : "bg-muted-foreground/30")}>
         <div className={cn("w-5 h-5 rounded-full bg-background absolute top-0.5 transition-all shadow-sm", checked ? "left-[22px]" : "left-0.5")} />
       </div>
       <span style={{ fontSize: 13 }}>{label}</span>
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ display: "none" }} />
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ display: "none" }} disabled={disabled} />
     </label>
   );
 }

@@ -14,8 +14,9 @@ import { FigmaEmbedViewer } from "./components/FigmaEmbedViewer";
 import { getCSSTransitionStyle } from "./utils/cssTransitions";
 import "./TestView.css";
 import { createMediaRecordingController, type MediaRecordingController } from "./lib/mediaRecording";
-import { CircleCheck, MoveRight } from "lucide-react";
+import { ArrowRight, CircleCheck, MoveRight } from "lucide-react";
 
+// WebGazer.js: https://github.com/brownhci/WebGazer — API: https://github.com/brownhci/WebGazer/wiki/Top-Level-API
 declare global {
   interface Window {
     webgazer?: {
@@ -23,9 +24,15 @@ declare global {
       pause: () => void;
       resume: () => void;
       end: () => void;
-      setGazeListener: (cb: (data: { x: number; y: number } | null, elapsedTime: number) => void) => any;
+      setGazeListener: (cb: (data: { x: number; y: number } | null, elapsedTime: number) => void) => unknown;
+      clearGazeListener?: () => unknown;
+      getCurrentPrediction?: () => { x: number; y: number } | null;
       showVideo?: (show: boolean) => void;
       showPredictionPoints?: (show: boolean) => void;
+      detectCompatibility?: () => boolean;
+      saveDataAcrossSessions?: (save: boolean) => unknown;
+      setStaticVideo?: (videoElement: HTMLVideoElement | null) => unknown;
+      setVideoElementCanvas?: (canvas: HTMLCanvasElement | null) => unknown;
     };
   }
 }
@@ -51,6 +58,7 @@ interface TestViewProps {
   prototypeIdOverride?: string | null; // НОВОЕ: Опциональный override для prototypeId (для StudyView)
   instructionsOverride?: string | null; // НОВОЕ: Опциональный override для instructions (для StudyView)
   onComplete?: () => void; // НОВОЕ: Callback при завершении прототипа (для StudyView)
+  onPermissionsComplete?: () => void; // Callback при завершении настройки разрешений (для PrototypeBlockWrapper)
   runIdOverride?: string | null; // НОВОЕ: Для StudyRunView - run_id
   blockIdOverride?: string | null; // НОВОЕ: Для StudyRunView - block_id
   studyIdOverride?: string | null; // НОВОЕ: Для StudyRunView - study_id
@@ -58,6 +66,12 @@ interface TestViewProps {
   recordScreen?: boolean;
   recordCamera?: boolean;
   recordAudio?: boolean;
+  /** Скрыть задание над прототипом (показывается в сайдбаре PrototypeBlockWrapper) */
+  hideTaskAbove?: boolean;
+  /** Скрыть кнопку «Сдаться» под прототипом (показывается в сайдбаре PrototypeBlockWrapper) */
+  hideGiveUpBelow?: boolean;
+  /** Запись запускать только когда true (после клика «Начать» в сайдбаре задания). Если не передано — запись стартует при клике «Далее» на шаге разрешений. */
+  startRecordingWhenReady?: boolean;
 }
 
 export default function TestView({ 
@@ -65,6 +79,7 @@ export default function TestView({
   prototypeIdOverride = null,
   instructionsOverride = null,
   onComplete = undefined,
+  onPermissionsComplete = undefined,
   runIdOverride = null,
   blockIdOverride = null,
   studyIdOverride = null,
@@ -72,6 +87,9 @@ export default function TestView({
   recordScreen = false,
   recordCamera = false,
   recordAudio = false,
+  hideTaskAbove = false,
+  hideGiveUpBelow = false,
+  startRecordingWhenReady = false,
 }: TestViewProps) {
   // sessionId используется через propSessionId
   const navigate = useNavigate();
@@ -107,73 +125,71 @@ export default function TestView({
   // Local state for renderer (not shared)
   const [, setCurrentRenderer] = useState<"screen" | "scene">("screen");
   
-  // ===== Запись экрана/камеры/голоса =====
-  // Объявляем recordingController здесь, до первого использования в useEffect
-  const [recordingController, setRecordingController] = useState<MediaRecordingController | null>(null);
-  
-  // Функция для загрузки записи в Supabase Storage
-  const uploadRecording = useCallback(async (blob: Blob | null) => {
+  // ===== Запись экрана и камеры отдельно (два видео в отчёте) =====
+  const [recordingCameraController, setRecordingCameraController] = useState<MediaRecordingController | null>(null);
+  const [recordingScreenController, setRecordingScreenController] = useState<MediaRecordingController | null>(null);
+  const recordingCameraControllerRef = useRef<MediaRecordingController | null>(null);
+  const recordingScreenControllerRef = useRef<MediaRecordingController | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const uploadRecordingRef = useRef<(blob: Blob | null, type: "camera" | "screen") => Promise<void>>(() => Promise.resolve());
+  recordingCameraControllerRef.current = recordingCameraController;
+  recordingScreenControllerRef.current = recordingScreenController;
+
+  // Остановка записей и треков при размонтировании (смена блока / закрытие)
+  useEffect(() => {
+    return () => {
+      const camCtrl = recordingCameraControllerRef.current;
+      const screenCtrl = recordingScreenControllerRef.current;
+      const cam = cameraStreamRef.current;
+      const screen = screenStreamRef.current;
+      void (async () => {
+        if (camCtrl) {
+          const blob = await camCtrl.stop();
+          if (blob) await uploadRecordingRef.current(blob, "camera");
+        }
+        if (screenCtrl) {
+          const blob = await screenCtrl.stop();
+          if (blob) await uploadRecordingRef.current(blob, "screen");
+        }
+      })();
+      cam?.getTracks().forEach((t) => t.stop());
+      screen?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  // Загрузка одной записи (камера или экран) в Supabase Storage
+  const uploadRecording = useCallback(async (blob: Blob | null, type: "camera" | "screen") => {
     const currentSessionId = actualSessionId || propSessionId;
     if (!blob || !currentSessionId) return;
     try {
-      // КРИТИЧНО: Проверяем существование bucket перед загрузкой
-      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-      if (listError) {
-        console.error("TestView: failed to list storage buckets", listError);
-        return;
-      }
-      
-      const recordingsBucketExists = buckets?.some(b => b.name === "recordings");
-      if (!recordingsBucketExists) {
-        console.error("TestView: Storage bucket 'recordings' not found. Please create it in Supabase Storage.", {
-          availableBuckets: buckets?.map(b => b.name) || [],
-          error: "Bucket 'recordings' does not exist"
-        });
-        // НЕ прерываем выполнение - просто логируем ошибку
-        return;
-      }
-      
-      const filePath = `session-recordings/${currentSessionId}-${Date.now()}.webm`;
+      const ts = Date.now();
+      const filePath = `session-recordings/${currentSessionId}-${type}-${ts}.webm`;
       const { data, error } = await supabase.storage
         .from("recordings")
         .upload(filePath, blob, { contentType: "video/webm" });
       if (error) {
-        console.error("TestView: failed to upload recording", {
+        console.error(`TestView: failed to upload ${type} recording`, {
           error,
           errorMessage: error.message,
-          errorCode: error.statusCode,
           bucket: "recordings",
           filePath,
-          note: error.message?.includes("Bucket not found") 
-            ? "Bucket 'recordings' does not exist in Supabase Storage. Please create it in the Supabase dashboard."
-            : "Check Supabase Storage configuration and RLS policies."
         });
         return;
       }
-      
-      if (!data) {
-        console.error("TestView: upload succeeded but no data returned", { filePath });
-        return;
-      }
-      
+      if (!data) return;
       const { data: publicUrlData } = supabase.storage.from("recordings").getPublicUrl(data.path);
-      const recordingUrl = publicUrlData?.publicUrl;
-      if (recordingUrl) {
-        const { error: updateError } = await supabase.from("sessions").update({ recording_url: recordingUrl }).eq("id", currentSessionId);
-        if (updateError) {
-          console.error("TestView: failed to update session with recording_url", updateError);
-        } else {
-          console.log("TestView: Recording uploaded and session updated successfully", { recordingUrl, sessionId: currentSessionId });
-        }
+      const url = publicUrlData?.publicUrl;
+      if (!url) return;
+      const column = type === "camera" ? "recording_url" : "recording_screen_url";
+      const { error: updateError } = await supabase.from("sessions").update({ [column]: url }).eq("id", currentSessionId);
+      if (updateError) {
+        console.error(`TestView: failed to update session with ${column}`, updateError);
       } else {
-        console.error("TestView: failed to get public URL for recording", { path: data.path });
+        console.log(`TestView: ${type} recording uploaded`, { sessionId: currentSessionId });
       }
     } catch (err) {
-      console.error("TestView: unexpected error while saving recording_url", {
-        error: err,
-        errorMessage: err instanceof Error ? err.message : String(err),
-        sessionId: currentSessionId
-      });
+      console.error(`TestView: error saving ${type} recording`, err instanceof Error ? err.message : String(err));
     }
   }, [actualSessionId, propSessionId]);
 
@@ -182,27 +198,40 @@ export default function TestView({
     console.log("TestView: showSuccessPopup changed", { showSuccessPopup, currentScreen, protoEnd: proto?.end });
   }, [showSuccessPopup, currentScreen, proto]);
 
-  // НОВОЕ: Вызываем onComplete когда прототип завершен (для StudyView)
+  // Завершение прототипа: остановка обеих записей, загрузка, остановка треков, затем onComplete после 2s
   useEffect(() => {
-    if (showSuccessPopup && onComplete && testCompleted.current) {
-      console.log("TestView: Prototype completed, calling onComplete callback");
-      // Небольшая задержка чтобы пользователь увидел success popup
-      const timer = setTimeout(() => {
-        onComplete();
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [showSuccessPopup, onComplete]);
-
-  // Остановка записи и загрузка после завершения прототипа
-  useEffect(() => {
-    if (showSuccessPopup && testCompleted.current && recordingController) {
-      void (async () => {
-        const blob = await recordingController.stop();
-        await uploadRecording(blob);
-      })();
-    }
-  }, [showSuccessPopup, recordingController, uploadRecording]);
+    if (!showSuccessPopup || !testCompleted.current || !onComplete) return;
+    let cancelled = false;
+    void (async () => {
+      console.log("TestView: Prototype completed, stopping recording and uploading");
+      stopEyeTracking();
+      if (recordingCameraController) {
+        const blob = await recordingCameraController.stop();
+        await uploadRecording(blob, "camera");
+        if (cancelled) return;
+      }
+      if (recordingScreenController) {
+        const blob = await recordingScreenController.stop();
+        await uploadRecording(blob, "screen");
+        if (cancelled) return;
+      }
+      setRecordingCameraController(null);
+      setRecordingScreenController(null);
+      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      if (cameraPreviewPopupRef.current && !cameraPreviewPopupRef.current.closed) {
+        cameraPreviewPopupRef.current.close();
+        cameraPreviewPopupRef.current = null;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+      if (cancelled) return;
+      console.log("TestView: Calling onComplete callback");
+      onComplete();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showSuccessPopup, onComplete, recordingCameraController, recordingScreenController, uploadRecording]);
   
   // Helper функции для работы с v1/v2 прототипами
   const getScreenOrScene = (proto: Proto | null, id: string): Screen | Scene | null => {
@@ -253,7 +282,7 @@ export default function TestView({
   
   const hasRecordedClosed = useRef<boolean>(false);
   // Таймаут неактивности сессии: используется для авто‑закрытия \"зависших\" прототипов
-  const SESSION_INACTIVITY_TIMEOUT_MS = (Number(import.meta.env.VITE_SESSION_INACTIVITY_TIMEOUT_SECONDS || "300") || 300) * 1000;
+  const SESSION_INACTIVITY_TIMEOUT_MS = (Number(import.meta.env.VITE_SESSION_INACTIVITY_TIMEOUT_SECONDS || "60") || 60) * 1000;
   const INACTIVITY_CHECK_INTERVAL_MS = 30000; // 30s между проверками
   const lastActivityAtRef = useRef<number>(Date.now());
   const inactivityIntervalRef = useRef<number | null>(null);
@@ -267,18 +296,44 @@ export default function TestView({
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [readyToStartTest, setReadyToStartTest] = useState<boolean>(false);
 
+  // Превью камеры в отдельном окне, чтобы не попадать в запись экрана (getDisplayMedia захватывает только вкладку)
+  const cameraPreviewPopupRef = useRef<Window | null>(null);
+  const cameraPreviewVideoRef = useRef<HTMLVideoElement>(null);
+
+  cameraStreamRef.current = cameraStream;
+  screenStreamRef.current = screenStream;
+  uploadRecordingRef.current = uploadRecording;
+
   useEffect(() => {
-    console.log("TestView: useEffect - checking recording requirements", { recordScreen, recordCamera, recordAudio });
-    if (recordScreen || recordCamera || recordAudio) {
-      console.log("TestView: Recording required, setting permissionStep to 1");
-      setPermissionStep(1);
-      setReadyToStartTest(false); // Явно устанавливаем false при необходимости разрешений
+    console.log("TestView: useEffect - checking recording requirements", { recordScreen, recordCamera, recordAudio, enableEyeTracking });
+    // #region agent log
+    // Для eye tracking также нужна камера, поэтому включаем в логику шагов
+    const needsCamera = recordCamera || enableEyeTracking;
+    const onlyScreen = recordScreen && !needsCamera && !recordAudio;
+    const step = (recordScreen || needsCamera || recordAudio) ? (onlyScreen ? 2 : 1) : 0;
+    fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:recording useEffect',message:'recording requirements',data:{recordScreen,recordCamera,recordAudio,enableEyeTracking,needsCamera,onlyScreen,stepSet:step},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+    // #endregion
+    if (recordScreen || needsCamera || recordAudio) {
+      // Если включена только запись экрана — сразу показываем шаг 2 (запрос экрана). Иначе — шаг 1 (камера/микрофон/eye tracking).
+      setPermissionStep(onlyScreen ? 2 : 1);
+      setReadyToStartTest(false);
     } else {
-      console.log("TestView: No recording required, setting permissionStep to 0 and readyToStartTest to true");
       setPermissionStep(0);
       setReadyToStartTest(true);
     }
-  }, [recordScreen, recordCamera, recordAudio]);
+  }, [recordScreen, recordCamera, recordAudio, enableEyeTracking]);
+
+  // Превью камеры отображается в отдельном окне (CameraPreviewPopup), поток для записи остаётся в этой вкладке
+
+  // Закрытие окна превью камеры при размонтировании
+  useEffect(() => {
+    return () => {
+      if (cameraPreviewPopupRef.current && !cameraPreviewPopupRef.current.closed) {
+        cameraPreviewPopupRef.current.close();
+        cameraPreviewPopupRef.current = null;
+      }
+    };
+  }, []);
 
   // Определяем prototypeId из URL или override
   // ВАЖНО: prototypeIdOverride имеет приоритет над URL (для StudyView)
@@ -302,9 +357,9 @@ export default function TestView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlPrototypeId]);
 
-  // ======== EXPERIMENTAL: WebGazer eye-tracking integration ========
+  // ======== WebGazer.js eye-tracking (https://github.com/brownhci/WebGazer, https://webgazer.cs.brown.edu/#examples) ========
+  // API: setGazeListener(callback), begin(), pause(), end(); callback(data, elapsedTime) — data.x/y в пикселях viewport.
 
-  // Загружаем WebGazer.js динамически только при необходимости
   async function loadWebgazerScript(): Promise<typeof window.webgazer | null> {
     if (typeof window === "undefined") return null;
     if (window.webgazer) return window.webgazer;
@@ -312,34 +367,152 @@ export default function TestView({
     return new Promise((resolve) => {
       const existing = document.querySelector<HTMLScriptElement>('script[data-webgazer="true"]');
       if (existing) {
+        if (window.webgazer) {
+          resolve(window.webgazer);
+          return;
+        }
         existing.addEventListener("load", () => resolve(window.webgazer || null));
         existing.addEventListener("error", () => resolve(null));
         return;
       }
 
       const script = document.createElement("script");
-      script.src = "https://webgazer.cs.brown.edu/webgazer.js";
+      // Self-host WebGazer so MediaPipe assets load from same origin
+      script.src = "/webgazer.js";
       script.async = true;
       script.defer = true;
       script.dataset.webgazer = "true";
-      script.onload = () => resolve(window.webgazer || null);
-      script.onerror = () => resolve(null);
+      console.log("TestView: Loading WebGazer from", script.src, "page URL:", window.location.href);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:loadWebgazerScript',message:'loading webgazer',data:{src:script.src,pageUrl:window.location.href},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H9-webgazer-load'})}).catch(()=>{});
+      // #endregion
+      script.onload = () => {
+        console.log("TestView: WebGazer loaded successfully");
+        resolve(window.webgazer || null);
+      };
+      script.onerror = () => {
+        console.error("TestView: Failed to load local webgazer.js, trying CDN fallback");
+        // Fallback to CDN if local file not available
+        const fallbackScript = document.createElement("script");
+        fallbackScript.src = "https://webgazer.cs.brown.edu/webgazer.js";
+        fallbackScript.async = true;
+        fallbackScript.dataset.webgazer = "true";
+        fallbackScript.onload = () => resolve(window.webgazer || null);
+        fallbackScript.onerror = () => resolve(null);
+        document.head.appendChild(fallbackScript);
+      };
       document.head.appendChild(script);
     });
   }
 
+  // Отслеживаем состояние WebGazer: 'none' | 'initializing' | 'running' | 'paused' | 'failed'
+  const webgazerStateRef = useRef<'none' | 'initializing' | 'running' | 'paused' | 'failed'>('none');
+
   async function startEyeTracking() {
+    // #region agent log
+    const hasCamera = !!cameraStreamRef.current;
+    fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:startEyeTracking entry',message:'eye tracking start',data:{hasCamera,state:webgazerStateRef.current},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-H5'})}).catch(()=>{});
+    // #endregion
+    
+    // Если уже работает — ничего не делаем
+    if (webgazerStateRef.current === 'running' || webgazerStateRef.current === 'initializing') {
+      console.log("TestView: WebGazer already running or initializing, skipping");
+      return;
+    }
+    
+    // Если был на паузе — возобновляем (без переинициализации MediaPipe)
+    if (webgazerStateRef.current === 'paused' && window.webgazer) {
+      console.log("TestView: Resuming paused WebGazer");
+      try {
+        // ВАЖНО: Перерегистрируем gaze listener перед resume
+        // Он мог быть потерян или не работать после pause
+        let gazeDataCount = 0;
+        window.webgazer.setGazeListener((data: { x: number; y: number } | null, _elapsedTime: number) => {
+          if (!data) return;
+          const vw = window.innerWidth || 1;
+          const vh = window.innerHeight || 1;
+          const xNorm = Math.min(1, Math.max(0, data.x / vw));
+          const yNorm = Math.min(1, Math.max(0, data.y / vh));
+
+          gazeBufferRef.current.push({
+            ts: Date.now(),
+            xNorm,
+            yNorm,
+            screenId: currentScreenRef.current,
+          });
+          
+          gazeDataCount++;
+          if (gazeDataCount === 1 || gazeDataCount % 50 === 0) {
+            console.log("TestView: Gaze data (resumed)", { count: gazeDataCount, xNorm, yNorm });
+          }
+        });
+        
+        window.webgazer.resume?.();
+        webgazerStateRef.current = 'running';
+        console.log("TestView: WebGazer resumed successfully");
+        
+        // Перезапускаем flush interval
+        if (gazeFlushIntervalRef.current === null) {
+          gazeFlushIntervalRef.current = window.setInterval(() => {
+            flushGazeBuffer();
+          }, 750);
+        }
+        return;
+      } catch (err) {
+        console.warn("TestView: Failed to resume WebGazer, will try full init", err);
+        webgazerStateRef.current = 'failed'; // Помечаем как failed чтобы попробовать полную инициализацию
+        // Продолжаем к полной инициализации
+      }
+    }
+    
+    // Если уже была ошибка — попробуем сбросить состояние и инициализировать заново
+    if (webgazerStateRef.current === 'failed') {
+      console.warn("TestView: WebGazer previously failed. Attempting fresh initialization...");
+      // Пробуем очистить старый WebGazer если он есть
+      try {
+        if (window.webgazer) {
+          window.webgazer.clearGazeListener?.();
+          window.webgazer.end?.();
+        }
+      } catch (cleanupErr) {
+        console.warn("TestView: Error cleaning up old WebGazer:", cleanupErr);
+      }
+      // Сбрасываем состояние для свежей инициализации
+      webgazerStateRef.current = 'none';
+    }
+    
+    webgazerStateRef.current = 'initializing';
     try {
       const webgazer = await loadWebgazerScript();
       if (!webgazer) {
-        console.warn("TestView: WebGazer.js failed to load, skipping eye-tracking");
+        webgazerStateRef.current = 'failed';
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:startEyeTracking',message:'webgazer null',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
+        console.warn("TestView: WebGazer.js не загрузился. Трекинг глаз недоступен в этом браузере (экспериментальная функция).");
         return;
       }
 
-      // Не показываем отладочное видео/точки пользователю
+      if (webgazer.detectCompatibility && !webgazer.detectCompatibility()) {
+        webgazerStateRef.current = 'failed';
+        console.warn("TestView: WebGazer.detectCompatibility() = false. Браузер не поддерживает трекинг глаз.");
+        return;
+      }
+
+      // Каждая сессия теста — независимая калибровка (не подгружаем данные из IndexedDB предыдущих пользователей)
+      if (webgazer.saveDataAcrossSessions) webgazer.saveDataAcrossSessions(false);
       if (webgazer.showVideo) webgazer.showVideo(false);
       if (webgazer.showPredictionPoints) webgazer.showPredictionPoints(false);
 
+      // WebGazer сам получит поток с камеры через getUserMedia()
+      // ВАЖНО: record_camera и eye_tracking_enabled взаимоисключающие в UI,
+      // поэтому WebGazer получает эксклюзивный доступ к камере (нет конфликта потоков)
+      console.log("TestView: WebGazer получает эксклюзивный доступ к камере (record_camera отключена)");
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:before webgazer.begin',message:'webgazer configured, calling begin()',data:{hasRecordCamera:recordCamera,hasExistingCameraStream:!!cameraStreamRef.current},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-exclusive-camera'})}).catch(()=>{});
+      // #endregion
+
+      let gazeDataCount = 0;
       webgazer.setGazeListener((data, _elapsedTime) => {
         if (!data) return;
         const vw = window.innerWidth || 1;
@@ -353,17 +526,68 @@ export default function TestView({
           yNorm,
           screenId: currentScreenRef.current,
         });
+        
+        gazeDataCount++;
+        // Log every 50th gaze point to avoid flooding
+        // #region agent log
+        if (gazeDataCount === 1 || gazeDataCount % 50 === 0) {
+          fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:gazeListener',message:'gaze data received',data:{count:gazeDataCount,xNorm,yNorm,bufferSize:gazeBufferRef.current.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-gaze-capture'})}).catch(()=>{});
+        }
+        // #endregion
       });
 
-      await webgazer.begin();
+      // Отложенный вызов begin() чтобы дать время MediaPipe/Emscripten полностью инициализироваться
+      // Увеличенная задержка (2000ms) помогает избежать ошибки "Cannot read properties of undefined (reading 'buffer')"
+      // которая возникает когда Module.HEAP ещё не инициализирован
+      await new Promise<void>((resolve) => {
+        if (typeof requestIdleCallback !== "undefined") {
+          requestIdleCallback(() => resolve(), { timeout: 2000 });
+        } else {
+          setTimeout(resolve, 1500);
+        }
+      });
 
+      // Retry logic для webgazer.begin() - MediaPipe иногда не успевает инициализироваться
+      const maxRetries = 3;
+      let lastError: unknown = null;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`TestView: webgazer.begin() attempt ${attempt}/${maxRetries}`);
+          await webgazer.begin();
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:after webgazer.begin',message:'webgazer.begin() SUCCESS',data:{attempt},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-exclusive-camera'})}).catch(()=>{});
+          // #endregion
+          lastError = null;
+          break; // Success - exit retry loop
+        } catch (beginErr) {
+          lastError = beginErr;
+          console.warn(`TestView: webgazer.begin() attempt ${attempt} failed:`, beginErr);
+          if (attempt < maxRetries) {
+            // Ждём перед следующей попыткой
+            await new Promise(r => setTimeout(r, 1000 * attempt));
+          }
+        }
+      }
+      
+      if (lastError) {
+        throw lastError; // Re-throw last error if all retries failed
+      }
+
+      webgazerStateRef.current = 'running';
       if (gazeFlushIntervalRef.current === null) {
         gazeFlushIntervalRef.current = window.setInterval(() => {
           flushGazeBuffer();
         }, 750);
       }
     } catch (err) {
-      console.error("TestView: Error starting WebGazer eye-tracking", err);
+      webgazerStateRef.current = 'failed';
+      // #region agent log
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errName = err instanceof Error ? err.name : (err && typeof err === 'object' && 'constructor' in err ? (err as Error).constructor?.name : 'unknown');
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:startEyeTracking catch',message:'eye tracking error',data:{errMsg,errName,stack:err instanceof Error ? err.stack?.slice(0,200) : undefined},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-H5'})}).catch(()=>{});
+      // #endregion
+      // WebGazer/MediaPipe может падать (404, Module.arguments, "No stream") — не ломаем тест, одно предупреждение
+      console.warn("TestView: Трекинг глаз недоступен в этом браузере (экспериментальная функция). Ошибка:", errMsg);
     }
   }
 
@@ -387,6 +611,10 @@ export default function TestView({
       y_norm: sample.yNorm,
     }));
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:flushGazeBuffer',message:'flushing gaze to supabase',data:{pointCount:payload.length,sessionId:currentSessionId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-gaze-save'})}).catch(()=>{});
+    // #endregion
+
     try {
       const { error } = await supabase.from("gaze_points").insert(payload);
       if (error) {
@@ -397,11 +625,20 @@ export default function TestView({
     }
   }
 
-  function stopEyeTracking() {
+  function stopEyeTracking(fullStop = false) {
     try {
       if (typeof window !== "undefined" && window.webgazer) {
+        // Только pause, не end — MediaPipe WASM нельзя переинициализировать
+        // end() вызываем только при полном размонтировании
         window.webgazer.pause?.();
-        window.webgazer.end?.();
+        if (fullStop) {
+          window.webgazer.clearGazeListener?.();
+          window.webgazer.end?.();
+          webgazerStateRef.current = 'none';
+        } else if (webgazerStateRef.current === 'running') {
+          webgazerStateRef.current = 'paused';
+        }
+        console.log("TestView: WebGazer stopped", { fullStop, newState: webgazerStateRef.current });
       }
     } catch (err) {
       console.error("TestView: Error stopping WebGazer", err);
@@ -414,20 +651,16 @@ export default function TestView({
     void flushGazeBuffer();
   }
 
-  // Управление жизненным циклом eye-tracking
+  // Управление жизненным циклом eye-tracking: старт только после «Далее» (в handleStart), здесь только остановка
   useEffect(() => {
     if (!enableEyeTracking) {
-      stopEyeTracking();
+      // Просто пауза — можно возобновить если пользователь включит eye tracking снова
+      stopEyeTracking(false);
       return;
     }
-
-    // Включаем eye-tracking только если это часть StudyRun (есть run/block/study)
-    if (runIdOverride && blockIdOverride && studyIdOverride) {
-      void startEyeTracking();
-    }
-
     return () => {
-      stopEyeTracking();
+      // Полная остановка при unmount компонента
+      stopEyeTracking(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enableEyeTracking, runIdOverride, blockIdOverride, studyIdOverride]);
@@ -1243,9 +1476,13 @@ export default function TestView({
     
     // ВАЖНО: Определяем правильный screen ID для трекинга
     // Если hotspot находится внутри overlay, используем overlay screen ID
-    
+
+    // Всегда отправлять x,y в аналитику: при отсутствии координат — центр хотспота (чтобы во вкладке «Клики» отображались все маркеры)
+    const finalClickX = clickX != null ? clickX : (h.x ?? 0) + (h.w ?? 100) / 2;
+    const finalClickY = clickY != null ? clickY : (h.y ?? 0) + (h.h ?? 50) / 2;
+
     // Сохраняем событие клика (всегда, независимо от типа действия)
-    recordEvent("hotspot_click", activeScreenId, h.id, false, clickX, clickY);
+    recordEvent("hotspot_click", activeScreenId, h.id, false, finalClickX, finalClickY);
     
     // НОВОЕ: Обработка overlay actions
     // ВАЖНО: Если есть overlayAction, мы НИКОГДА не переходим на h.target
@@ -2283,7 +2520,12 @@ export default function TestView({
 
   // Мастер разрешений и запуск записи - показываем сайдбар и оверлей поверх прототипа
   const showPermissionsUI = (recordScreen || recordCamera || recordAudio) && permissionStep > 0 && !readyToStartTest;
-  
+  const showStep2 = ((permissionStep === 2) || (permissionStep === 1 && recordScreen && !(recordCamera || recordAudio))) && recordScreen;
+  // #region agent log
+  if (showPermissionsUI && (recordScreen || recordCamera || recordAudio)) {
+    fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:Permissions UI state',message:'step visibility',data:{recordScreen,recordCamera,recordAudio,permissionStep,showStep2,showPermissionsUI},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+  }
+  // #endregion
   console.log("TestView: Permissions UI state", {
     recordScreen,
     recordCamera,
@@ -2294,24 +2536,37 @@ export default function TestView({
     hasProto: !!proto
   });
   const micEnabled = !!cameraStream && (recordAudio || recordCamera);
+  // Камера считается включённой для записи ИЛИ для eye tracking
   const cameraEnabled = !!cameraStream && recordCamera;
+  const eyeTrackingCameraEnabled = !!cameraStream && enableEyeTracking && !recordCamera;
   const screenEnabled = !!screenStream && recordScreen;
 
   const handleRequestCameraAndMic = async () => {
     try {
+      // Запрашиваем видео если recordCamera ИЛИ enableEyeTracking
+      const needsVideo = recordCamera || enableEyeTracking;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: recordAudio || recordCamera,
-        video: recordCamera,
+        video: needsVideo,
       });
       setCameraStream(stream);
+      console.log("TestView: Camera/mic stream obtained", { needsVideo, enableEyeTracking, recordCamera, recordAudio });
     } catch (err) {
       console.warn("TestView: getUserMedia failed", err);
     } finally {
-      setPermissionStep(2);
+      // Если запись экрана не нужна — сразу на финальный экран (шаг 3), иначе — шаг 2 (запрос экрана)
+      const nextStep = recordScreen ? 2 : 3;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:after camera/mic',message:'permissionStep after step 1',data:{recordScreen,nextStep,enableEyeTracking},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+      setPermissionStep(nextStep);
     }
   };
 
   const handleRequestScreen = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TestView.tsx:handleRequestScreen',message:'getDisplayMedia requested',data:{recordScreen},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: recordScreen,
@@ -2324,10 +2579,9 @@ export default function TestView({
         track.onended = () => {
           console.log("TestView: Screen recording track ended by user");
           setScreenStream(null);
-          // Останавливаем запись, если она была запущена
-          if (recordingController) {
-            recordingController.stop();
-            setRecordingController(null);
+          if (recordingScreenController) {
+            recordingScreenController.stop();
+            setRecordingScreenController(null);
           }
         };
       });
@@ -2345,28 +2599,56 @@ export default function TestView({
   };
 
   const handleStart = () => {
-    console.log("TestView: handleStart called", { 
-      cameraStream: !!cameraStream, 
+    console.log("TestView: handleStart called", {
+      cameraStream: !!cameraStream,
       screenStream: !!screenStream,
       hasProto: !!proto,
       currentScreen,
-      showPermissionsUI
+      showPermissionsUI,
+      startRecordingWhenReadyDefined: startRecordingWhenReady !== undefined
     });
-    const streams: MediaStream[] = [];
-    if (cameraStream) streams.push(cameraStream);
-    if (screenStream) streams.push(screenStream);
-
-    if (streams.length > 0) {
-      const controller = createMediaRecordingController({ streams });
-      controller.start();
-      setRecordingController(controller);
-      console.log("TestView: Recording started", { streamsCount: streams.length });
+    // Если запись запускается по сигналу родителя (после «Начать» в сайдбаре задания) — не стартуем запись здесь
+    const deferRecordingToParent = typeof onPermissionsComplete === "function";
+    if (!deferRecordingToParent) {
+      // ВАЖНО: recordCamera проверяем явно, т.к. cameraStream может содержать только аудио
+      if (cameraStream && recordCamera) {
+        const cameraCtrl = createMediaRecordingController({ streams: [cameraStream] });
+        cameraCtrl.start();
+        setRecordingCameraController(cameraCtrl);
+      }
+      if (screenStream && recordScreen) {
+        // Если recordAudio=true но recordCamera=false, добавляем аудио-треки к записи экрана
+        let streamForRecording: MediaStream = screenStream;
+        if (recordAudio && !recordCamera && cameraStream) {
+          streamForRecording = new MediaStream([
+            ...screenStream.getVideoTracks(),
+            ...cameraStream.getAudioTracks(),
+          ]);
+          console.log("TestView: Adding microphone audio to screen recording (handleStart)", { 
+            videoTracks: streamForRecording.getVideoTracks().length,
+            audioTracks: streamForRecording.getAudioTracks().length 
+          });
+        }
+        const screenCtrl = createMediaRecordingController({ streams: [streamForRecording] });
+        screenCtrl.start();
+        setRecordingScreenController(screenCtrl);
+      }
+      console.log("TestView: Recording started", { camera: recordCamera && !!cameraStream, screen: recordScreen && !!screenStream, audioInScreen: recordAudio && !recordCamera });
+      if (enableEyeTracking && runIdOverride && blockIdOverride && studyIdOverride) {
+        void startEyeTracking();
+      }
     }
-
     console.log("TestView: Setting readyToStartTest to true - sidebar should hide now");
     setReadyToStartTest(true);
-    
-    // КРИТИЧНО: Убеждаемся, что прототип виден после скрытия sidebar
+    if (recordCamera && typeof window !== "undefined") {
+      if (cameraPreviewPopupRef.current && !cameraPreviewPopupRef.current.closed) {
+        cameraPreviewPopupRef.current.close();
+      }
+      const url = `${window.location.origin}/camera-preview`;
+      const popup = window.open(url, "camera-preview", "width=140,height=160,left=100,top=100,noopener,noreferrer");
+      cameraPreviewPopupRef.current = popup ?? null;
+    }
+    onPermissionsComplete?.();
     setTimeout(() => {
       console.log("TestView: After handleStart - checking visibility", {
         readyToStartTest,
@@ -2376,6 +2658,45 @@ export default function TestView({
       });
     }, 100);
   };
+
+  // Запуск записи по сигналу родителя (после клика «Начать» в сайдбаре задания)
+  useEffect(() => {
+    if (!startRecordingWhenReady) return;
+    // КРИТИЧНО: после завершения теста не запускаем запись снова (контроллеры обнуляются → эффект перезапускается → MediaRecorder на остановленных треках даёт NotSupportedError)
+    if (testCompleted.current) return;
+    // ВАЖНО: recordCamera/recordScreen проверяем явно, т.к. cameraStream может содержать только аудио
+    if (cameraStream && recordCamera && !recordingCameraController) {
+      const cameraCtrl = createMediaRecordingController({ streams: [cameraStream] });
+      cameraCtrl.start();
+      setRecordingCameraController(cameraCtrl);
+    }
+    if (screenStream && recordScreen && !recordingScreenController) {
+      // Если recordAudio=true но recordCamera=false, добавляем аудио-треки к записи экрана
+      // cameraStream содержит только аудио в этом случае
+      const streamsForScreenRecording: MediaStream[] = [screenStream];
+      if (recordAudio && !recordCamera && cameraStream) {
+        // Создаём новый комбинированный stream с видео экрана + аудио микрофона
+        const combinedStream = new MediaStream([
+          ...screenStream.getVideoTracks(),
+          ...cameraStream.getAudioTracks(),
+        ]);
+        streamsForScreenRecording[0] = combinedStream;
+        console.log("TestView: Adding microphone audio to screen recording", { 
+          videoTracks: combinedStream.getVideoTracks().length,
+          audioTracks: combinedStream.getAudioTracks().length 
+        });
+      }
+      const screenCtrl = createMediaRecordingController({ streams: streamsForScreenRecording });
+      screenCtrl.start();
+      setRecordingScreenController(screenCtrl);
+    }
+    if (startRecordingWhenReady && ((cameraStream && recordCamera) || (screenStream && recordScreen))) {
+      console.log("TestView: Recording started (after Начать)", { camera: recordCamera && !!cameraStream, screen: recordScreen && !!screenStream });
+    }
+    if (startRecordingWhenReady && enableEyeTracking && runIdOverride && blockIdOverride && studyIdOverride) {
+      void startEyeTracking();
+    }
+  }, [startRecordingWhenReady, cameraStream, screenStream, recordingCameraController, recordingScreenController, recordCamera, recordScreen, recordAudio]);
 
   // Функция-обертка для рендеринга сайдбара и оверлея поверх прототипа
   // КРИТИЧНО: Всегда возвращаем одинаковую структуру DOM для предотвращения пересоздания компонентов
@@ -2406,7 +2727,7 @@ export default function TestView({
           {children}
         </div>
 
-        {/* Overlay с темным фоном БЕЗ blur, только на области контента (справа от sidebar) */}
+        {/* Overlay с темным фоном и blur на области контента (справа от sidebar) */}
         {/* КРИТИЧНО: Скрываем через display: none вместо условного рендеринга для стабильности DOM */}
         <div style={{
           position: "absolute",
@@ -2415,6 +2736,8 @@ export default function TestView({
           right: 0,
           bottom: 0,
           background: "rgba(0, 0, 0, 0.5)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
           zIndex: 999,
           pointerEvents: "none",
           display: showPermissionsUI ? "block" : "none"
@@ -2429,32 +2752,48 @@ export default function TestView({
           top: 0,
           bottom: 0,
           width: "400px",
+          minWidth: "320px",
           background: "#ffffff",
           zIndex: 1001,
           boxShadow: "2px 0 8px rgba(0,0,0,0.1)",
           overflowY: "auto",
           padding: "24px",
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-          display: showPermissionsUI ? "block" : "none"
+          display: showPermissionsUI ? "flex" : "none",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          gap: "20px",
         }}>
-          {permissionStep === 1 && (recordCamera || recordAudio) && (
+          {permissionStep === 1 && (recordCamera || recordAudio || enableEyeTracking) && (
               <>
-                <h2 style={{ margin: "0 0 12px 0", fontSize: 22, fontWeight: 600 }}>Шаг 1</h2>
-                <p style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 500 }}>Настройка разрешений для задания</p>
-                <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#555" }}>
-                  Следующая задача потребует некоторых дополнительных разрешений.
-                </p>
-                <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7", marginBottom: 16 }}>
-                  <div style={{ fontWeight: 500, marginBottom: 4 }}>Разрешить запись аудио и видео</div>
-                  <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
-                    Это поможет нам захватить ваши реальные реакции и мысли. Когда вас попросят, просто нажмите
-                    «Разрешить», чтобы предоставить разрешения.
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Шаг 1</h2>
+                  <p style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Настройка разрешений для задания</p>
+                  <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
+                    Следующая задача потребует некоторых дополнительных разрешений.
                   </p>
+                  {/* Разные тексты для eye tracking vs записи камеры */}
+                  {enableEyeTracking && !recordCamera ? (
+                    <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7" }}>
+                      <div style={{ fontWeight: 500, marginBottom: 4 }}>Анализ взгляда</div>
+                      <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                        Для анализа движений глаз нужен доступ к камере. Видео не записывается — камера используется только для отслеживания взгляда.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7" }}>
+                      <div style={{ fontWeight: 500, marginBottom: 4 }}>Разрешить запись аудио и видео</div>
+                      <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                        Это поможет нам захватить ваши реальные реакции и мысли. Когда вас попросят, просто нажмите
+                        «Разрешить», чтобы предоставить разрешения.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                <div style={{ display: "flex", gap: 12 }}>
                   <button
                     type="button"
-                    onClick={() => setPermissionStep(2)}
+                    onClick={() => setPermissionStep(recordScreen ? 2 : 3)}
                     style={{
                       flex: 1,
                       padding: "10px 16px",
@@ -2486,34 +2825,40 @@ export default function TestView({
               </>
             )}
 
-            {permissionStep === 2 && recordScreen && (
+            {/* Шаг 2: запрос записи экрана. Показываем при permissionStep === 2 ИЛИ когда включена только запись экрана (тогда шаг 1 не показывается) */}
+            {showStep2 && (
               <>
-                <h2 style={{ margin: "0 0 12px 0", fontSize: 22, fontWeight: 600 }}>Шаг 2</h2>
-                <p style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 500 }}>Настройка разрешений для задания</p>
-                <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#555" }}>
-                  Следующая задача потребует некоторых дополнительных разрешений.
-                </p>
-                <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7", marginBottom: 16 }}>
-                  <div style={{ fontWeight: 500, marginBottom: 4 }}>Разрешить запись экрана</div>
-                  <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
-                    Выберите экран, окно или вкладку, которыми вы хотите поделиться.
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Шаг 2</h2>
+                  <p style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Настройка разрешений для задания</p>
+                  <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
+                    Следующая задача потребует некоторых дополнительных разрешений.
                   </p>
+                  <div style={{ padding: 12, borderRadius: 8, background: "#f5f5f7" }}>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>Разрешить запись экрана</div>
+                    <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                      Выберите <strong>вкладку</strong> браузера (не окно и не весь экран), чтобы превью камеры не попало в запись.
+                    </p>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-                  <button
-                    type="button"
-                    onClick={() => setPermissionStep(3)}
-                    style={{
-                      flex: 1,
-                      padding: "10px 16px",
-                      borderRadius: 8,
-                      border: "1px solid #ddd",
-                      background: "#f5f5f5",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Пропустить
-                  </button>
+                <div style={{ display: "flex", gap: 12 }}>
+                  {/* При включённой записи экрана не показываем «Пропустить» — иначе экран не будет зелёным на шаге 3 */}
+                  {!recordScreen && (
+                    <button
+                      type="button"
+                      onClick={() => setPermissionStep(3)}
+                      style={{
+                        flex: 1,
+                        padding: "10px 16px",
+                        borderRadius: 8,
+                        border: "1px solid #ddd",
+                        background: "#f5f5f5",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Пропустить
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleRequestScreen}
@@ -2536,77 +2881,110 @@ export default function TestView({
 
             {permissionStep === 3 && (
               <>
-                <h2 style={{ margin: "0 0 12px 0", fontSize: 22, fontWeight: 600 }}>Вы все настроили</h2>
-                <p style={{ margin: "0 0 16px 0", fontSize: 14, color: "#555" }}>
-                  Перед началом задания проверьте, какие разрешения активны.
-                </p>
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-                    <span
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        marginRight: 8,
-                        background: micEnabled ? "#0f9d58" : "#ccc",
-                      }}
-                    />
-                    <span style={{ fontSize: 14 }}>Микрофон</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-                    <span
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        marginRight: 8,
-                        background: cameraEnabled ? "#0f9d58" : "#ccc",
-                      }}
-                    />
-                    <span style={{ fontSize: 14 }}>Камера</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center" }}>
-                    <span
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        marginRight: 8,
-                        background: screenEnabled ? "#0f9d58" : "#ccc",
-                      }}
-                    />
-                    <span style={{ fontSize: 14 }}>Экран</span>
-                  </div>
-                </div>
-
-                {!micEnabled && !cameraEnabled && !screenEnabled && (
-                  <p style={{ margin: "0 0 16px 0", fontSize: 13, color: "#777" }}>
-                    Некоторые разрешения заблокированы. Если вы хотите включить эти разрешения, вы можете сделать это в
-                    настройках вашего браузера.
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Вы все настроили</h2>
+                  <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
+                    Перед началом задания проверьте, какие разрешения активны.
                   </p>
-                )}
-
-                {/* Показываем задание, если есть */}
-                {instructionsOverride && (
-                  <div style={{ 
-                    marginBottom: 16, 
-                    padding: 16, 
-                    background: "#f5f5f7", 
-                    borderRadius: 8 
-                  }}>
-                    <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 600 }}>Задание</h3>
-                    <p style={{ margin: 0, fontSize: 14, color: "#333", whiteSpace: "pre-wrap" }}>
-                      {instructionsOverride}
-                    </p>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                      <span
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          marginRight: 8,
+                          background: micEnabled ? "#0f9d58" : "#ccc",
+                        }}
+                      />
+                      <span style={{ fontSize: 14 }}>Микрофон</span>
+                    </div>
+                    {/* Показываем "Анализ взгляда" вместо "Камера" если включен eye tracking без записи камеры */}
+                    {enableEyeTracking && !recordCamera ? (
+                      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                        <span
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            marginRight: 8,
+                            background: eyeTrackingCameraEnabled ? "#0f9d58" : "#ccc",
+                          }}
+                        />
+                        <span style={{ fontSize: 14 }}>Анализ взгляда</span>
+                      </div>
+                    ) : recordCamera ? (
+                      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                        <span
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            marginRight: 8,
+                            background: cameraEnabled ? "#0f9d58" : "#ccc",
+                          }}
+                        />
+                        <span style={{ fontSize: 14 }}>Камера</span>
+                      </div>
+                    ) : null}
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <span
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          marginRight: 8,
+                          background: screenEnabled ? "#0f9d58" : "#ccc",
+                        }}
+                      />
+                      <span style={{ fontSize: 14 }}>Экран</span>
+                      {recordScreen && !screenEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => setPermissionStep(2)}
+                          style={{
+                            marginLeft: 12,
+                            padding: "4px 10px",
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: "1px solid #007AFF",
+                            background: "transparent",
+                            color: "#007AFF",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Разрешить запись экрана
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
 
+                  {!micEnabled && !cameraEnabled && !eyeTrackingCameraEnabled && !screenEnabled && (
+                    <p style={{ margin: 0, fontSize: 13, color: "#777" }}>
+                      Некоторые разрешения заблокированы. Если вы хотите включить эти разрешения, вы можете сделать это в
+                      настройках вашего браузера.
+                    </p>
+                  )}
+
+                  {/* Показываем задание, если есть (скрыто в StudyRunView — задание в сайдбаре) */}
+                  {!hideTaskAbove && instructionsOverride && (
+                    <div style={{
+                      padding: 16,
+                      background: "#f5f5f7",
+                      borderRadius: 8,
+                    }}>
+                      <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 600 }}>Задание</h3>
+                      <p style={{ margin: 0, fontSize: 14, color: "#333", whiteSpace: "pre-wrap" }}>
+                        {instructionsOverride}
+                      </p>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={handleStart}
                   style={{
                     width: "100%",
-                    marginTop: 8,
                     padding: "12px 16px",
                     borderRadius: 8,
                     border: "none",
@@ -2614,9 +2992,14 @@ export default function TestView({
                     color: "#ffffff",
                     fontWeight: 600,
                     cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
                   }}
                 >
-                  Начать
+                  Далее
+                  <ArrowRight size={18} />
                 </button>
               </>
             )}
@@ -2646,7 +3029,7 @@ export default function TestView({
           {children}
         </div>
 
-        {/* Overlay с темным фоном БЕЗ blur, только на области контента (справа от sidebar) */}
+        {/* Overlay с темным фоном и blur на области контента (справа от sidebar) */}
         {showSuccessPopup && (
           <div style={{
             position: "absolute",
@@ -2655,6 +3038,8 @@ export default function TestView({
             right: 0,
             bottom: 0,
             background: "rgba(0, 0, 0, 0.5)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
             zIndex: 999,
             pointerEvents: "none"
           }} />
@@ -2668,6 +3053,7 @@ export default function TestView({
             top: 0,
             bottom: 0,
             width: "400px",
+            minWidth: "320px",
             background: "#ffffff",
             zIndex: 1001,
             boxShadow: "2px 0 8px rgba(0,0,0,0.1)",
@@ -2676,23 +3062,30 @@ export default function TestView({
             fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
             display: "flex",
             flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center"
+            justifyContent: "space-between",
           }}>
-            <CircleCheck 
-              size={64} 
-              color="#0f9d58" 
-              style={{ marginBottom: 24 }}
-            />
-            <h2 style={{ 
-              margin: "0 0 16px 0", 
-              fontSize: 24, 
-              fontWeight: 600,
-              color: "#333",
-              textAlign: "center"
+            <div style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
             }}>
-              Поздравляем, вы справились с заданием
-            </h2>
+              <CircleCheck 
+                size={64} 
+                color="#0f9d58" 
+                style={{ marginBottom: 24 }}
+              />
+              <h2 style={{ 
+                margin: 0, 
+                fontSize: 24, 
+                fontWeight: 600,
+                color: "#333",
+                textAlign: "center"
+              }}>
+                Поздравляем, вы справились с заданием
+              </h2>
+            </div>
             <button
               type="button"
               onClick={() => {
@@ -2970,8 +3363,8 @@ export default function TestView({
         width: "100%",
         padding: "20px"
       }}>
-        {/* Отображение задания над прототипом */}
-        {taskDescription && (() => {
+        {/* Отображение задания над прототипом (скрыто в StudyRunView — задание в сайдбаре) */}
+        {!hideTaskAbove && taskDescription && (() => {
           // КРИТИЧНО: Поддержка v1 (Screen) и v2 (Scene) прототипов для taskDescription
           // ВАЖНО: Используем startScreenOrScene для стабильных размеров, не зависящих от currentScreen
           let maxTaskWidth: number;
@@ -3944,8 +4337,8 @@ export default function TestView({
         {/* Figma сам обрабатывает оверлеи внутри одного прототипа через свои внутренние хотспоты */}
         {/* Оверлеи должны быть частью одного Figma прототипа, а не отдельными iframe */}
         
-        {/* Кнопка "Сдаться" под прототипом */}
-        {!testCompleted.current && (
+        {/* Кнопка "Сдаться" под прототипом (скрыта в StudyRunView — кнопка в сайдбаре) */}
+        {!hideGiveUpBelow && !testCompleted.current && (
           <button
             style={{
               width: isProtoV1(proto) && startScreenOrScene 
@@ -3971,15 +4364,20 @@ export default function TestView({
               if (currentSessionId) {
                 recordEvent("aborted", currentScreen);
                 
-                // Сохраняем запись при прерывании теста, если она была запущена
-                if (recordingController) {
-                  try {
-                    const blob = await recordingController.stop();
-                    await uploadRecording(blob);
-                    setRecordingController(null);
-                  } catch (err) {
-                    console.error("TestView: Error saving recording on abort", err);
+                // Сохраняем записи при прерывании теста
+                try {
+                  if (recordingCameraController) {
+                    const blob = await recordingCameraController.stop();
+                    await uploadRecording(blob, "camera");
+                    setRecordingCameraController(null);
                   }
+                  if (recordingScreenController) {
+                    const blob = await recordingScreenController.stop();
+                    await uploadRecording(blob, "screen");
+                    setRecordingScreenController(null);
+                  }
+                } catch (err) {
+                  console.error("TestView: Error saving recording on abort", err);
                 }
                 
                 // Если есть runIdOverride (используется в StudyRunView), обновляем статус сессии
@@ -4086,7 +4484,7 @@ export default function TestView({
         padding: 0,
         margin: 0
       }}>
-        {taskDescription && (
+        {!hideTaskAbove && taskDescription && (
           <div style={{
             width: "100%",
             maxWidth: scene.size.width,
@@ -4282,7 +4680,7 @@ export default function TestView({
       padding: "20px"
     }}>
       {/* Отображение задания над прототипом */}
-      {taskDescription && (
+      {!hideTaskAbove && taskDescription && (
         <div style={{
           width: "100%",
           maxWidth: screen.width,
@@ -5216,7 +5614,7 @@ export default function TestView({
       })}
       
       {/* Кнопка "Сдаться" под прототипом */}
-      {!testCompleted.current && (
+      {!hideGiveUpBelow && !testCompleted.current && (
         <button
           style={{
             marginTop: 20,

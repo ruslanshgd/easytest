@@ -8,87 +8,87 @@ interface HeatmapRendererProps {
   max?: number;
 }
 
-// Простая реализация тепловой карты без использования проблемной библиотеки
+// Остановки градиента: синий -> голубой -> зеленый -> желтый -> оранжевый -> красный (как на референсе)
+const HEAT_STOPS: Array<{ t: number; r: number; g: number; b: number }> = [
+  { t: 0,    r: 0,   g: 0,   b: 255 }, // синий
+  { t: 0.15, r: 0,   g: 255, b: 255 }, // голубой
+  { t: 0.35, r: 0,   g: 255, b: 100 }, // зеленый
+  { t: 0.55, r: 255, g: 255, b: 0 },   // желтый
+  { t: 0.75, r: 255, g: 165, b: 0 },   // оранжевый
+  { t: 1,    r: 255, g: 0,   b: 0 },   // красный
+];
+
+function heatToRgba(t: number): { r: number; g: number; b: number; a: number } {
+  const clamped = Math.max(0, Math.min(1, t));
+  let i = 0;
+  for (; i < HEAT_STOPS.length - 1 && HEAT_STOPS[i + 1].t <= clamped; i++) {}
+  const a = HEAT_STOPS[i];
+  const b = HEAT_STOPS[Math.min(i + 1, HEAT_STOPS.length - 1)];
+  const local = b.t > a.t ? (clamped - a.t) / (b.t - a.t) : 1;
+  const r = Math.round(a.r + (b.r - a.r) * local);
+  const g = Math.round(a.g + (b.g - a.g) * local);
+  const bl = Math.round(a.b + (b.b - a.b) * local);
+  const alpha = 0.25 + 0.7 * clamped; // холодные — полупрозрачные, горячие — ярче
+  return { r, g, b: bl, a: alpha };
+}
+
+// Тепловая карта: сначала накапливаем «тепло» по экрану, затем красим по градиенту
 function renderHeatmap(
   canvas: HTMLCanvasElement,
   data: Array<{ x: number; y: number; count: number }>,
   width: number,
-  height: number,
-  maxValue: number
+  height: number
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  // Очищаем canvas
   ctx.clearRect(0, 0, width, height);
+  if (data.length === 0) return;
 
-  // Создаем изображение для наложения
-  const heatmapImage = ctx.createImageData(width, height);
-  const heatmapData = heatmapImage.data;
+  const radius = 48;
+  const sigma = radius / 2.5;
+  const heat = new Float32Array(width * height);
 
-  // Радиус размытия
-  const radius = 50;
-  const blur = 0.75;
-
-  // Обрабатываем каждую точку данных
-  data.forEach((point) => {
-    const intensity = point.count / maxValue;
-    const alpha = Math.min(0.8, 0.1 + intensity * 0.7);
-
-    // Рисуем радиальный градиент вокруг точки
+  // Накопление: каждая точка добавляет гауссово пятно с весом count
+  for (const point of data) {
+    const cx = Math.round(point.x);
+    const cy = Math.round(point.y);
+    const count = point.count;
     for (let dy = -radius; dy <= radius; dy++) {
       for (let dx = -radius; dx <= radius; dx++) {
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance > radius) continue;
-
-        const x = Math.round(point.x + dx);
-        const y = Math.round(point.y + dy);
-
+        const distSq = dx * dx + dy * dy;
+        if (distSq > radius * radius) continue;
+        const x = cx + dx;
+        const y = cy + dy;
         if (x < 0 || x >= width || y < 0 || y >= height) continue;
-
-        // Вычисляем интенсивность с учетом расстояния и размытия
-        const falloff = Math.exp(-(distance * distance) / (2 * radius * radius * blur * blur));
-        const finalAlpha = alpha * falloff;
-
-        const idx = (y * width + x) * 4;
-        
-        // Цветовая схема: синий -> голубой -> зеленый -> желтый -> красный
-        let r = 0, g = 0, b = 0;
-        if (intensity < 0.4) {
-          // Синий
-          b = 255;
-        } else if (intensity < 0.6) {
-          // Голубой
-          g = Math.round(255 * (intensity - 0.4) / 0.2);
-          b = 255;
-        } else if (intensity < 0.7) {
-          // Зеленый
-          g = 255;
-          b = Math.round(255 * (1 - (intensity - 0.6) / 0.1));
-        } else if (intensity < 0.8) {
-          // Желтый
-          r = 255;
-          g = 255;
-        } else {
-          // Красный
-          r = 255;
-          g = Math.round(255 * (1 - (intensity - 0.8) / 0.2));
-        }
-
-        // Накладываем цвет с учетом прозрачности
-        const currentAlpha = heatmapData[idx + 3] / 255;
-        const newAlpha = Math.min(1, currentAlpha + finalAlpha);
-        
-        heatmapData[idx] = Math.round((heatmapData[idx] * currentAlpha + r * finalAlpha) / newAlpha);
-        heatmapData[idx + 1] = Math.round((heatmapData[idx + 1] * currentAlpha + g * finalAlpha) / newAlpha);
-        heatmapData[idx + 2] = Math.round((heatmapData[idx + 2] * currentAlpha + b * finalAlpha) / newAlpha);
-        heatmapData[idx + 3] = Math.round(newAlpha * 255);
+        const w = count * Math.exp(-distSq / (2 * sigma * sigma));
+        heat[y * width + x] += w;
       }
     }
-  });
+  }
 
-  // Применяем изображение к canvas
-  ctx.putImageData(heatmapImage, 0, 0);
+  let maxHeat = 0;
+  for (let i = 0; i < heat.length; i++) {
+    if (heat[i] > maxHeat) maxHeat = heat[i];
+  }
+  if (maxHeat <= 0) return;
+
+  const imageData = ctx.createImageData(width, height);
+  const out = imageData.data;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const t = heat[y * width + x] / maxHeat;
+      const { r, g, b, a } = heatToRgba(t);
+      const idx = (y * width + x) * 4;
+      out[idx] = r;
+      out[idx + 1] = g;
+      out[idx + 2] = b;
+      out[idx + 3] = Math.round(a * 255);
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
 }
 
 export function HeatmapRenderer({
@@ -150,12 +150,9 @@ export function HeatmapRenderer({
         count: point.count,
       }));
 
-      // Вычисляем максимальное значение для нормализации
-      const maxValue = max || Math.max(...data.map((d) => d.count), 1);
-
-      // Рендерим тепловую карту
+      // Рендерим тепловую карту (нормализация по накопленному теплу внутри)
       if (canvasRef.current) {
-        renderHeatmap(canvasRef.current, scaledData, containerWidth, containerHeight, maxValue);
+        renderHeatmap(canvasRef.current, scaledData, containerWidth, containerHeight);
       }
     };
 
@@ -187,19 +184,19 @@ export function HeatmapRenderer({
   }, [data, width, height, max, imageUrl]);
 
   return (
-    <div ref={wrapperRef} className="relative w-full" style={{ position: 'relative' }}>
+    <div ref={wrapperRef} className="relative w-full h-full min-h-0" style={{ position: 'relative' }}>
       {imageUrl && (
         <img
           ref={imageRef}
           src={imageUrl}
           alt=""
-          className="w-full h-auto"
+          className="w-full h-full object-contain block"
           style={{ display: 'block' }}
         />
       )}
       <div
         ref={containerRef}
-        className="absolute top-0 left-0"
+        className="absolute top-0 left-0 w-full h-full"
         style={{ 
           pointerEvents: 'none'
         }}

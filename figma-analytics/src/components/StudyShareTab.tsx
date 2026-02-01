@@ -3,7 +3,6 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Link, Lightbulb } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface StudyShareTabProps {
   studyId: string;
@@ -97,14 +96,10 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
           <Input
             readOnly
             value={shareUrl}
-            className={cn(
-              "flex-1 font-mono text-sm",
-              studyStatus === "stopped" && "opacity-60 bg-muted line-through"
-            )}
+            className="flex-1 font-mono text-sm"
           />
           <Button
             onClick={handleCopy}
-            disabled={studyStatus === "stopped"}
             className="h-11 shrink-0 gap-2"
           >
             <Link className="h-4 w-4" />
@@ -112,10 +107,14 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
           </Button>
         </div>
 
-        {studyStatus === "draft" && (
+        {(studyStatus === "draft" || studyStatus === "stopped") && (
           <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/50 p-3 text-[15px] text-muted-foreground">
             <Lightbulb className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
-            <span>Отправьте эту ссылку коллегам для проверки теста перед публикацией.</span>
+            <span>
+              {studyStatus === "stopped"
+                ? "Тест остановлен. Редактируйте блоки при необходимости и снова опубликуйте — ссылка станет активной для респондентов."
+                : "Отправьте эту ссылку коллегам для проверки теста перед публикацией."}
+            </span>
           </div>
         )}
       </Card>
@@ -126,7 +125,7 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
         <ul className="space-y-1 text-sm text-muted-foreground list-none pl-0 m-0">
           <li><strong className="text-foreground">Черновик</strong> — редактируйте блоки, тестируйте с командой</li>
           <li><strong className="text-foreground">Опубликован</strong> — респонденты проходят тест, блоки нельзя менять</li>
-          <li><strong className="text-foreground">Остановлен</strong> — тестирование завершено, только просмотр результатов</li>
+          <li><strong className="text-foreground">Остановлен</strong> — редактирование снова доступно, можно изменить тест и снова опубликовать</li>
         </ul>
       </div>
     </div>

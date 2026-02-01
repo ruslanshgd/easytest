@@ -49,6 +49,7 @@ export interface Session {
   umux_lite_sus_score?: number | null;
   feedback_text?: string | null;
   recording_url?: string | null;
+  recording_screen_url?: string | null;
 }
 
 export interface SessionEvent {

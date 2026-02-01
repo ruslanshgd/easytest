@@ -24,6 +24,9 @@ export function createMediaRecordingController(
 
   const start = () => {
     if (recording || combinedStream.getTracks().length === 0) return;
+    // Не запускать запись, если все треки уже остановлены (например после завершения теста)
+    const hasLiveTrack = combinedStream.getTracks().some((t) => t.readyState === "live");
+    if (!hasLiveTrack) return;
     try {
       recorder = new MediaRecorder(combinedStream, {
         mimeType: "video/webm;codecs=vp9,opus",
@@ -38,8 +41,13 @@ export function createMediaRecordingController(
         chunks.push(event.data);
       }
     };
-    recorder.start();
-    recording = true;
+    try {
+      // timeslice 1s — периодический сброс данных, чтобы длинные записи (60+ с) не терялись
+      recorder.start(1000);
+      recording = true;
+    } catch (err) {
+      console.warn("MediaRecorder.start() failed (stream may be ended):", err instanceof Error ? err.message : err);
+    }
   };
 
   const stop = async (): Promise<Blob | null> => {

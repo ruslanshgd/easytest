@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { useAppStore } from "./store";
 import { Button } from "@/components/ui/button";
@@ -56,7 +56,6 @@ import {
   FileText,
   Timer,
   ClipboardList,
-  Users,
   Check,
   MousePointerClick,
   LayoutGrid,
@@ -135,6 +134,7 @@ interface StudyStats {
 }
 
 export default function StudiesList() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentFolderId = searchParams.get("folder");
@@ -150,7 +150,6 @@ export default function StudiesList() {
     studyStats,
     // UI state
     error,
-    showCreateStudyModal,
     showCreateFolderModal,
     showRenameModal,
     showRenameFolderModal,
@@ -160,9 +159,6 @@ export default function StudiesList() {
     showDeleteFolderDialog,
     showBulkMoveModal,
     showBulkDeleteDialog,
-    newStudyTitle,
-    newStudyDescription,
-    newStudyType,
     newFolderName,
     renameTitle,
     renameFolderName,
@@ -177,8 +173,6 @@ export default function StudiesList() {
     getUserTeamId,
     buildBreadcrumbs,
     // Modal actions
-    openCreateStudyModal,
-    closeCreateStudyModal,
     openCreateFolderModal,
     closeCreateFolderModal,
     openRenameModal,
@@ -198,9 +192,6 @@ export default function StudiesList() {
     openBulkDeleteDialog,
     closeBulkDeleteDialog,
     // Form actions
-    setNewStudyTitle,
-    setNewStudyDescription,
-    setNewStudyType,
     setNewFolderName,
     setRenameTitle,
     setRenameFolderName,
@@ -222,29 +213,26 @@ export default function StudiesList() {
   // Template modal (e.g. "prototype_testing")
   const [templateModalId, setTemplateModalId] = useState<string | null>(null);
   
+  // Загружаем список при открытии страницы списка и при смене папки; при возврате с карточки теста данные обновляются
   useEffect(() => {
-    // Пропускаем, если folderId не изменился (кроме первого рендера)
-    if (lastFolderIdRef.current !== undefined && lastFolderIdRef.current === currentFolderId) {
-      console.log('StudiesList: useEffect skipped - folderId unchanged', { currentFolderId });
-      return;
-    }
-    
-    // Пропускаем, если уже загружаем
+    const isListPage = location.pathname === "/" || location.pathname === "/studies";
+    if (!isListPage) return;
+
     if (loadingRef.current) {
       console.log('StudiesList: useEffect skipped - already loading');
       return;
     }
-    
+
     console.log('StudiesList: useEffect running loadAllData', { currentFolderId });
     lastFolderIdRef.current = currentFolderId;
     loadingRef.current = true;
-    
+
     loadAllData(currentFolderId).finally(() => {
       loadingRef.current = false;
     });
     clearSelection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFolderId]); // Functions from store are stable, don't need to be in deps
+  }, [location.pathname, currentFolderId]); // pathname — при возврате с /studies/:id список перезапрашивается, счётчики ответов обновляются
 
   // Navigation
   const navigateToFolder = (folderId: string | null) => {
@@ -327,68 +315,6 @@ export default function StudiesList() {
     }
   };
 
-  // Create study from modal form
-  const handleCreateStudy = async () => {
-    if (!newStudyTitle.trim()) {
-      setError("Название исследования не может быть пустым");
-      return;
-    }
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError("Требуется авторизация");
-        return;
-      }
-
-      const teamId = await getUserTeamId(user.id);
-      
-      // Prepare study data
-      const studyData: {
-        title: string;
-        user_id: string | null;
-        team_id: string | null;
-        folder_id: string | null;
-        status: string;
-        description?: string;
-        type?: string;
-      } = {
-        title: newStudyTitle.trim(),
-        user_id: teamId ? null : user.id,
-        team_id: teamId || null,
-        folder_id: currentFolderId || null,
-        status: "draft"
-      };
-
-      // Add optional fields if provided
-      if (newStudyDescription.trim()) {
-        studyData.description = newStudyDescription.trim();
-      }
-      if (newStudyType.trim()) {
-        studyData.type = newStudyType.trim();
-      }
-
-      const { data, error: createError } = await supabase
-        .from("studies")
-        .insert([studyData])
-        .select()
-        .single();
-
-      if (createError) {
-        setError(createError.message);
-        return;
-      }
-
-      if (data) {
-        closeCreateStudyModal();
-        navigate(`/studies/${data.id}`);
-      }
-    } catch (err) {
-      console.error("Unexpected error creating study:", err);
-      setError(`Неожиданная ошибка: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
   const PLACEHOLDER_IMAGE_DATA_URI = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23e5e7eb' width='400' height='300'/%3E%3Ctext fill='%239ca3af' x='50%25' y='50%25' text-anchor='middle' dy='.3em' font-size='14'%3EДобавьте своё изображение%3C/text%3E%3C/svg%3E";
 
   // Create study from template "Тестирование прототипа"
@@ -435,9 +361,36 @@ export default function StudiesList() {
         { study_id: studyData.id, type: "open_question", order_index: 3, config: { question: "Поделитесь, что было сложным при выполнении задания?", optional: false } }
       ];
 
-      const { error: blocksError } = await supabase.from("study_blocks").insert(blocks);
-      if (blocksError) {
-        setError(blocksError.message);
+      const { data: insertedBlocks, error: blocksError } = await supabase.from("study_blocks").insert(blocks).select("id, order_index");
+      if (blocksError || !insertedBlocks || insertedBlocks.length !== 4) {
+        setError(blocksError?.message ?? "Ошибка создания блоков");
+        return;
+      }
+
+      const byOrder = (a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index;
+      const sorted = [...insertedBlocks].sort(byOrder);
+      const scaleBlockId = sorted[2].id;
+      const openQuestionBlockId = sorted[3].id;
+      const openQuestionConfig = blocks[3].config as Record<string, unknown>;
+
+      const { error: updateLogicError } = await supabase
+        .from("study_blocks")
+        .update({
+          config: {
+            ...openQuestionConfig,
+            logic: {
+              showOnCondition: {
+                enabled: true,
+                action: "show",
+                conditions: [{ blockId: scaleBlockId, operator: "less_than" as const, value: "5" }]
+              },
+              conditionalLogic: { rules: [], elseGoToBlockId: "__end__" }
+            }
+          }
+        })
+        .eq("id", openQuestionBlockId);
+      if (updateLogicError) {
+        setError(updateLogicError.message);
         return;
       }
 
@@ -1185,7 +1138,7 @@ export default function StudiesList() {
 
   if (studiesLoading) {
     return (
-      <div className="container mx-auto p-6 max-w-6xl">
+      <div className="container mx-auto p-6 max-w-6xl min-h-[60vh]">
         <h1 className="text-2xl font-bold mb-6">Тесты</h1>
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -1406,7 +1359,7 @@ export default function StudiesList() {
               />
               Выбрать все
             </label>
-            <Button onClick={openCreateStudyModal} size="sm">
+            <Button onClick={handleCreateStudyNoModal} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               Тест
             </Button>
@@ -1419,7 +1372,7 @@ export default function StudiesList() {
         <div className="space-y-6" id="onboarding-empty">
           <div className="flex justify-between items-center">
             <h2 className="text-[15px] font-extrabold leading-6 text-foreground">Тесты</h2>
-            <Button onClick={openCreateStudyModal} size="sm">
+            <Button onClick={handleCreateStudyNoModal} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               Тест
             </Button>
@@ -1484,7 +1437,7 @@ export default function StudiesList() {
             <h2 className="text-[15px] font-extrabold leading-6 text-foreground">
               Тесты {currentFolderName && `в папке "${currentFolderName}"`}
             </h2>
-            <Button onClick={openCreateStudyModal} size="sm">
+            <Button onClick={handleCreateStudyNoModal} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               Тест
             </Button>
@@ -1610,13 +1563,16 @@ export default function StudiesList() {
                     )}
                   </div>
                   
-                  {/* Sessions count */}
-                  {sessionsCount > 0 && (
-                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-shrink-0">
-                      <Users size={14} />
-                      <span>{sessionsCount}</span>
-                    </div>
-                  )}
+                  {/* Количество ответов (респондентов) */}
+                  <div className="text-sm text-muted-foreground flex-shrink-0">
+                    {sessionsCount === 0
+                      ? "0 ответов"
+                      : sessionsCount === 1
+                        ? "1 ответ"
+                        : sessionsCount >= 2 && sessionsCount <= 4
+                          ? `${sessionsCount} ответа`
+                          : `${sessionsCount} ответов`}
+                  </div>
                   
                   {/* Status & Actions */}
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -1830,67 +1786,6 @@ export default function StudiesList() {
             </Button>
             <Button onClick={handleUseTemplateProductSurvey}>
               Использовать этот шаблон
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Create Study Modal */}
-      <Dialog open={showCreateStudyModal} onOpenChange={(open) => open ? openCreateStudyModal() : closeCreateStudyModal()}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Создать исследование</DialogTitle>
-            <DialogDescription>
-              Заполните форму для создания нового исследования
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <FormField label="Название исследования">
-              <Input
-                id="study-title"
-                placeholder="Введите название исследования"
-                value={newStudyTitle}
-                onChange={(e) => setNewStudyTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleCreateStudy();
-                  }
-                }}
-                autoFocus
-              />
-            </FormField>
-            <FormField label="Описание" optional>
-              <FormTextarea
-                id="study-description"
-                placeholder="Введите описание исследования (опционально)"
-                value={newStudyDescription}
-                onChange={(e) => setNewStudyDescription(e.target.value)}
-                rows={4}
-              />
-            </FormField>
-            <FormField label="Тип исследования" optional>
-              <FormSelect
-                id="study-type"
-                value={newStudyType}
-                onChange={(e) => setNewStudyType(e.target.value)}
-              >
-                <option value="">Выберите тип исследования</option>
-                <option value="prototype">Тестирование прототипа</option>
-                <option value="first_click">Тест первого клика</option>
-                <option value="survey">Опрос</option>
-                <option value="usability">Юзабилити-тест</option>
-                <option value="card_sorting">Карточная сортировка</option>
-                <option value="preference">Тест предпочтений</option>
-              </FormSelect>
-            </FormField>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeCreateStudyModal}>
-              Отмена
-            </Button>
-            <Button onClick={handleCreateStudy} disabled={!newStudyTitle.trim()}>
-              Создать исследование
             </Button>
           </DialogFooter>
         </DialogContent>

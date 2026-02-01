@@ -69,16 +69,6 @@
       font-size: 13px;
       color: var(--text-primary);
     }
-    .url-container {
-      margin-top: 12px;
-      padding: 12px;
-      background: #f5f5f5;
-      border-radius: 4px;
-      display: none;
-    }
-    .url-container.show {
-      display: block;
-    }
     .url-input {
       width: 100%;
       padding: 8px;
@@ -143,6 +133,46 @@
       background: rgba(112, 182, 246, 0.12);
       color: rgba(25, 28, 48, 0.90);
       display: block;
+    }
+    .study-dropdown-item:hover,
+    .study-dropdown-folder-row:hover {
+      background: rgba(82, 110, 211, 0.08);
+    }
+    .study-dropdown-folder-toggle {
+      width: 14px;
+      height: 14px;
+      min-width: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+    .study-dropdown-folder-toggle svg {
+      display: block;
+      width: 14px;
+      height: 14px;
+    }
+    .study-dropdown-folder-toggle.collapsed {
+      transform: rotate(-90deg);
+    }
+    .study-dropdown-folder-row .folder-icon,
+    .study-dropdown-folder-row .test-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      opacity: 0.85;
+    }
+    .study-dropdown-folder-row .folder-icon-expanded { display: none; }
+    .study-dropdown-folder-row .folder-icon-collapsed { display: inline-block; }
+    .study-dropdown-folder-row.expanded .folder-icon-expanded { display: inline-block; }
+    .study-dropdown-folder-row.expanded .folder-icon-collapsed { display: none; }
+    .study-dropdown-folder-children {
+      overflow: hidden;
+    }
+    .study-dropdown-folder-children.collapsed {
+      display: none;
     }
     hr {
       border: none;
@@ -622,12 +652,14 @@
       </label>
       
       <div id="studySelectContainer" style="display: none; margin-top: 8px;">
-        <select 
-          id="studySelect" 
-          style="width: 100%; padding: 6px 8px; border: 1px solid var(--input-border); border-radius: 12px; font-size: 12px; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input);"
-        >
-          <option value="">Загрузка studies...</option>
-        </select>
+        <div id="studyDropdown" class="study-dropdown" style="position: relative; width: 100%;">
+          <button id="studyDropdownTrigger" type="button" style="width: 100%; padding: 6px 8px; border: 1px solid var(--input-border); border-radius: 12px; font-size: 12px; box-sizing: border-box; background: #FFFFFF; color: var(--text-primary); box-shadow: var(--shadow-input); text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+            <span id="studyDropdownLabel">Загрузка...</span>
+            <span style="font-size: 10px;">▼</span>
+          </button>
+          <div id="studyDropdownPanel" style="display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid var(--input-border); border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; padding: 4px 0;"></div>
+        </div>
+        <input type="hidden" id="studySelect" value="" />
         <div id="attachError" style="display: none; margin-top: 8px; padding: 8px; background: #ffebee; color: #c62828; border-radius: 4px; font-size: 11px;"></div>
         <div id="attachRetryContainer" style="display: none; margin-top: 8px;">
           <button 
@@ -644,11 +676,6 @@
     <!-- Кнопка отправки -->
     <button id="sendToTest" class="btn-primary" style="width: 100%; margin-top: 16px; height: 44px; padding-top: 14px; padding-bottom: 14px; border-radius: 12px;">Отправить на тест</button>
     <div class="status" id="status"></div>
-    <div class="url-container" id="urlContainer">
-      <label style="font-size: 12px; display: block; margin-bottom: 4px; color: var(--text-primary);">Ссылка для респондента:</label>
-      <input type="text" class="url-input" id="testUrl" readonly />
-      <button class="url-copy-btn" id="copyUrl">Копировать ссылку</button>
-    </div>
   </div>
   
   <!-- Контент таба "Настройки" -->
@@ -915,8 +942,11 @@
     async function loadStudies() {
       console.log("loadStudies called");
       const studySelect = document.getElementById("studySelect");
-      studySelect.innerHTML = '<option value="">Загрузка studies...</option>';
-      studySelect.disabled = true;
+      const studyDropdownLabel = document.getElementById("studyDropdownLabel");
+      const studyDropdownTrigger = document.getElementById("studyDropdownTrigger");
+      const studyDropdownPanel = document.getElementById("studyDropdownPanel");
+      if (studyDropdownLabel) studyDropdownLabel.textContent = "Загрузка...";
+      studySelect.value = "";
       
       try {
         console.log("ACCESS_TOKEN exists:", !!ACCESS_TOKEN, "length:", ACCESS_TOKEN ? ACCESS_TOKEN.length : 0);
@@ -924,7 +954,7 @@
         
         if (!ACCESS_TOKEN || !ACCESS_TOKEN.trim()) {
           console.log("No ACCESS_TOKEN, showing error");
-          studySelect.innerHTML = '<option value="">Требуется access token</option>';
+          if (studyDropdownLabel) studyDropdownLabel.textContent = "Требуется access token";
           return;
         }
         
@@ -942,7 +972,17 @@
         if (!userResponse.ok) {
           const errorText = await userResponse.text();
           console.error("Auth error:", errorText);
-          studySelect.innerHTML = '<option value="">Ошибка авторизации</option>';
+          let msg = "Ошибка авторизации";
+          try {
+            const err = JSON.parse(errorText);
+            const m = err.msg || "";
+            if (/expired|token is expired/i.test(m)) {
+              msg = "Токен истёк. Обновите в настройках.";
+            } else if (/malformed|invalid number of segments|invalid JWT/i.test(m)) {
+              msg = "Токен некорректен. Скопируйте заново со страницы /token.";
+            }
+          } catch (_) {}
+          if (studyDropdownLabel) studyDropdownLabel.textContent = msg;
           return;
         }
         
@@ -964,7 +1004,7 @@
         
         if (!teamMembersResponse.ok) {
           console.error("Team members fetch error:", await teamMembersResponse.text());
-          studySelect.innerHTML = '<option value="">Ошибка загрузки команд</option>';
+          if (studyDropdownLabel) studyDropdownLabel.textContent = "Ошибка загрузки команд";
           return;
         }
         
@@ -973,7 +1013,7 @@
         
         if (teamMembers.length === 0) {
           console.log("User is not in any team");
-          studySelect.innerHTML = '<option value="">Нет доступных teams</option>';
+          if (studyDropdownLabel) studyDropdownLabel.textContent = "Нет доступных команд";
           return;
         }
         
@@ -981,45 +1021,130 @@
         const teamIds = teamMembers.map(tm => tm.team_id);
         console.log("Team IDs:", teamIds);
         
-        // Загружаем studies по team_id (используем in для нескольких команд)
         const teamIdsFilter = teamIds.map(id => `"${id}"`).join(',');
-        const studiesUrl = `${SUPABASE_URL}/rest/v1/studies?team_id=in.(${teamIdsFilter})&select=id,title,status&order=created_at.desc`;
-        console.log("Fetching studies from:", studiesUrl);
         
-        const studiesResponse = await fetch(studiesUrl, {
-          headers: {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
-            "Content-Type": "application/json"
-          }
-        });
+        const [foldersRes, studiesRes] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/folders?team_id=in.(${teamIdsFilter})&select=id,name,parent_id&order=name.asc`, {
+            headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`, "Content-Type": "application/json" }
+          }),
+          fetch(`${SUPABASE_URL}/rest/v1/studies?team_id=in.(${teamIdsFilter})&select=id,title,status,folder_id&order=created_at.desc`, {
+            headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`, "Content-Type": "application/json" }
+          })
+        ]);
         
-        console.log("Studies response status:", studiesResponse.status);
-        
-        if (!studiesResponse.ok) {
-          const errorText = await studiesResponse.text();
-          console.error("Studies fetch error:", errorText);
-          studySelect.innerHTML = '<option value="">Ошибка загрузки studies</option>';
+        if (!studiesRes.ok) {
+          console.error("Studies fetch error:", await studiesRes.text());
+          studyDropdownLabel.textContent = "Ошибка загрузки";
           return;
         }
         
-        studies = await studiesResponse.json() || [];
-        console.log("Studies loaded:", studies.length, studies);
+        const folders = foldersRes.ok ? (await foldersRes.json() || []) : [];
+        studies = await studiesRes.json() || [];
+        console.log("Folders:", folders.length, "Studies:", studies.length);
         
-        // Обновляем select
-        studySelect.innerHTML = '<option value="">Выберите Study (опционально)</option>';
-        studies.forEach(study => {
-          const option = document.createElement("option");
-          option.value = study.id;
-          option.textContent = `${study.title} (${study.status === "published" ? "Published" : "Draft"})`;
-          studySelect.appendChild(option);
+        const statusRu = { draft: "Черновик", published: "Опубликован", closed: "Закрыт", completed: "Завершён", aborted: "Отменён" };
+        const rootFolders = folders.filter(f => !f.parent_id);
+        const rootStudies = studies.filter(s => !s.folder_id);
+        
+        const svgDataUri = (svg) => "data:image/svg+xml," + encodeURIComponent(svg.replace(/currentColor/g, "%231B1F3B").replace(/stroke="currentColor"/g, 'stroke="%231B1F3B"'));
+        const iconSelect = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.29 5.29c.39-.39 1.02-.39 1.41 0L8 8.59l3.29-3.3c.39-.39 1.02-.39 1.41 0 .39.39.39 1.02 0 1.41l-4 4c-.39.39-1.02.39-1.41 0l-4-4c-.39-.39-.39-1.02 0-1.41z" fill="#1B1F3B" fill-opacity="0.4"/></svg>';
+        const iconFolder = svgDataUri('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1B1F3B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>');
+        const iconFolderOpen = svgDataUri('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1B1F3B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>');
+        const iconFlask = svgDataUri('<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1B1F3B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>');
+        const imgFolder = '<img src="' + iconFolder + '" class="folder-icon folder-icon-collapsed" width="14" height="14" alt="">';
+        const imgFolderOpen = '<img src="' + iconFolderOpen + '" class="folder-icon folder-icon-expanded" width="14" height="14" alt="">';
+        const imgSelect = iconSelect;
+        const imgFlask = '<img src="' + iconFlask + '" class="test-icon" width="14" height="14" alt="">';
+
+        function buildFolderBlock(f, indent, expanded) {
+          const toggleClass = expanded ? "" : " collapsed";
+          const rowClass = expanded ? " expanded" : "";
+          const childrenClass = expanded ? "" : " collapsed";
+          let html = '<div class="study-dropdown-folder" data-folder-id="' + f.id + '">';
+          html += '<div class="study-dropdown-folder-row' + rowClass + '" data-folder-id="' + f.id + '" style="padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px; padding-left: ' + indent + 'px;" title="Создать тест в папке">';
+          html += '<span class="study-dropdown-folder-toggle' + toggleClass + '" data-toggle role="button" title="Свернуть/Развернуть" style="width: 14px; flex-shrink: 0;">' + imgSelect + '</span>';
+          html += imgFolder + imgFolderOpen;
+          html += '<span class="folder-name">' + f.name + '</span></div>';
+          html += '<div class="study-dropdown-folder-children' + childrenClass + '">';
+          html += buildTreeHtml(f.id, indent + 16);
+          html += '</div></div>';
+          return html;
+        }
+        function buildTreeHtml(parentId, indent) {
+          let html = "";
+          const childFolders = folders.filter(f => f.parent_id === parentId);
+          const childStudies = studies.filter(s => s.folder_id === parentId);
+          childFolders.forEach(f => {
+            html += buildFolderBlock(f, indent, true);
+          });
+          childStudies.forEach(s => {
+            const statusLabel = statusRu[s.status] || s.status;
+            html += '<div class="study-dropdown-item" data-study-id="' + s.id + '" style="padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px; padding-left: ' + indent + 'px;" title="Добавить в тест">' + imgFlask + '<span>' + s.title + ' (' + statusLabel + ')</span></div>';
+          });
+          return html;
+        }
+
+        let panelHtml = "";
+        rootStudies.forEach(s => {
+          const statusLabel = statusRu[s.status] || s.status;
+          panelHtml += '<div class="study-dropdown-item" data-study-id="' + s.id + '" style="padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px;" title="Добавить в тест">' + imgFlask + '<span>' + s.title + ' (' + statusLabel + ')</span></div>';
+        });
+        rootFolders.forEach(f => {
+          panelHtml += buildFolderBlock(f, 16, true);
         });
         
-        studySelect.disabled = false;
-        console.log("Studies select updated, options count:", studySelect.options.length);
+        studyDropdownLabel.textContent = "Выберите тест или папку (опционально)";
+        studyDropdownPanel.innerHTML = panelHtml || '<div style="padding: 10px; font-size: 12px; color: var(--text-secondary);">Нет тестов и папок</div>';
+        
+        document.querySelectorAll(".study-dropdown-item").forEach(el => {
+          el.addEventListener("click", function() {
+            const id = this.getAttribute("data-study-id");
+            studySelect.value = id;
+            const span = this.querySelector("span");
+            studyDropdownLabel.textContent = span ? span.textContent.trim() : this.textContent.trim();
+            studyDropdownPanel.style.display = "none";
+          });
+        });
+        document.querySelectorAll(".study-dropdown-folder-toggle").forEach(el => {
+          el.addEventListener("click", function(e) {
+            e.stopPropagation();
+            const folder = this.closest(".study-dropdown-folder");
+            if (!folder) return;
+            const row = folder.querySelector(".study-dropdown-folder-row");
+            const children = folder.querySelector(".study-dropdown-folder-children");
+            if (!row || !children) return;
+            const isExpanded = row.classList.contains("expanded");
+            row.classList.toggle("expanded", !isExpanded);
+            children.classList.toggle("collapsed", isExpanded);
+            this.classList.toggle("collapsed", isExpanded);
+          });
+        });
+        document.querySelectorAll(".study-dropdown-folder-row").forEach(el => {
+          el.addEventListener("click", function(e) {
+            if (e.target.closest(".study-dropdown-folder-toggle")) return;
+            const id = this.getAttribute("data-folder-id");
+            studySelect.value = "folder:" + id;
+            const folderName = folders.find(f => f.id === id)?.name || "Папка";
+            studyDropdownLabel.textContent = folderName + " (создать тест)";
+            studyDropdownPanel.style.display = "none";
+          });
+        });
+        
+        const studyDropdown = document.getElementById("studyDropdown");
+        if (studyDropdownTrigger) {
+          studyDropdownTrigger.onclick = function(e) {
+            e.stopPropagation();
+            studyDropdownPanel.style.display = studyDropdownPanel.style.display === "none" ? "block" : "none";
+          };
+        }
+        document.addEventListener("click", function closeDropdown(e) {
+          if (studyDropdown && !studyDropdown.contains(e.target)) studyDropdownPanel.style.display = "none";
+        });
+        studyDropdownPanel.style.display = "none";
       } catch (error) {
         console.error("Error loading studies:", error);
-        studySelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+        const studyDropdownLabel = document.getElementById("studyDropdownLabel");
+        if (studyDropdownLabel) studyDropdownLabel.textContent = "Ошибка загрузки";
       }
     }
     
@@ -1083,7 +1208,7 @@
     }
     
     // Создание нового study
-    async function createStudy(title, teamId) {
+    async function createStudy(title, teamId, userId, folderId) {
       try {
         if (!ACCESS_TOKEN || !ACCESS_TOKEN.trim()) {
           throw new Error("Access token required");
@@ -1092,6 +1217,8 @@
         const studyBody = {
           title: title || "Новый тест",
           team_id: teamId,
+          user_id: userId || null,
+          folder_id: folderId ?? null,
           status: "draft"
         };
         
@@ -1146,58 +1273,6 @@
       }
     }
     
-    // Получение share_token для study
-    async function getStudyShareToken(studyId) {
-      try {
-        // Сначала проверяем, есть ли уже share
-        const existingResponse = await fetch(`${SUPABASE_URL}/rest/v1/study_shares?study_id=eq.${studyId}&mode=eq.respond&revoked_at=is.null&select=token&limit=1`, {
-          headers: {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
-            "Content-Type": "application/json"
-          }
-        });
-        
-        if (existingResponse.ok) {
-          const existing = await existingResponse.json();
-          if (existing && existing.length > 0) {
-            console.log("Found existing share token:", existing[0].token);
-            return existing[0].token;
-          }
-        }
-        
-        // Если нет, создаем новый share
-        const shareBody = {
-          study_id: studyId,
-          mode: "respond",
-          access: "any"
-        };
-        
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/study_shares`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": `Bearer ${ACCESS_TOKEN.trim()}`,
-            "Prefer": "return=representation"
-          },
-          body: JSON.stringify(shareBody)
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Ошибка создания share: ${response.status} - ${errorText}`);
-        }
-        
-        const data = await response.json();
-        console.log("Created share token:", data[0].token);
-        return data[0].token;
-      } catch (error) {
-        console.error("Error getting share token:", error);
-        throw error;
-      }
-    }
-
     function generateUUID() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         const r = Math.random() * 16 | 0;
@@ -1263,7 +1338,7 @@
 
     document.getElementById("sendToTest").onclick = async () => {
       if (!latestData) {
-        showStatus("JSON пока не получен", "error");
+        showStatus("Сначала вставьте ссылку Figma и нажмите кнопку поиска — прототип будет сгенерирован", "error");
         return;
       }
 
@@ -1276,7 +1351,6 @@
 
       const statusEl = document.getElementById("status");
       const sendBtn = document.getElementById("sendToTest");
-      const urlContainer = document.getElementById("urlContainer");
 
       sendBtn.disabled = true;
       showStatus("Отправка в Supabase...", "loading");
@@ -1396,10 +1470,20 @@
         let studyTitle = taskDescription || "Новый тест";
         
         try {
-          if (attachToStudyToggle && attachToStudyToggle.checked && studySelect && studySelect.value) {
-            // Используем выбранный study
-            studyId = studySelect.value;
-            console.log("Using selected study:", studyId);
+          const selectedValue = studySelect && studySelect.value ? studySelect.value.trim() : "";
+          if (attachToStudyToggle && attachToStudyToggle.checked && selectedValue) {
+            if (selectedValue.startsWith("folder:")) {
+              const folderId = selectedValue.slice(7);
+              console.log("Creating new study in folder:", folderId);
+              const teamId = await getUserTeamId(userId);
+              if (!teamId) throw new Error("Не удалось получить team_id. Убедитесь, что вы состоите в команде.");
+              const newStudy = await createStudy(studyTitle, teamId, userId, folderId);
+              studyId = newStudy.id;
+              studySelect.value = studyId;
+            } else {
+              studyId = selectedValue;
+              console.log("Using selected study:", studyId);
+            }
           } else {
             // Создаем новый study
             console.log("Creating new study with title:", studyTitle);
@@ -1410,7 +1494,7 @@
               throw new Error("Не удалось получить team_id. Убедитесь, что вы состоите в команде.");
             }
             
-            const newStudy = await createStudy(studyTitle, teamId);
+            const newStudy = await createStudy(studyTitle, teamId, userId);
             studyId = newStudy.id;
             console.log("Created new study:", studyId);
           }
@@ -1419,33 +1503,17 @@
           await attachToStudy(prototypeId, studyId, taskDescription);
           console.log("Prototype attached to study:", studyId);
           
-          // 4. Получаем share_token для study
-          const shareToken = await getStudyShareToken(studyId);
-          console.log("Got share token:", shareToken);
-          
-          // 5. Генерируем URL для study через share token
-          const viewerUrl = VIEWER_URL.endsWith('/') ? VIEWER_URL.slice(0, -1) : VIEWER_URL;
-          const testUrl = `${viewerUrl}/share/${shareToken}`;
-          document.getElementById("testUrl").value = testUrl;
-          urlContainer.classList.add("show");
-          
           // Очищаем ошибки при успехе
           if (attachError) attachError.style.display = "none";
           if (attachRetryContainer) attachRetryContainer.style.display = "none";
           
-          showStatus("✓ Прототип успешно добавлен в тест! Скопируйте ссылку.", "success");
+          showStatus("✓ Прототип успешно добавлен в тест. Откройте тест в аналитике.", "success");
           
         } catch (studyErr) {
           console.error("Error with study:", studyErr);
           
-          // Fallback: показываем ошибку, но даем прямую ссылку на прототип
-          const viewerUrl = VIEWER_URL.endsWith('/') ? VIEWER_URL.slice(0, -1) : VIEWER_URL;
-          const fallbackUrl = `${viewerUrl}/prototype/${prototypeId}`;
-          document.getElementById("testUrl").value = fallbackUrl;
-          urlContainer.classList.add("show");
-          
           if (attachError) {
-            attachError.textContent = `⚠️ Прототип создан, но не удалось привязать к тесту: ${studyErr.message}. Используйте прямую ссылку.`;
+            attachError.textContent = `⚠️ Прототип создан, но не удалось привязать к тесту: ${studyErr.message}`;
             attachError.style.display = "block";
           }
           showStatus("⚠️ Прототип создан, но не привязан к тесту. См. ошибку ниже.", "error");
@@ -1457,18 +1525,6 @@
       } finally {
         sendBtn.disabled = false;
       }
-    };
-
-    document.getElementById("copyUrl").onclick = () => {
-      const urlInput = document.getElementById("testUrl");
-      urlInput.select();
-      document.execCommand("copy");
-      showStatus("✓ Ссылка скопирована в буфер обмена!", "success");
-      setTimeout(() => {
-        const statusEl = document.getElementById("status");
-        statusEl.classList.remove("success");
-        statusEl.classList.remove("show");
-      }, 2000);
     };
 
     function showStatus(message, type) {
@@ -2004,8 +2060,8 @@
         console.log("Requesting starting points via Plugin API...");
         const pluginStartingPoints = await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            reject(new Error("Timeout waiting for starting points"));
-          }, 5000);
+            reject(new Error("Таймаут ожидания starting points (попробуйте ещё раз после загрузки файла)"));
+          }, 15000);
           
           const messageHandler = (event) => {
             if (event.data.pluginMessage) {
@@ -2313,8 +2369,9 @@
         const attachErrorEl = document.getElementById("attachError");
         const attachRetryContainer = document.getElementById("attachRetryContainer");
         
-        if (!attachToStudyToggle || !attachToStudyToggle.checked || !studySelect || !studySelect.value) {
-          showStatus("⚠️ Выберите Study для прикрепления", "error");
+        const retryValue = studySelect && studySelect.value ? studySelect.value.trim() : "";
+        if (!attachToStudyToggle || !attachToStudyToggle.checked || !retryValue) {
+          showStatus("⚠️ Выберите тест для прикрепления", "error");
           return;
         }
         
@@ -2325,7 +2382,7 @@
         showStatus("Повторная попытка прикрепления к Study...", "loading");
         
         try {
-          await attachToStudy(lastCreatedPrototypeId, studySelect.value, taskDescription);
+          await attachToStudy(lastCreatedPrototypeId, retryValue, taskDescription);
           if (attachErrorEl) attachErrorEl.style.display = "none";
           if (attachRetryContainer) attachRetryContainer.style.display = "none";
           showStatus("✓ Прототип успешно прикреплен к Study!", "success");

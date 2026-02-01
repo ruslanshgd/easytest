@@ -147,18 +147,54 @@ export const createStudiesStore = (set: any, get: any): StudiesStore => ({
             .is("deleted_at", null)
             .order("order_index", { ascending: true });
           
-          const { data: sessionsData } = await supabase
-            .from("sessions")
-            .select("study_id")
+          // Количество ответов = респонденты, у которых есть хотя бы одна сессия или ответ (удаление по блокам/по одному не оставляет пустые run в счётчике)
+          const { data: runsData } = await supabase
+            .from("study_runs")
+            .select("id, study_id")
             .in("study_id", studyIds);
+          const runIdToStudyId: Record<string, string> = {};
+          const allRunIds: string[] = [];
+          for (const r of runsData || []) {
+            if (r.id && r.study_id) {
+              runIdToStudyId[r.id] = r.study_id;
+              allRunIds.push(r.id);
+            }
+          }
+          const runsByStudy: Record<string, number> = {};
+          for (const id of studyIds) runsByStudy[id] = 0;
+          if (allRunIds.length > 0) {
+            const runsWithSessionsByStudy: Record<string, Set<string>> = {};
+            for (const id of studyIds) runsWithSessionsByStudy[id] = new Set();
+            const { data: sessionsData } = await supabase
+              .from("sessions")
+              .select("run_id, study_id")
+              .in("study_id", studyIds);
+            for (const row of sessionsData || []) {
+              if (row.run_id && row.study_id && runIdToStudyId[row.run_id] === row.study_id) {
+                runsWithSessionsByStudy[row.study_id].add(row.run_id);
+              }
+            }
+            const { data: responsesData } = await supabase
+              .from("study_block_responses")
+              .select("run_id")
+              .in("run_id", allRunIds);
+            const runsWithResponsesSet = new Set<string>();
+            for (const row of responsesData || []) {
+              if (row.run_id) runsWithResponsesSet.add(row.run_id);
+            }
+            for (const [runId, studyId] of Object.entries(runIdToStudyId)) {
+              const hasSession = runsWithSessionsByStudy[studyId]?.has(runId) ?? false;
+              const hasResponse = runsWithResponsesSet.has(runId);
+              if (hasSession || hasResponse) runsByStudy[studyId] = (runsByStudy[studyId] ?? 0) + 1;
+            }
+          }
           
           const stats: Record<string, StudyStats> = {};
           for (const study of loadedStudies) {
             const studyBlocks = (blocksData || []).filter(b => b.study_id === study.id);
-            const studySessions = (sessionsData || []).filter(s => s.study_id === study.id);
             stats[study.id] = {
               blocks: studyBlocks,
-              sessionsCount: studySessions.length
+              sessionsCount: runsByStudy[study.id] ?? 0
             };
           }
           set({ studyStats: stats });

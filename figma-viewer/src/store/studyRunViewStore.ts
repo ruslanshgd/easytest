@@ -65,8 +65,8 @@ export const createStudyRunViewStore = (set: any, get: any): StudyRunViewStore =
       console.log("StudyRunViewStore: rpc_get_public_study result", { studyDataResult, studyError });
 
       if (studyError) {
-        if (studyError.message?.includes("stopped")) {
-          set({ studyRunError: "Тестирование завершено. Этот тест больше не принимает ответы.", studyRunLoading: false });
+        if (studyError.code === "400" || /not found|invalid|не найден|недействителен/i.test(studyError.message || "")) {
+          set({ studyRunError: "STUDY_NOT_FOUND", studyRunLoading: false });
         } else {
           set({ studyRunError: `Ошибка загрузки теста: ${studyError.message}`, studyRunLoading: false });
         }
@@ -74,7 +74,7 @@ export const createStudyRunViewStore = (set: any, get: any): StudyRunViewStore =
       }
 
       if (!studyDataResult) {
-        set({ studyRunError: "Тест не найден или токен недействителен", studyRunLoading: false });
+        set({ studyRunError: "STUDY_NOT_FOUND", studyRunLoading: false });
         return;
       }
 
@@ -99,12 +99,16 @@ export const createStudyRunViewStore = (set: any, get: any): StudyRunViewStore =
       console.log("StudyRunViewStore: rpc_start_public_run result", { runIdResult, runError });
 
       if (runError) {
-        set({ studyRunError: `Ошибка создания прохождения: ${runError.message}`, studyRunLoading: false });
+        if (runError.code === "400" || /not found|invalid|не найден|недействителен/i.test(runError.message || "")) {
+          set({ studyRunError: "STUDY_NOT_FOUND", studyRunLoading: false });
+        } else {
+          set({ studyRunError: `Ошибка создания прохождения: ${runError.message}`, studyRunLoading: false });
+        }
         return;
       }
 
       if (!runIdResult) {
-        set({ studyRunError: "Не удалось создать прохождение", studyRunLoading: false });
+        set({ studyRunError: "STUDY_NOT_FOUND", studyRunLoading: false });
         return;
       }
 

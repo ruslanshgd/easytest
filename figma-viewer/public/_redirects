@@ -1,0 +1,7 @@
+# MediaPipe rewrite for eye tracking (WebGazer loads from relative paths)
+# /run/TOKEN1/TOKEN2[/TOKEN3]/mediapipe/* → /mediapipe/* (serve from public/mediapipe/)
+/run/*/*/mediapipe/*  /mediapipe/:splat  200
+/run/*/*/*/mediapipe/*  /mediapipe/:splat  200
+
+# SPA fallback - all other routes go to index.html
+/*  /index.html  200

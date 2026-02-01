@@ -24,7 +24,7 @@ interface BlockTypeConfig {
 }
 
 export const BLOCK_TYPE_CONFIG: Record<BlockType, BlockTypeConfig> = {
-  prototype: { value: "prototype", label: "Прототип", icon: Layers },
+  prototype: { value: "prototype", label: "Figma прототип", icon: Layers },
   open_question: { value: "open_question", label: "Открытый вопрос", icon: MessageSquare },
   choice: { value: "choice", label: "Выбор", icon: ListChecks },
   scale: { value: "scale", label: "Шкала", icon: BarChart3 },
@@ -43,6 +43,34 @@ export const BLOCK_TYPES_LIST = Object.values(BLOCK_TYPE_CONFIG);
 
 export function getBlockTypeConfig(type: BlockType): BlockTypeConfig {
   return BLOCK_TYPE_CONFIG[type] || BLOCK_TYPE_CONFIG.prototype;
+}
+
+/** Display name for block — instructions/question/task when available, else default label */
+export function getBlockDisplayName(block: { type: BlockType; instructions?: string | null; config?: Record<string, unknown> | null }): string {
+  const config = getBlockTypeConfig(block.type);
+  switch (block.type) {
+    case "prototype":
+      return (block.instructions?.trim() && block.instructions.substring(0, 80)) || config.label;
+    case "open_question":
+    case "choice":
+    case "scale":
+    case "preference":
+    case "matrix":
+      return (block.config?.question && String(block.config.question).substring(0, 80)) || config.label;
+    case "context":
+    case "agreement":
+      return (block.config?.title && String(block.config.title).substring(0, 80)) || config.label;
+    case "five_seconds":
+    case "first_click":
+      return (block.config?.instruction && String(block.config.instruction).substring(0, 80)) || config.label;
+    case "card_sorting":
+    case "tree_testing":
+      return (block.config?.task && String(block.config.task).substring(0, 80)) || config.label;
+    case "umux_lite":
+      return config.label;
+    default:
+      return config.label;
+  }
 }
 
 // Helper component for rendering block type icon

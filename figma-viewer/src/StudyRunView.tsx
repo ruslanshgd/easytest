@@ -696,7 +696,7 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
         <ImageModal imageUrl={config.imageUrl} onClose={() => setShowImageModal(false)} />
       )}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
-        <div style={{ maxWidth: "900px", width: "100%" }}>
+        <div style={{ maxWidth: "600px", width: "100%" }}>
           {config.imageUrl && (
             <div style={{ marginBottom: 24, borderRadius: 8, overflow: "hidden", cursor: "pointer" }} onClick={() => setShowImageModal(true)}>
               <img src={config.imageUrl} alt="" style={{ width: "100%", maxHeight: 500, objectFit: "contain", background: "#f5f5f5" }} />
@@ -866,20 +866,58 @@ function PreferenceBlock({ config, onSubmit }: PreferenceBlockProps) {
     );
   }
 
+  const [modalImageIndexAll, setModalImageIndexAll] = useState<number | null>(null);
+
+  const handleOpenModalAll = (index: number) => {
+    setModalImageIndexAll(index);
+  };
+
+  const handleModalNextAll = () => {
+    if (modalImageIndexAll === null) return;
+    const next = (modalImageIndexAll + 1) % shuffledImages.length;
+    setModalImageIndexAll(next);
+  };
+
+  const handleModalPrevAll = () => {
+    if (modalImageIndexAll === null) return;
+    const prev = modalImageIndexAll <= 0 ? shuffledImages.length - 1 : modalImageIndexAll - 1;
+    setModalImageIndexAll(prev);
+  };
+
+  const handleModalSelectAll = () => {
+    if (modalImageIndexAll === null) return;
+    handleSelectAll(modalImageIndexAll);
+    setModalImageIndexAll(null);
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
-      <div style={{ maxWidth: "1200px", width: "100%", background: "white", borderRadius: "12px", padding: "32px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-        <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333", textAlign: "center" }}>{config.question}</h2>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(shuffledImages.length, 4)}, 1fr)`, gap: 20 }}>
-          {shuffledImages.map((img, i) => (
-            <button key={`preference-${i}-${img.url || img.id || i}`} onClick={() => handleSelectAll(i)} disabled={submitting} style={{ padding: 0, border: selected === i ? "3px solid #007AFF" : "2px solid #ddd", borderRadius: 12, overflow: "hidden", cursor: submitting ? "not-allowed" : "pointer", background: selected === i ? "#e3f2fd" : "white", transition: "all 0.2s" }}>
-              <img src={img.url} alt={`Вариант ${i + 1}`} style={{ width: "100%", height: 250, objectFit: "cover" }} onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='250'%3E%3Crect fill='%23f0f0f0' width='200' height='250'/%3E%3Ctext fill='%23999' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНет изображения%3C/text%3E%3C/svg%3E"; }} />
-              <div style={{ padding: 16, fontWeight: 500, fontSize: 15, textAlign: "center" }}>Вариант {String.fromCharCode(65 + i)}</div>
-            </button>
-          ))}
+    <>
+      {modalImageIndexAll !== null && (
+        <ImageModal
+          imageUrl={shuffledImages[modalImageIndexAll].url}
+          onClose={() => setModalImageIndexAll(null)}
+          onNext={handleModalNextAll}
+          onPrev={handleModalPrevAll}
+          showNavigation={true}
+          showSelectButton={true}
+          onSelect={handleModalSelectAll}
+        />
+      )}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", width: "100%", padding: "20px", background: "#f5f5f7" }}>
+        <div style={{ maxWidth: "1200px", width: "100%" }}>
+          <h2 style={{ margin: "0 0 24px 0", fontSize: "24px", fontWeight: 600, color: "#333", textAlign: "center" }}>{config.question}</h2>
+          <p style={{ margin: "0 0 24px 0", color: "#999", fontSize: "14px", textAlign: "center" }}>Нажмите на вариант для увеличения и выбора</p>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(shuffledImages.length, 4)}, 1fr)`, gap: 20 }}>
+            {shuffledImages.map((img, i) => (
+              <button key={`preference-${i}-${img.url || img.id || i}`} onClick={() => handleOpenModalAll(i)} disabled={submitting} style={{ padding: 0, border: selected === i ? "3px solid #007AFF" : "2px solid #ddd", borderRadius: 12, overflow: "hidden", cursor: submitting ? "not-allowed" : "pointer", background: selected === i ? "#e3f2fd" : "white", transition: "all 0.2s" }}>
+                <img src={img.url} alt={`Вариант ${i + 1}`} style={{ width: "100%", height: 250, objectFit: "cover" }} onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='250'%3E%3Crect fill='%23f0f0f0' width='200' height='250'/%3E%3Ctext fill='%23999' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНет изображения%3C/text%3E%3C/svg%3E"; }} />
+                <div style={{ padding: 16, fontWeight: 500, fontSize: 15, textAlign: "center" }}>Вариант {String.fromCharCode(65 + i)}</div>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1199,6 +1237,7 @@ interface TreeTestingBlockProps {
 
 function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
   const [selectedPath, setSelectedPath] = useState<string[]>([]); // массив ID от корня до выбранного узла
+  const [clickHistory, setClickHistory] = useState<{ id: string; name: string }[]>([]); // полная история кликов по узлам
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [startTime] = useState(Date.now());
@@ -1247,11 +1286,15 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
     setExpandedNodes(newExpanded);
   };
 
-  // Выбрать узел
+  // Выбрать узел — добавляем клик в историю
   const selectNode = (nodeId: string) => {
     const path = findPathToNode(config.tree, nodeId);
     if (path) {
       setSelectedPath(path);
+      const node = findNode(config.tree, nodeId);
+      if (node) {
+        setClickHistory(prev => [...prev, { id: nodeId, name: node.name }]);
+      }
       // Развернуть всех родителей
       const newExpanded = new Set(expandedNodes);
       path.forEach(id => newExpanded.add(id));
@@ -1298,6 +1341,8 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
         selectedNodeId,
         selectedPath,
         pathNames: getPathNames(selectedPath),
+        clickHistory: clickHistory.map(c => c.id),
+        clickHistoryNames: clickHistory.map(c => c.name),
         isCorrect,
         isDirect
       }, durationMs);
@@ -1426,18 +1471,16 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
     <div style={{
       display: "flex",
       flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
       minHeight: "100vh",
+      width: "100%",
       padding: "20px",
       background: "#f5f5f7"
     }}>
       <div style={{
         maxWidth: "800px",
-        width: "100%",
-        margin: "0 auto",
-        background: "white",
-        borderRadius: "12px",
-        padding: "32px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+        width: "100%"
       }}>
         {/* Заголовок */}
         <h2 style={{
@@ -1501,9 +1544,8 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
         )}
 
         {/* Кнопки */}
-        <div style={{ display: "flex", gap: 12, flexDirection: "column" }}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <button
+        <div style={{ display: "flex", gap: 12, flexDirection: "row", flexWrap: "wrap" }}>
+          <button
               onClick={hasSelection ? handleSubmit : handleSkip}
               disabled={(!hasSelection && !config.allowSkip) || submitting}
               style={{
@@ -1520,26 +1562,27 @@ function TreeTestingBlock({ config, onSubmit, onSkip }: TreeTestingBlockProps) {
                 gap: 8
               }}
             >
-              {submitting ? "Сохранение..." : "Далее"}
+              {submitting ? "Сохранение..." : "Выбрать"}
               {!submitting && <ArrowRight size={18} />}
             </button>
-          </div>
-          <button
-            onClick={handleDontKnow}
-            disabled={submitting}
-            style={{
-              width: "100%",
-              padding: "14px 24px",
-              background: submitting ? "#ccc" : "#f5f5f5",
-              color: "#666",
-              border: "1px solid #e0e0e0",
-              borderRadius: "8px",
-              fontSize: "16px",
-              cursor: submitting ? "not-allowed" : "pointer"
-            }}
-          >
-            {submitting ? "Сохранение..." : "Не знаю"}
-          </button>
+            <button
+              onClick={handleDontKnow}
+              disabled={submitting}
+              style={{
+                padding: "14px 24px",
+                background: submitting ? "#ccc" : "#f5f5f5",
+                color: "#666",
+                border: "1px solid #e0e0e0",
+                borderRadius: "8px",
+                fontSize: "16px",
+                cursor: submitting ? "not-allowed" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8
+              }}
+            >
+              {submitting ? "Сохранение..." : "Не знаю"}
+            </button>
         </div>
       </div>
     </div>
@@ -2868,6 +2911,35 @@ export default function StudyRunView() {
     await handleNextBlock({});
   };
 
+  const handleGiveUp = useCallback(async (sessionId: string) => {
+    if (!studyData || !runId) return;
+    const currentBlock = studyData.blocks[currentBlockIndex];
+    if (!currentBlock) return;
+    try {
+      const { error: updateError } = await supabase
+        .from("sessions")
+        .update({ completed: false, aborted: true })
+        .eq("id", sessionId);
+      if (updateError) {
+        console.error("StudyRunView: failed to update session aborted", updateError);
+      }
+      const { error: insertError } = await supabase.from("events").insert({
+        session_id: sessionId,
+        event_type: "aborted",
+        run_id: runId,
+        block_id: currentBlock.id,
+        study_id: studyData.study.id,
+        user_id: null,
+      });
+      if (insertError) {
+        console.error("StudyRunView: failed to insert aborted event", insertError);
+      }
+    } catch (err) {
+      console.error("StudyRunView: error on give up", err);
+    }
+    await handleNextBlock({});
+  }, [studyData, runId, currentBlockIndex, handleNextBlock]);
+
   const submitBlockResponse = async (blockId: string, answer: any, durationMs: number) => {
     if (!runId) {
       const error = new Error("Не удалось сохранить ответ: отсутствует идентификатор сессии");
@@ -3028,11 +3100,22 @@ export default function StudyRunView() {
 
   if (studyRunLoading) {
     console.log("StudyRunView: Rendering loading state");
-    return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontSize: "18px", color: "#666" }}>Загрузка теста...</div>;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
+        <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 600, color: "var(--color-foreground, #213547)" }}>Загрузка теста...</h1>
+      </div>
+    );
   }
 
   if (studyRunError) {
-    console.log("StudyRunView: Rendering error state", { studyRunError });
+    if (studyRunError === "STUDY_NOT_FOUND") {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
+          <h1 style={{ margin: "0 0 8px 0", fontSize: "24px", fontWeight: 600, color: "#1f1f1f" }}>Страница не найдена</h1>
+          <p style={{ margin: 0, fontSize: "14px", color: "#6b6b6b" }}>Простите, здесь ничего нет</p>
+        </div>
+      );
+    }
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: "20px" }}>
         <div style={{ maxWidth: "500px", padding: "24px", background: "#ffebee", color: "#c62828", borderRadius: "8px", textAlign: "center" }}>
@@ -3080,7 +3163,7 @@ export default function StudyRunView() {
   };
 
   return (
-    <div style={{ position: "relative", width: "100%", minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+    <div style={{ position: "relative", width: "100%", height: "100vh", minHeight: "100vh", overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
       {/* Progress bar */}
       <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: "4px", background: "#e0e0e0", zIndex: 1000 }}>
         <div style={{ height: "100%", width: `${progress}%`, background: "#007AFF", transition: "width 0.3s ease" }} />
@@ -3104,11 +3187,15 @@ export default function StudyRunView() {
             eyeTracking: !!prototypeConfig.eye_tracking_enabled,
             config: prototypeConfig
           });
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/f1d0d01a-cd1c-4f04-b0f8-08b8e8524021',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'StudyRunView.tsx:prototype block',message:'block config for recording',data:{record_screen:prototypeConfig.record_screen,record_camera:prototypeConfig.record_camera,record_audio:prototypeConfig.record_audio,configKeys:currentBlock.config?Object.keys(currentBlock.config):[]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+          // #endregion
           return (
             <PrototypeBlockWrapper
               key={currentBlock.id}
               prototypeId={currentBlock.prototype_id!}
               instructions={currentBlock.instructions}
+              description={currentBlock.config?.description}
               sessionId={currentBlockSessionId}
               runId={runId}
               blockId={currentBlock.id}
@@ -3118,6 +3205,7 @@ export default function StudyRunView() {
               recordCamera={!!prototypeConfig.record_camera}
               recordAudio={!!prototypeConfig.record_audio}
               onComplete={handlePrototypeComplete}
+              onGiveUp={handleGiveUp}
             />
           );
         })()
@@ -3203,9 +3291,13 @@ export default function StudyRunView() {
 }
 
 // ============= Wrapper для прототипа =============
+// Сайдбар слева: задание, описание, Начать (intro) / Сдаться (active).
+// Оверлей затемняет и размывает прототип под сайдбаром.
+// Кнопка «Показать задание» — выступает слева, открывает сайдбар во время прохождения.
 interface PrototypeBlockWrapperProps {
   prototypeId: string;
   instructions: string | null;
+  description?: string | null;
   sessionId: string | null;
   runId: string;
   blockId: string;
@@ -3215,11 +3307,17 @@ interface PrototypeBlockWrapperProps {
   recordCamera: boolean;
   recordAudio: boolean;
   onComplete: () => void;
+  /** Вызывается при нажатии «Сдаться»: обновить сессию (aborted) и записать событие, затем вызвать onComplete */
+  onGiveUp?: (sessionId: string) => Promise<void>;
 }
+
+const SIDEBAR_WIDTH = 320;
+const OVERLAY_BLUR = "blur(12px)";
 
 function PrototypeBlockWrapper({
   prototypeId,
   instructions,
+  description,
   sessionId,
   runId,
   blockId,
@@ -3229,31 +3327,187 @@ function PrototypeBlockWrapper({
   recordCamera,
   recordAudio,
   onComplete,
+  onGiveUp,
 }: PrototypeBlockWrapperProps) {
-  console.log("PrototypeBlockWrapper: Rendering", { 
-    prototypeId, 
-    sessionId, 
-    runId, 
-    blockId, 
-    studyId,
-    hasSessionId: !!sessionId 
-  });
-  
+  const hasRecordingOptions = recordScreen || recordCamera || recordAudio;
+  const [phase, setPhase] = useState<"permissions" | "intro" | "active">(
+    hasRecordingOptions ? "permissions" : "intro"
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showLabelOnTrigger, setShowLabelOnTrigger] = useState(false);
+  const labelTimeoutRef = useRef<number | null>(null);
+
+  const handleStart = () => {
+    // Время в отчётах считаем с момента нажатия «Начать» респондентом
+    if (sessionId) {
+      supabase
+        .from("sessions")
+        .update({ started_at: new Date().toISOString() })
+        .eq("id", sessionId)
+        .then(({ error }) => {
+          if (error) console.warn("StudyRunView: failed to set session started_at", error);
+        });
+    }
+    setPhase("active");
+  };
+
+  const handleShowTask = () => {
+    setSidebarOpen(true);
+  };
+
+  const handleHideSidebar = () => {
+    setSidebarOpen(false);
+    setShowLabelOnTrigger(true);
+    if (labelTimeoutRef.current) clearTimeout(labelTimeoutRef.current);
+    labelTimeoutRef.current = window.setTimeout(() => {
+      setShowLabelOnTrigger(false);
+      labelTimeoutRef.current = null;
+    }, SHOW_TASK_LABEL_DURATION_MS) as unknown as number;
+  };
+
+  useEffect(() => () => {
+    if (labelTimeoutRef.current) clearTimeout(labelTimeoutRef.current);
+  }, []);
+
+  const taskText = instructions || "Выполните задание в прототипе.";
+  const showSidebar = phase === "intro" || sidebarOpen;
+
+  const sidebarContent = (
+    <aside
+      style={{
+        width: SIDEBAR_WIDTH,
+        minWidth: SIDEBAR_WIDTH,
+        background: "white",
+        boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+        padding: 24,
+        display: "flex",
+        flexDirection: "column",
+        gap: 20,
+      }}
+    >
+      <div>
+        <p style={{ margin: 0, color: "#333", fontSize: 15, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{taskText}</p>
+        {description && (
+          <p style={{ margin: "12px 0 0 0", color: "#666", fontSize: 14, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{description}</p>
+        )}
+      </div>
+      {phase === "intro" ? (
+        <button
+          onClick={handleStart}
+          style={{
+            padding: "14px 24px",
+            background: "#007AFF",
+            color: "white",
+            border: "none",
+            borderRadius: 8,
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: "pointer",
+            alignSelf: "flex-start",
+          }}
+        >
+          Начать
+        </button>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "row", gap: 12, flexWrap: "wrap" }}>
+          <button
+            onClick={handleHideSidebar}
+            style={{
+              padding: "14px 24px",
+              background: "#007AFF",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 15,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Продолжить
+          </button>
+          <button
+            onClick={async () => {
+              if (sessionId && onGiveUp) {
+                await onGiveUp(sessionId);
+              } else {
+                onComplete();
+              }
+            }}
+            style={{
+              padding: "14px 24px",
+              background: "#e0e0e0",
+              color: "#000",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 15,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Сдаться
+          </button>
+        </div>
+      )}
+    </aside>
+  );
+
+  const overlayContent = showSidebar && (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        backdropFilter: OVERLAY_BLUR,
+        WebkitBackdropFilter: OVERLAY_BLUR,
+        zIndex: 1,
+        pointerEvents: "none",
+      }}
+    />
+  );
+
+  const handlePermissionsComplete = () => {
+    setPhase("intro");
+  };
+
+  const testViewContent = (
+    <TestView
+      sessionId={sessionId}
+      prototypeIdOverride={prototypeId}
+      instructionsOverride={instructions}
+      runIdOverride={runId}
+      blockIdOverride={blockId}
+      studyIdOverride={studyId}
+      enableEyeTracking={enableEyeTracking}
+      recordScreen={recordScreen}
+      recordCamera={recordCamera}
+      recordAudio={recordAudio}
+      onComplete={onComplete}
+      onPermissionsComplete={hasRecordingOptions ? handlePermissionsComplete : undefined}
+      hideTaskAbove={true}
+      hideGiveUpBelow={true}
+      startRecordingWhenReady={phase === "active"}
+    />
+  );
+
+  const SIDEBAR_Z = 9990;
+  const OVERLAY_Z = 9989;
+
+  const showTaskSidebar = phase === "intro" || (phase === "active" && sidebarOpen);
+
   return (
-    <div style={{ position: "relative", width: "100%", minHeight: "100vh" }}>
-      <TestView 
-        sessionId={sessionId}
-        prototypeIdOverride={prototypeId}
-        instructionsOverride={instructions}
-        runIdOverride={runId}
-        blockIdOverride={blockId}
-        studyIdOverride={studyId}
-        enableEyeTracking={enableEyeTracking}
-        recordScreen={recordScreen}
-        recordCamera={recordCamera}
-        recordAudio={recordAudio}
-        onComplete={onComplete}
-      />
-    </div>
+    <>
+      <div style={{ display: "flex", width: "100%", height: "100vh", minHeight: "100vh", overflow: "hidden", background: "#f5f5f7", position: "relative" }}>
+        {showTaskSidebar && sidebarContent}
+        <div style={{ flex: 1, position: "relative", height: "100%", minHeight: 0 }}>
+          <div style={{ position: "absolute", inset: 0 }}>
+            {testViewContent}
+          </div>
+          {showTaskSidebar && overlayContent}
+        </div>
+      </div>
+      {phase === "active" && (
+        <ShowTaskTrigger onClick={handleShowTask} showLabel={showLabelOnTrigger} />
+      )}
+    </>
   );
 }
