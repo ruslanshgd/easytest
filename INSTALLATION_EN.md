@@ -9,18 +9,6 @@ Three tools for UX testing with Figma prototypes:
 
 Supported block types: Welcome screen, Prototype testing, Open questions, Single/Multiple choice, Scale, Card sorting, Tree testing, Completion screen, Matrix, Agreement.
 
-## 🆕 What's New
-
-### Response Management in Reports
-- **Delete Responses**: In "Report" → "Responses" section, you can now delete all responses for a block using the trash icon (🗑️) next to the block title
-- **Auto-hide**: Blocks without responses are automatically hidden from the list in "Responses" mode
-- **Synchronization**: When deleted, responses are removed from Supabase, and statistics in "Summary" mode update automatically
-
-### Prototype Block Display Improvements
-- **Responses Mode**: The "Prototype" block now correctly displays in the "Responses" section for each user
-- **Interface Optimization**: In "Responses" mode, the "Paths" (Flow visualization) block is hidden, showing only the task and respondents table
-- **Respondents Table**: Displays a table with columns: Date, Status, Time, Path (with screen thumbnails)
-
 ---
 
 ## Part 1: Installing on Your Computer
@@ -535,6 +523,12 @@ VITE_SUPABASE_URL=https://api.your-domain.com
 2. Open `https://analytics.your-domain.com` — analytics should open
 3. In Figma, update plugin settings to production URL
 4. Create prototype and verify it works
+
+---
+
+## What's Available to Users
+
+Figma plugin: send a prototype to a new or existing test, to a folder or to the root; create folders, bulk move and delete tests. In the builder: templates and block types for creating tests; in the profile: team collaboration, invites, draft team invite link, and test publication.
 
 ---
 
