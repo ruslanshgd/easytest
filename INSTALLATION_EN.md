@@ -22,7 +22,7 @@ Supported block types: Welcome screen, Prototype testing, Open questions, Single
 
 1. Download Node.js: https://nodejs.org/
 2. Install version **22.x LTS** (recommended)
-3. Open Command Prompt (Win + R, type `cmd`)
+3. Open a terminal: **Win + R** → type `cmd` (Command Prompt) or **Win + X** → "Terminal" / "Windows PowerShell"
 4. Verify installation:
    ```bash
    node --version
@@ -138,9 +138,8 @@ sudo ufw allow 5432/tcp
 ### Step 4: Create Database
 
 In Supabase Dashboard:
-1. Open SQL Editor
-2. Create tables (if you have SQL script, run it)
-3. Configure RLS (Row Level Security) policies
+1. Open **SQL Editor**
+2. Run the three migration files from the repo **`supabase/migrations/`** in order: `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql` (copy each file's contents and click Run). Details: **[Part 5: Supabase on Your Server and Clean Database](#part-5-supabase-on-your-server-and-clean-database)** (section 5.2).
 
 ### Step 5: Configure Figma OAuth (Embed Kit 2.0)
 
@@ -218,32 +217,32 @@ The plugin is published in Figma Community and can be installed automatically:
    - **Figma Personal Access Token** — token for Figma REST API access (get it in Figma Settings → Account → Personal Access Tokens)
 3. Click "Save Settings"
 
-### Working with Prototypes and Flows
+### Working with Prototypes and Tests
 
-**Creating Prototype in Figma:**
-1. Create a prototype with flows (starting points) in Figma
-2. For each flow, define a final screen — add `[final]` to the frame name
-3. Make sure each flow has its own final screen (they can differ)
+**How it fits together:** Tests (studies) are created in **figma-analytics**: you add blocks (welcome, prototype, questions, etc.), folders, and publish the test. The Figma plugin is used to **import a Figma prototype** into a new or existing test and get a link to send to respondents.
 
-**Importing Prototype in Plugin:**
-1. In Figma, copy Share link (Share → Copy link)
-2. Run ИзиТест plugin
-3. Click "Импортировать прототип" (Import prototype)
-4. Paste Share link
-5. If the file has multiple flows, select the needed one from the dropdown
-6. Click "Использовать выбранный flow" (Use selected flow)
-7. Check that the plugin correctly identified start and final screens
+**Creating a prototype in Figma:**
+1. In Figma, create a prototype with flows (starting points) and transitions between frames
+2. For each flow, mark the final screen — add `[final]` to the frame name
+3. Ensure each flow has its own final screen (they can differ)
 
-**Sending for Testing:**
-1. Enter task description for respondents (up to 250 characters)
-2. Click "Отправить на тест" (Send for testing)
-3. Copy the link for respondents
-4. Respondents will open the link in browser and complete the test
+**Importing the prototype in the plugin:**
+1. In Figma: Share → Copy link (copy the file link)
+2. Run the **ИзиТест** plugin (Plugins → Изи Тест)
+3. Click "Импортировать прототип" (Import prototype) and paste the link
+4. If the file has multiple flows, select the one you need from the dropdown
+5. Click "Использовать выбранный flow" (Use selected flow)
+6. Check that the plugin identified the start and final screens correctly
+
+**Sending for testing:**
+1. Enter the task description for respondents (up to 250 characters)
+2. Choose: **new test**, **existing test**, or **folder** (where to add the prototype)
+3. Click "Отправить на тест" (Send for testing)
+4. Copy the link and share it with respondents — they open it in the browser (viewer) and complete the test
 
 **Important:**
-- Each flow has its own screens and final screen
-- Analytics shows only screens from the selected flow
-- When creating multiple prototypes from the same file with different flows, each will have its own screens in analytics
+- Each flow in Figma has its own screens and final screen; analytics shows only screens from the selected flow
+- The full test builder (blocks, folders, publishing) is in **figma-analytics**; the plugin adds the ability to import a Figma prototype into a test
 
 ---
 
@@ -280,9 +279,9 @@ The plugin is published in Figma Community and can be installed automatically:
    apt update && apt upgrade -y
    ```
 
-3. Install Node.js:
+3. Install Node.js 22 LTS (as in Part 1):
    ```bash
-   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
    apt install -y nodejs
    ```
 
@@ -446,66 +445,114 @@ Certbot will automatically update Nginx configuration.
 
 ---
 
-## Part 5: Supabase on Your Server
+## Part 5: Supabase on Your Server and Clean Database
 
-If you want to host Supabase on the same or separate server:
+Two scenarios: **Supabase Cloud** (free account) and **self-hosted** (your own server). In both cases the database schema is the same — all SQL scripts are in the repo, **with no data**: only tables, policies, RPCs, and Storage.
 
-### Requirements
+---
 
-- Server with 4+ GB RAM
-- 50+ GB free space
-- Ubuntu 20.04+ or similar
-- Docker and Docker Compose
+### 5.1. Where the migrations live
 
-### Installation
+In the repo under **`supabase/migrations/`**:
 
-1. Connect to server
-2. Install Docker (see above)
-3. Download Supabase:
+| File | Contents |
+|------|----------|
+| **001_full_schema.sql** | Extensions (uuid-ossp, pgcrypto), all `public` tables, foreign keys, index on `events.session_id`. |
+| **002_functions_triggers_rls.sql** | Functions and triggers (`set_user_id`, `is_team_member`, etc.), all RPCs (study run, teams, invitations), enable RLS, all table policies. |
+| **003_storage.sql** | Storage buckets `recordings` and `study-images`, policies for `storage.objects`. |
+
+See **`supabase/migrations/README.md`** for more detail.
+
+---
+
+### 5.2. Clean install (Cloud or self-hosted)
+
+#### Step 1: Create a Supabase project
+
+- **Cloud:** Go to [supabase.com](https://supabase.com), create an account and a new project. Wait for it to be ready (2–3 minutes).
+- **Self-hosted:** See section 5.4 below — deploy Supabase on your server first, then use its web UI.
+
+#### Step 2: Apply migrations via SQL Editor
+
+1. In Supabase Dashboard open **SQL Editor**.
+2. Run the three migration files **in order**, each in full:
+   - Open `supabase/migrations/001_full_schema.sql` from the repo → copy contents → paste in SQL Editor → **Run**.
+   - Then do the same for `002_functions_triggers_rls.sql` → **Run**.
+   - Then do the same for `003_storage.sql` → **Run**.
+
+If you get errors like "relation already exists" or "policy already exists", that object was already created (e.g. on a previous run). You can skip that part or remove the already-created objects from the script.
+
+#### Step 3: Get URL and key
+
+In Dashboard go to **Settings → API**. Copy:
+
+- **Project URL** (e.g. `https://xxxxx.supabase.co`)
+- **anon public** key
+
+#### Step 4: Set env vars in the apps
+
+In **figma-analytics** and **figma-viewer** create or edit `.env` at the project root:
+
+```env
+VITE_SUPABASE_URL=https://your-project-url.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
+
+Then you can run the apps (Part 2) and configure Figma OAuth (Part 2, Step 5).
+
+---
+
+### 5.3. What gets created (no data)
+
+- **Tables:** `teams`, `folders`, `studies`, `study_blocks`, `study_shares`, `study_runs`, `study_block_responses`, `prototypes`, `sessions`, `events`, `gaze_points`, `team_members`, `team_invitations`. All with RLS.
+- **RPCs:** `rpc_get_public_study`, `rpc_start_public_run`, `rpc_finish_run`, `rpc_submit_block_response`, `rpc_get_public_results`, `get_team_members_safe`, `get_team_invitations`, `create_team_and_migrate_resources`, `remove_team_member`, `accept_team_invitation`.
+- **Storage:** Buckets `recordings` (session videos from viewer) and `study-images` (images in test blocks in analytics), with access policies.
+
+No data from your current store or tables is included — schema only.
+
+---
+
+### 5.4. Self-hosted Supabase (on your server)
+
+To run Supabase on the same or a separate server:
+
+**Requirements:** Server with 4+ GB RAM, 50+ GB free space, Ubuntu 20.04+ (or similar), Docker and Docker Compose.
+
+**Installation:**
+
+1. Connect to the server via SSH.
+2. Install Docker if needed:
+   ```bash
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sh get-docker.sh
+   ```
+3. Clone and start Supabase:
    ```bash
    git clone --depth 1 https://github.com/supabase/supabase
    cd supabase/docker
+   cp .env.example .env
    ```
-4. Configure `.env` (see above)
+4. In `.env` set:
+   - `POSTGRES_PASSWORD` — database password
+   - `JWT_SECRET` — random string (`openssl rand -base64 32`)
+   - `ANON_KEY` and `SERVICE_ROLE_KEY` — generate or take from Supabase docs
 5. Start:
    ```bash
    docker-compose up -d
    ```
-6. Check status:
-   ```bash
-   docker-compose ps
-   ```
-7. Open: `http://your-ip:8000`
+6. Check: `docker-compose ps`. Open `http://your-ip:8000` in a browser.
+7. Create a project in the web UI, then as in **5.2** open SQL Editor and run `001_full_schema.sql`, `002_functions_triggers_rls.sql`, and `003_storage.sql` in order.
 
-### Configure Domain for Supabase
-
-1. Set up subdomain (e.g., `api.your-domain.com`)
-2. Configure Nginx as reverse proxy:
-   ```nginx
-   server {
-       listen 80;
-       server_name api.your-domain.com;
-
-       location / {
-           proxy_pass http://localhost:8000;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-       }
-   }
-   ```
-3. Get SSL certificate:
-   ```bash
-   certbot --nginx -d api.your-domain.com
-   ```
-
-### Update URL in Projects
-
-In `.env` files, replace URL with yours:
-```env
-VITE_SUPABASE_URL=https://api.your-domain.com
-```
+**Domain and SSL (optional):** Configure a subdomain (e.g. `api.your-domain.com`), Nginx as reverse proxy to port 8000, then `certbot --nginx -d api.your-domain.com`. In the apps' `.env` set `VITE_SUPABASE_URL=https://api.your-domain.com`.
 
 ---
+
+### 5.5. Relation to Part 2 (Step 4 "Create Database")
+
+Step 4 in Part 2 is exactly **applying the repo migrations** (section 5.2 above). You don't need to create anything else by hand: tables, RLS, RPCs, and Storage are defined in `supabase/migrations/`.
+
+---
+
 
 ## Part 6: Verification
 
@@ -548,9 +595,9 @@ Figma plugin: send a prototype to a new or existing test, to a folder or to the 
 
 ### Build Errors
 
-- Make sure Node.js is version 18+
+- Make sure Node.js is 20.19+ or 22.12+ (see Part 1)
 - Delete `node_modules` and `package-lock.json`, then `npm install`
-- Check that all environment variables are filled
+- Check that `figma-viewer` and `figma-analytics` have `.env` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
 
 ### DNS Not Working
 
