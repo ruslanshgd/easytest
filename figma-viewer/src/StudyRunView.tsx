@@ -212,9 +212,6 @@ function ShowTaskTrigger({ onClick, showLabel }: ShowTaskTriggerProps) {
   );
 }
 
-// Все типы блоков
-type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click" | "matrix" | "agreement";
-
 // StudyData interface removed - not used in code
 
 // ============= Компонент "Открытый вопрос" =============
@@ -226,7 +223,7 @@ interface OpenQuestionBlockProps {
   onSkip?: () => Promise<void>;
 }
 
-function OpenQuestionBlock({ question, optional, imageUrl, onSubmit }: OpenQuestionBlockProps) {
+function OpenQuestionBlock({ question, optional, imageUrl: _imageUrl, onSubmit }: OpenQuestionBlockProps) {
   const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startTime] = useState(Date.now());
@@ -312,7 +309,7 @@ interface ChoiceBlockProps {
   onSkip?: () => Promise<void>;
 }
 
-function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
+function ChoiceBlock({ config, onSubmit, onSkip: _onSkip }: ChoiceBlockProps) {
   const [shuffledOptions] = useState(() => {
     const opts = [...config.options];
     if (config.shuffle) {
@@ -574,7 +571,7 @@ interface ScaleBlockProps {
   onSkip?: () => Promise<void>;
 }
 
-function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
+function ScaleBlock({ config, onSubmit, onSkip: _onSkip }: ScaleBlockProps) {
   const [value, setValue] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [startTime] = useState(Date.now());
@@ -2099,7 +2096,7 @@ interface MatrixBlockProps {
   onSkip?: () => Promise<void>;
 }
 
-function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
+function MatrixBlock({ config, onSubmit, onSkip: _onSkip }: MatrixBlockProps) {
   const [submitting, setSubmitting] = useState(false);
   const [startTime] = useState(Date.now());
   const [showImageModal, setShowImageModal] = useState(false);
@@ -2732,7 +2729,7 @@ export default function StudyRunView() {
 
     const checkOneRuleCondition = (cond: any): boolean => {
       if (cond.blockId === currentBlock.id) {
-        const tempAnswer: any = updatedResponses[currentBlock.id];
+        const tempAnswer = (updatedResponses as Record<string, unknown>)[currentBlock.id];
         if (cond.operator === "has_answer") {
           if (tempAnswer == null) return false;
           if (typeof tempAnswer === "string") return tempAnswer.trim().length > 0;

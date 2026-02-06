@@ -2322,6 +2322,7 @@ export default function StudyDetail() {
                       onDragOver={handleDragOver}
                       onDrop={() => handleDrop(block.id)}
                       isDragging={draggedBlockId === block.id}
+                      onSetError={setError}
                     />
                   </div>
                 ))}
@@ -3424,6 +3425,7 @@ interface InlineBlockEditorProps {
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
   isDragging: boolean;
+  onSetError?: (message: string | null) => void;
 }
 
 function InlineBlockEditor({
@@ -3438,7 +3440,8 @@ function InlineBlockEditor({
   onDragStart,
   onDragOver,
   onDrop,
-  isDragging
+  isDragging,
+  onSetError
 }: InlineBlockEditorProps) {
   const typeInfo = BLOCK_TYPES.find(t => t.value === block.type) || BLOCK_TYPES[0];
   const IconComponent = typeInfo.Icon;
@@ -5417,7 +5420,7 @@ function InlineBlockEditor({
                                 updateConfig("customPdfUrl", uploadedUrl);
                               }
                             } else {
-                              setError("Пожалуйста, выберите файл в формате PDF");
+                              onSetError?.("Пожалуйста, выберите файл в формате PDF");
                             }
                           }}
                           disabled={!isEditable}

@@ -1815,7 +1815,7 @@ export default function StudyResultsTab({ studyId, blocks, studyStatus, onBlockD
               recordingModal={recordingModal ?? null}
               setRecordingModal={setRecordingModal ?? (() => {})}
               gazePoints={gazePoints}
-              onDeleteResponses={viewMode === "responses" ? (blockId: string) => {
+              onDeleteResponses={(viewMode as string) === "responses" ? (blockId: string) => {
                 // КРИТИЧНО: В режиме "ответы" передаем runId/sessionId для удаления только конкретного респондента
                 const runIdOrSessionId = selectedSessionId;
                 return deleteBlockResponses(blockId, runIdOrSessionId);
@@ -3206,7 +3206,7 @@ function CardSortingViewComponent({
         return cardTitle;
       }));
       
-      allCardTitles.forEach((cardTitle: string) => {
+      (Array.from(allCardTitles) as string[]).forEach((cardTitle) => {
         if (!sortedCardTitles.has(cardTitle)) {
           unsortedCardMap[cardTitle] = (unsortedCardMap[cardTitle] || 0) + 1;
         }
@@ -4604,7 +4604,7 @@ function PrototypeView({
   // Используем локальное состояние для modalJustOpened
   const handleModalOpen = () => {
     setLocalModalJustOpened(true);
-    handleModalOpen();
+    setModalJustOpened(true);
     setTimeout(() => {
       setLocalModalJustOpened(false);
     }, 100);
@@ -5099,7 +5099,7 @@ function PrototypeView({
             completed: path.status === 'completed',
             aborted: path.status === 'aborted',
             closed: path.status === 'closed',
-            in_progress: path.status === 'in_progress' as const
+            in_progress: (path.status as string) === 'in_progress'
           };
           
           // Создаем ноду на следующей позиции после стартового экрана
@@ -6075,7 +6075,7 @@ function PrototypeView({
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
           onClick={(e) => {
             // Prevent closing if modal was just opened (prevents click event from button bubbling)
-            if (modalJustOpened || localModalJustOpened) {
+            if (localModalJustOpened) {
               e.stopPropagation();
               return;
             }
@@ -6350,7 +6350,7 @@ function AllBlocksReportView({
   // Используем локальное состояние для modalJustOpened
   const handleModalOpen = () => {
     setLocalModalJustOpened(true);
-    handleModalOpen();
+    setModalJustOpened(true);
     setTimeout(() => {
       setLocalModalJustOpened(false);
     }, 100);
@@ -6453,7 +6453,7 @@ function AllBlocksReportView({
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
           onClick={(e) => {
             // Prevent closing if modal was just opened (prevents click event from button bubbling)
-            if (modalJustOpened || localModalJustOpened) {
+            if (localModalJustOpened) {
               e.stopPropagation();
               return;
             }

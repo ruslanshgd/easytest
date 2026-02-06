@@ -57,22 +57,22 @@ export function getBlockDisplayName(block: { type: BlockType; instructions?: str
     case "preference":
     case "matrix": {
       const question = block.config?.question;
-      return (question && typeof question === "string" && question.substring(0, 80)) || config.label;
+      return ((question && typeof question === "string" && question.substring(0, 80)) || config.label) as string;
     }
     case "context":
     case "agreement": {
       const title = block.config?.title;
-      return (title && typeof title === "string" && title.substring(0, 80)) || config.label;
+      return ((title && typeof title === "string" && title.substring(0, 80)) || config.label) as string;
     }
     case "five_seconds":
     case "first_click": {
       const instruction = block.config?.instruction;
-      return (instruction && typeof instruction === "string" && instruction.substring(0, 80)) || config.label;
+      return ((instruction && typeof instruction === "string" && instruction.substring(0, 80)) || config.label) as string;
     }
     case "card_sorting":
     case "tree_testing": {
       const task = block.config?.task;
-      return (task && typeof task === "string" && task.substring(0, 80)) || config.label;
+      return ((task && typeof task === "string" && task.substring(0, 80)) || config.label) as string;
     }
     case "umux_lite":
       return config.label;

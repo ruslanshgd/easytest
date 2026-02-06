@@ -24,7 +24,7 @@ export interface TestViewStore {
   setShowSuccessPopup: (show: boolean) => void;
 }
 
-export const createTestViewStore = (set: any, get: any): TestViewStore => ({
+export const createTestViewStore = (set: any, _get: any): TestViewStore => ({
   // Initial state
   proto: null,
   currentScreen: null,
