@@ -17,9 +17,15 @@ export default function StudyShareTab({ studyId, studyStatus, shareToken, loadin
 
   const getShareUrl = (): string => {
     if (!shareToken) return "";
-    const currentPort = window.location.port;
-    const viewerPort = currentPort === "5174" ? "5173" : currentPort === "5173" ? "5174" : currentPort;
-    const baseUrl = `${window.location.protocol}//${window.location.hostname}:${viewerPort}`.replace(/\/+$/, "");
+    let baseUrl: string;
+    const viewerUrl = import.meta.env.VITE_VIEWER_URL;
+    if (viewerUrl && typeof viewerUrl === "string" && viewerUrl.trim()) {
+      baseUrl = viewerUrl.trim().replace(/\/+$/, "");
+    } else {
+      const currentPort = window.location.port;
+      const viewerPort = currentPort === "5174" ? "5173" : currentPort === "5173" ? "5174" : currentPort;
+      baseUrl = `${window.location.protocol}//${window.location.hostname}:${viewerPort}`.replace(/\/+$/, "");
+    }
     const token = String(shareToken).trim().replace(/^\/+/, "");
     return `${baseUrl}/run/${token}`;
   };
