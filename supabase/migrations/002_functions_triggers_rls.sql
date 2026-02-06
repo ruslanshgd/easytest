@@ -48,6 +48,24 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.handle_team_deletion_prototypes()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Before deleting a team, update prototypes that have user_id = NULL
+  -- Set their user_id to the team's created_by to satisfy prototypes_ownership_check
+  UPDATE public.prototypes
+  SET user_id = OLD.created_by
+  WHERE team_id = OLD.id
+    AND user_id IS NULL
+    AND OLD.created_by IS NOT NULL;
+  
+  RETURN OLD;
+END;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Triggers (set user_id on insert)
 -- ---------------------------------------------------------------------------
@@ -66,6 +84,15 @@ DROP TRIGGER IF EXISTS set_user_id_prototypes ON public.prototypes;
 CREATE TRIGGER set_user_id_prototypes
   BEFORE INSERT ON public.prototypes
   FOR EACH ROW EXECUTE FUNCTION set_user_id();
+
+DROP TRIGGER IF EXISTS handle_team_deletion_prototypes_trigger ON public.teams;
+CREATE TRIGGER handle_team_deletion_prototypes_trigger
+  BEFORE DELETE ON public.teams
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_team_deletion_prototypes();
+
+COMMENT ON FUNCTION public.handle_team_deletion_prototypes() IS 
+  'Automatically assigns user_id to prototypes before team deletion to prevent prototypes_ownership_check violation';
 
 -- ---------------------------------------------------------------------------
 -- RPC: study run lifecycle (callable by anon for public links)

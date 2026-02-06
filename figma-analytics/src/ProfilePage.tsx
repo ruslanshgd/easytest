@@ -341,6 +341,51 @@ export default function ProfilePage() {
     if (!team) return;
     setIsDeletingTeam(true);
     try {
+      // Проверяем прототипы команды перед удалением
+      // Если есть прототипы с user_id=NULL, устанавливаем user_id на created_by команды
+      // Это предотвращает нарушение CHECK constraint prototypes_ownership_check при удалении команды
+      const { data: prototypesData, error: prototypesCheckErr } = await supabase
+        .from("prototypes")
+        .select("id, user_id, team_id")
+        .eq("team_id", team.id);
+
+      if (prototypesCheckErr) {
+        alert(`Ошибка при проверке прототипов: ${prototypesCheckErr.message}`);
+        return;
+      }
+
+      if (prototypesData && prototypesData.length > 0) {
+        const prototypesWithoutUser = prototypesData.filter(p => p.user_id === null);
+        
+        if (prototypesWithoutUser.length > 0) {
+          // Получаем created_by команды
+          const { data: teamData, error: teamDataErr } = await supabase
+            .from("teams")
+            .select("created_by")
+            .eq("id", team.id)
+            .single();
+
+          if (teamDataErr) {
+            alert(`Ошибка при получении данных команды: ${teamDataErr.message}`);
+            return;
+          }
+
+          if (teamData && teamData.created_by) {
+            // Устанавливаем user_id для прототипов без владельца
+            const prototypeIds = prototypesWithoutUser.map(p => p.id);
+            const { error: updatePrototypesErr } = await supabase
+              .from("prototypes")
+              .update({ user_id: teamData.created_by })
+              .in("id", prototypeIds);
+
+            if (updatePrototypesErr) {
+              alert(`Ошибка при обновлении прототипов: ${updatePrototypesErr.message}`);
+              return;
+            }
+          }
+        }
+      }
+
       const { error: invErr } = await supabase
         .from("team_invitations")
         .delete()

@@ -54,7 +54,11 @@ CREATE TABLE IF NOT EXISTS public.prototypes (
   user_id uuid REFERENCES auth.users(id),
   task_description text,
   single_session_only boolean DEFAULT false,
-  team_id uuid REFERENCES public.teams(id)
+  team_id uuid REFERENCES public.teams(id),
+  CONSTRAINT prototypes_ownership_check CHECK (
+    ((user_id IS NOT NULL) AND (team_id IS NULL)) OR 
+    ((user_id IS NULL) AND (team_id IS NOT NULL))
+  )
 );
 
 COMMENT ON COLUMN public.prototypes.task_description IS 'Описание задания для респондента (макс. 250 символов)';
