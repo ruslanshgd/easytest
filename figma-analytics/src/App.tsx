@@ -88,7 +88,7 @@ function App() {
         <Route path="/studies" element={<StudiesList />} />
         <Route path="/studies/:id" element={<StudyDetail />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/invite/*" element={<InvitePage />} />
         <Route path="/token" element={<TokenPage />} />
       </Routes>
     </div>

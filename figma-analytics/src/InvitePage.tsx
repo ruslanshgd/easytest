@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Loader2, CheckCircle2, XCircle, Home } from "lucide-react";
 
 export default function InvitePage() {
-  const { token } = useParams<{ token: string }>();
+  const token = (useParams()["*"] ?? "").replace(/\/$/, "");
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
