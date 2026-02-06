@@ -327,11 +327,11 @@ export const createStudiesStore = (set: any, get: any): StudiesStore => ({
       // Загружаем папки и исследования параллельно для ускорения
       // Если одна часть упадет, другая может загрузиться
       await Promise.allSettled([
-        get().loadFolders().catch(err => {
+        get().loadFolders().catch((err: unknown) => {
           console.warn("Failed to load folders:", err);
           // Не критично, продолжаем
         }),
-        get().loadStudies(folderId).catch(err => {
+        get().loadStudies(folderId).catch((err: unknown) => {
           console.error("Failed to load studies:", err);
           // Эта ошибка уже обрабатывается в loadStudies
         })

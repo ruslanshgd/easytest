@@ -33,6 +33,6 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 if (import.meta.env.MODE !== "test") {
-  console.log("SupabaseClient: Client created successfully", { supabaseUrl: supabase.supabaseUrl });
+  console.log("SupabaseClient: Client created successfully", { supabaseUrl: SUPABASE_URL });
 }
 

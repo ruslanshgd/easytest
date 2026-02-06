@@ -3202,11 +3202,11 @@ function CardSortingViewComponent({
       // Определяем неотсортированные карточки
       // Сравниваем title карточек из конфига с отсортированными title
       const allCardTitles = new Set(cards.map((c: any) => {
-        const cardTitle = typeof c === "string" ? c : (c.title || c.value || c.id || String(c));
+        const cardTitle: string = typeof c === "string" ? c : (c.title || c.value || c.id || String(c));
         return cardTitle;
       }));
       
-      allCardTitles.forEach(cardTitle => {
+      allCardTitles.forEach((cardTitle: string) => {
         if (!sortedCardTitles.has(cardTitle)) {
           unsortedCardMap[cardTitle] = (unsortedCardMap[cardTitle] || 0) + 1;
         }
@@ -4599,6 +4599,21 @@ function PrototypeView({
   responses = [],
   onDeleteResponses
 }: PrototypeViewProps) {
+  const [localModalJustOpened, setLocalModalJustOpened] = useState(false);
+  
+  // Используем локальное состояние для modalJustOpened
+  const handleModalOpen = () => {
+    setLocalModalJustOpened(true);
+    handleModalOpen();
+    setTimeout(() => {
+      setLocalModalJustOpened(false);
+    }, 100);
+  };
+  
+  const handleModalClose = () => {
+    setLocalModalJustOpened(false);
+    setModalJustOpened(false);
+  };
   const protoId = block.prototype_id;
   const proto = protoId ? prototypes[protoId] : null;
   const taskDescription = block.config?.task || block.instructions || "Задание";
@@ -5056,7 +5071,7 @@ function PrototypeView({
       
       // Если у респондента нет экранов, но он сдался/закрыл, используем общий стартовый экран
       let uniqueScreens = removeDuplicates(path.screens);
-      if (uniqueScreens.length === 0 && commonStartScreen && path.status !== 'in_progress') {
+      if (uniqueScreens.length === 0 && commonStartScreen && path.status !== ('in_progress' as const)) {
         uniqueScreens = [commonStartScreen];
         // Обновляем finalScreen для этого пути
         path.finalScreen = commonStartScreen;
@@ -5074,7 +5089,7 @@ function PrototypeView({
       
       // Если screensToRender пустой, но есть общий стартовый экран и респондент сдался на нем,
       // создаем новую ноду на следующей позиции с индикатором статуса и соединяем с общим стартовым экраном
-      if (screensToRender.length === 0 && commonStartScreen && uniqueScreens[0] === commonStartScreen && path.status !== 'in_progress') {
+      if (screensToRender.length === 0 && commonStartScreen && uniqueScreens[0] === commonStartScreen && path.status !== ('in_progress' as const)) {
         const startScreen = screens.find(s => s.id === commonStartScreen);
         if (startScreen) {
           const nodeId = `${path.sessionId}-${commonStartScreen}-final`;
@@ -5084,7 +5099,7 @@ function PrototypeView({
             completed: path.status === 'completed',
             aborted: path.status === 'aborted',
             closed: path.status === 'closed',
-            in_progress: path.status === 'in_progress'
+            in_progress: path.status === 'in_progress' as const
           };
           
           // Создаем ноду на следующей позиции после стартового экрана
@@ -5842,7 +5857,7 @@ function PrototypeView({
                                         screenIndex: screenIdx + 1,
                                         totalScreens: screenIds.length
                                       };
-                                      setModalJustOpened(true);
+                                      handleModalOpen();
                                       setSelectedRespondentScreen(screenData);
                                     }}
                                     className="relative border-0 bg-transparent p-0 cursor-pointer"
@@ -6060,12 +6075,12 @@ function PrototypeView({
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
           onClick={(e) => {
             // Prevent closing if modal was just opened (prevents click event from button bubbling)
-            if (modalJustOpened) {
+            if (modalJustOpened || localModalJustOpened) {
               e.stopPropagation();
               return;
             }
             setSelectedRespondentScreen(null);
-            setModalJustOpened(false);
+            handleModalClose();
           }}
         >
           <div
@@ -6079,7 +6094,7 @@ function PrototypeView({
               <button
                 onClick={() => {
                   setSelectedRespondentScreen(null);
-                  setModalJustOpened(false);
+                  handleModalClose();
                 }}
                 className="p-2 hover:bg-muted rounded"
               >
@@ -6327,9 +6342,24 @@ function AllBlocksReportView({
     totalScreens: number;
   } | null>(null);
   const [modalJustOpened, setModalJustOpened] = useState(false);
+  const [localModalJustOpened, setLocalModalJustOpened] = useState(false);
   const [respondentHeatmapView, setRespondentHeatmapView] = useState<HeatmapView>("heatmap");
   const [showClickOrder, setShowClickOrder] = useState(false);
   const [recordingModal, setRecordingModal] = useState<RecordingModalData | null>(null);
+
+  // Используем локальное состояние для modalJustOpened
+  const handleModalOpen = () => {
+    setLocalModalJustOpened(true);
+    handleModalOpen();
+    setTimeout(() => {
+      setLocalModalJustOpened(false);
+    }, 100);
+  };
+  
+  const handleModalClose = () => {
+    setLocalModalJustOpened(false);
+    setModalJustOpened(false);
+  };
 
   // Reset modalJustOpened flag after a short delay to prevent immediate backdrop clicks
   useEffect(() => {
@@ -6423,12 +6453,12 @@ function AllBlocksReportView({
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
           onClick={(e) => {
             // Prevent closing if modal was just opened (prevents click event from button bubbling)
-            if (modalJustOpened) {
+            if (modalJustOpened || localModalJustOpened) {
               e.stopPropagation();
               return;
             }
             setSelectedRespondentScreen(null);
-            setModalJustOpened(false);
+            handleModalClose();
           }}
         >
           <div
@@ -6442,7 +6472,7 @@ function AllBlocksReportView({
               <button
                 onClick={() => {
                   setSelectedRespondentScreen(null);
-                  setModalJustOpened(false);
+                  handleModalClose();
                 }}
                 className="p-2 hover:bg-muted rounded"
               >

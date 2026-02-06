@@ -1,7 +1,6 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "./supabaseClient";
-import { v4 as uuidv4 } from "uuid";
 import TestView from "./TestView.tsx";
 import { useViewerStore } from "./store";
 import { ArrowRight, ChevronLeft, Trash2 } from "lucide-react";
@@ -216,21 +215,7 @@ function ShowTaskTrigger({ onClick, showLabel }: ShowTaskTriggerProps) {
 // Все типы блоков
 type BlockType = "prototype" | "open_question" | "umux_lite" | "choice" | "context" | "scale" | "preference" | "five_seconds" | "card_sorting" | "tree_testing" | "first_click" | "matrix" | "agreement";
 
-interface StudyData {
-  study: {
-    id: string;
-    title: string;
-    status: string;
-  };
-  blocks: Array<{
-    id: string;
-    type: BlockType;
-    order_index: number;
-    prototype_id: string | null;
-    instructions: string | null;
-    config: any;
-  }>;
-}
+// StudyData interface removed - not used in code
 
 // ============= Компонент "Открытый вопрос" =============
 interface OpenQuestionBlockProps {
@@ -241,7 +226,7 @@ interface OpenQuestionBlockProps {
   onSkip?: () => Promise<void>;
 }
 
-function OpenQuestionBlock({ question, optional, imageUrl, onSubmit, onSkip }: OpenQuestionBlockProps) {
+function OpenQuestionBlock({ question, optional, imageUrl, onSubmit }: OpenQuestionBlockProps) {
   const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startTime] = useState(Date.now());
@@ -401,15 +386,7 @@ function ChoiceBlock({ config, onSubmit, onSkip }: ChoiceBlockProps) {
     }
   };
 
-  const handleSkip = async () => {
-    if (!config.optional || !onSkip) return;
-    setSubmitting(true);
-    try {
-      await onSkip();
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // handleSkip removed - onSkip is not used
 
   const hasAnswer = selected.length > 0 || (showOther && otherText.trim()) || noneSelected;
 
@@ -616,15 +593,7 @@ function ScaleBlock({ config, onSubmit, onSkip }: ScaleBlockProps) {
     }
   };
 
-  const handleSkip = async () => {
-    if (!config.optional || !onSkip) return;
-    setSubmitting(true);
-    try {
-      await onSkip();
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // handleSkip removed - onSkip is not used
 
   const renderNumeric = () => {
     const min = config.min ?? 1;
@@ -909,7 +878,7 @@ function PreferenceBlock({ config, onSubmit }: PreferenceBlockProps) {
           <p style={{ margin: "0 0 24px 0", color: "#999", fontSize: "14px", textAlign: "center" }}>Нажмите на вариант для увеличения и выбора</p>
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(shuffledImages.length, 4)}, 1fr)`, gap: 20 }}>
             {shuffledImages.map((img, i) => (
-              <button key={`preference-${i}-${img.url || img.id || i}`} onClick={() => handleOpenModalAll(i)} disabled={submitting} style={{ padding: 0, border: selected === i ? "3px solid #007AFF" : "2px solid #ddd", borderRadius: 12, overflow: "hidden", cursor: submitting ? "not-allowed" : "pointer", background: selected === i ? "#e3f2fd" : "white", transition: "all 0.2s" }}>
+              <button key={`preference-${i}-${img.url || i}`} onClick={() => handleOpenModalAll(i)} disabled={submitting} style={{ padding: 0, border: selected === i ? "3px solid #007AFF" : "2px solid #ddd", borderRadius: 12, overflow: "hidden", cursor: submitting ? "not-allowed" : "pointer", background: selected === i ? "#e3f2fd" : "white", transition: "all 0.2s" }}>
                 <img src={img.url} alt={`Вариант ${i + 1}`} style={{ width: "100%", height: 250, objectFit: "cover" }} onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='250'%3E%3Crect fill='%23f0f0f0' width='200' height='250'/%3E%3Ctext fill='%23999' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EНет изображения%3C/text%3E%3C/svg%3E"; }} />
                 <div style={{ padding: 16, fontWeight: 500, fontSize: 15, textAlign: "center" }}>Вариант {String.fromCharCode(65 + i)}</div>
               </button>
@@ -1056,10 +1025,10 @@ function FirstClickBlock({ config, onSubmit }: FirstClickBlockProps) {
     setShowSidebarOverlay(false);
     setShowLabelOnTrigger(true);
     if (labelTimeoutRef.current) clearTimeout(labelTimeoutRef.current);
-    labelTimeoutRef.current = window.setTimeout(() => {
+    labelTimeoutRef.current = setTimeout(() => {
       setShowLabelOnTrigger(false);
       labelTimeoutRef.current = null;
-    }, SHOW_TASK_LABEL_DURATION_MS);
+    }, SHOW_TASK_LABEL_DURATION_MS) as ReturnType<typeof setTimeout>;
   };
 
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
@@ -2205,15 +2174,7 @@ function MatrixBlock({ config, onSubmit, onSkip }: MatrixBlockProps) {
     }
   };
   
-  const handleSkip = async () => {
-    if (!config.optional || !onSkip) return;
-    setSubmitting(true);
-    try {
-      await onSkip();
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // handleSkip removed - onSkip is not used
   
   return (
     <>
@@ -2312,7 +2273,7 @@ interface AgreementBlockProps {
   onSkip?: () => Promise<void>;
 }
 
-function AgreementBlock({ config, onSubmit, onSkip }: AgreementBlockProps) {
+function AgreementBlock({ config, onSubmit }: AgreementBlockProps) {
   const [accepted, setAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2597,12 +2558,9 @@ export default function StudyRunView() {
     studyRunError,
     currentBlockSessionId,
     finished,
-    setStudyData,
-    setRunId,
     setCurrentBlockIndex,
     setStudyRunLoading,
     setStudyRunError,
-    setCurrentBlockSessionId,
     setFinished,
     loadStudyAndStartRun,
     createSessionForBlock,
@@ -2774,7 +2732,7 @@ export default function StudyRunView() {
 
     const checkOneRuleCondition = (cond: any): boolean => {
       if (cond.blockId === currentBlock.id) {
-        const tempAnswer = updatedResponses[currentBlock.id];
+        const tempAnswer: any = updatedResponses[currentBlock.id];
         if (cond.operator === "has_answer") {
           if (tempAnswer == null) return false;
           if (typeof tempAnswer === "string") return tempAnswer.trim().length > 0;
@@ -3489,8 +3447,7 @@ function PrototypeBlockWrapper({
     />
   );
 
-  const SIDEBAR_Z = 9990;
-  const OVERLAY_Z = 9989;
+  // Z-index constants removed - not used
 
   const showTaskSidebar = phase === "intro" || (phase === "active" && sidebarOpen);
 

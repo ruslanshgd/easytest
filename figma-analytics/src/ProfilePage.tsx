@@ -136,7 +136,15 @@ export default function ProfilePage() {
       if (error || !row) return;
 
       // RLS on teams can block the join for members — then teams(*) is null; fetch team by id
-      let teamData: Team | null = (row.teams as Team) || null;
+      let teamData: Team | null = null;
+      if (row.teams) {
+        // teams(*) может быть объектом или массивом
+        if (Array.isArray(row.teams)) {
+          teamData = row.teams[0] as Team || null;
+        } else {
+          teamData = row.teams as Team;
+        }
+      }
       if (!teamData && row.team_id) {
         const { data: t, error: te } = await supabase
           .from("teams")

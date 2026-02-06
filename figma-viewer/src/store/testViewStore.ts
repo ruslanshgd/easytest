@@ -1,4 +1,3 @@
-import type { ViewerStore } from './index';
 import type { Proto } from '../types/proto';
 
 export interface TestViewStore {

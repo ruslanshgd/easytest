@@ -1,4 +1,3 @@
-import type { ViewerStore } from './index';
 import type { StudyBlock } from './types';
 import { supabase } from '../supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
@@ -56,7 +55,7 @@ export const createStudyRunViewStore = (set: any, get: any): StudyRunViewStore =
   // Data loading
   loadStudyAndStartRun: async (token: string) => {
     const normalizedToken = (token || "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
-    console.log("StudyRunViewStore: loadStudyAndStartRun called", { token: normalizedToken, supabaseUrl: supabase.supabaseUrl });
+    console.log("StudyRunViewStore: loadStudyAndStartRun called", { token: normalizedToken, supabaseUrl: import.meta.env.VITE_SUPABASE_URL });
     set({ studyRunLoading: true, studyRunError: null });
     
     try {

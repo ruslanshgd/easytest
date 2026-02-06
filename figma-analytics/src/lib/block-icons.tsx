@@ -55,17 +55,25 @@ export function getBlockDisplayName(block: { type: BlockType; instructions?: str
     case "choice":
     case "scale":
     case "preference":
-    case "matrix":
-      return (block.config?.question && String(block.config.question).substring(0, 80)) || config.label;
+    case "matrix": {
+      const question = block.config?.question;
+      return (question && typeof question === "string" && question.substring(0, 80)) || config.label;
+    }
     case "context":
-    case "agreement":
-      return (block.config?.title && String(block.config.title).substring(0, 80)) || config.label;
+    case "agreement": {
+      const title = block.config?.title;
+      return (title && typeof title === "string" && title.substring(0, 80)) || config.label;
+    }
     case "five_seconds":
-    case "first_click":
-      return (block.config?.instruction && String(block.config.instruction).substring(0, 80)) || config.label;
+    case "first_click": {
+      const instruction = block.config?.instruction;
+      return (instruction && typeof instruction === "string" && instruction.substring(0, 80)) || config.label;
+    }
     case "card_sorting":
-    case "tree_testing":
-      return (block.config?.task && String(block.config.task).substring(0, 80)) || config.label;
+    case "tree_testing": {
+      const task = block.config?.task;
+      return (task && typeof task === "string" && task.substring(0, 80)) || config.label;
+    }
     case "umux_lite":
       return config.label;
     default:

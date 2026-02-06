@@ -12,7 +12,7 @@ export type ViewerStore = StudyRunViewStore & TestViewStore;
 // Глобальный store приложения
 export const useViewerStore = create<ViewerStore>()(
   devtools(
-    (set, get, api) => ({
+    (set, get) => ({
       ...createStudyRunViewStore(set, get),
       ...createTestViewStore(set, get),
     }),

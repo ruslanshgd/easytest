@@ -286,7 +286,7 @@ export default function TestView({
   const INACTIVITY_CHECK_INTERVAL_MS = 30000; // 30s между проверками
   const lastActivityAtRef = useRef<number>(Date.now());
   const inactivityIntervalRef = useRef<number | null>(null);
-  const scrollTimeoutRef = useRef<number | null>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gazeBufferRef = useRef<GazeSample[]>([]);
   const gazeFlushIntervalRef = useRef<number | null>(null);
 
@@ -298,7 +298,7 @@ export default function TestView({
 
   // Превью камеры в отдельном окне, чтобы не попадать в запись экрана (getDisplayMedia захватывает только вкладку)
   const cameraPreviewPopupRef = useRef<Window | null>(null);
-  const cameraPreviewVideoRef = useRef<HTMLVideoElement>(null);
+  // cameraPreviewVideoRef removed - not used
 
   cameraStreamRef.current = cameraStream;
   screenStreamRef.current = screenStream;
@@ -1607,94 +1607,19 @@ export default function TestView({
           setTimeout(() => {
             // КРИТИЧНО: Получаем актуальное значение currentScreen через функциональное обновление
             // Это необходимо, так как currentScreen может быть устаревшим из-за замыкания
-            setCurrentScreen(current => {
-              if (previousScreen && proto && hasScreenOrScene(proto, previousScreen)) {
-                // Проверяем, не обновился ли currentScreen через другой механизм
-                // Если нет, обновляем вручную
-                if (current !== previousScreen) {
-                  console.log("TestView: BACK action (overlayAction) - updating currentScreen via fallback", {
-                    hotspotId: h.id,
-                    currentScreen: current,
-                    previousScreen: previousScreen,
-                    willUpdate: true
-                  });
-                  
-                  // Удаляем предыдущий экран из истории (так как мы на него вернулись)
-                  screenHistoryRef.current.pop();
-                  // ИСПРАВЛЕНИЕ: Также обновляем currentScreenRef сразу для следующих проверок
-                  currentScreenRef.current = previousScreen;
-                  
-                  // Записываем событие screen_load
-                  recordEvent("screen_load", previousScreen, null);
-                  
-                  // КРИТИЧНО: Проверяем, не является ли предыдущий экран финальным
-                  // ВАЖНО: Проверяем завершение теста даже после BACK action, если мы на финальном экране
-                  const previousScreenOrScene = getScreenOrScene(proto, previousScreen);
-                  const previousScreenName = previousScreenOrScene ? ("name" in previousScreenOrScene ? previousScreenOrScene.name : null) : null;
-                  const isPreviousScreenFinal = previousScreen === proto.end || 
-                    (previousScreenName && /\[final\]/i.test(previousScreenName));
-                  
-                  if (isPreviousScreenFinal && !testCompleted.current) {
-                    console.log("TestView: 🎯 Previous screen is final screen after BACK action (overlayAction fallback)!", {
-                      previousScreen,
-                      protoEnd: proto.end,
-                      previousScreenName,
-                      note: "Will trigger completion check"
-                    });
-                    
-                    // КРИТИЧНО: Явно проверяем завершение теста здесь, так как useEffect может не сработать сразу
-                    // Это необходимо для случаев, когда пользователь возвращается на финальный экран через BACK action
-                    const isEndDifferentFromStart = proto.end !== proto.start;
-                    if (isEndDifferentFromStart) {
-                      console.log("TestView: 🎉 Triggering completion via BACK action (overlayAction) fallback!", {
-                        previousScreen,
-                        protoEnd: proto.end,
-                        protoStart: proto.start,
-                        isEndDifferentFromStart,
-                        testCompletedBefore: testCompleted.current
-                      });
-                      
-                      testCompleted.current = true;
-                      const currentSessionId = actualSessionId || propSessionId;
-                      if (currentSessionId) {
-                        recordEvent("completed", previousScreen);
-                        setTimeout(() => {
-                          if (testCompleted.current) {
-                            console.log("TestView: Setting showSuccessPopup to true (via BACK action overlayAction fallback)");
-                            setShowSuccessPopup(true);
-                            // НОВОЕ: Вызываем onComplete callback если передан (для StudyView)
-                            if (onComplete) {
-                              console.log("TestView: Calling onComplete callback");
-                              onComplete();
-                            }
-                          }
-                        }, 1000);
-                      } else {
-                        console.error("TestView: Cannot show success popup - sessionId is null", {
-                          actualSessionId,
-                          propSessionId,
-                          previousScreen
-                        });
-                      }
-                    }
-                  }
-                  
-                  // Обновляем currentScreen на предыдущий экран
-                  return previousScreen;
-                } else {
-                  // currentScreen уже обновлен через другой механизм
-                  console.log("TestView: BACK action (overlayAction) - currentScreen already updated", {
-                    hotspotId: h.id,
-                    currentScreen: current,
-                    previousScreen: previousScreen
-                  });
-                  // Удаляем предыдущий экран из истории (так как мы на него вернулись)
-                  screenHistoryRef.current.pop();
-                  return current; // Не изменяем currentScreen
-                }
+            const currentScreenValue = currentScreen;
+            if (previousScreen && proto && hasScreenOrScene(proto, previousScreen)) {
+              // Проверяем, не обновился ли currentScreen через другой механизм
+              // Если нет, обновляем вручную
+              if (currentScreenValue !== previousScreen) {
+                setCurrentScreen(previousScreen);
               }
-              return current; // Не изменяем currentScreen, если previousScreen не найден
-            });
+            } else {
+              // Fallback: используем start screen
+              if (proto?.start) {
+                setCurrentScreen(proto.start);
+              }
+            }
           }, 100); // Уменьшено с 500ms до 100ms - PRESENTED_NODE_CHANGED не приходит
         } else {
           console.warn("TestView: BACK action detected but no screen history", {
@@ -2507,7 +2432,7 @@ export default function TestView({
       // 'D' или 'd' для toggle debug overlay
       if (e.key === 'd' || e.key === 'D') {
         e.preventDefault();
-        setDebugOverlayEnabled(prev => !prev);
+        setDebugOverlayEnabled(!debugOverlayEnabled);
       }
     };
     
@@ -2571,7 +2496,7 @@ export default function TestView({
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: recordScreen,
         audio: false,
-      } as DisplayMediaStreamConstraints);
+      } as MediaStreamConstraints);
       
       // КРИТИЧНО: Добавляем обработчик события ended для треков экрана
       // Когда пользователь останавливает запись экрана через браузер, трек завершается

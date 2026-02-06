@@ -947,7 +947,9 @@ export default function StudyDetail() {
   // Синхронизация editedTitle с study.title
   useEffect(() => {
     if (study) {
-      setEditedTitle(study.title);
+      if (study) {
+        setEditedTitle(study.title);
+      }
     }
   }, [study?.title]);
 
@@ -1046,7 +1048,7 @@ export default function StudyDetail() {
 
     const { data: newStudy, error: createError } = await supabase
       .from("studies")
-      .insert([{ title: `${study.title} (копия)`, user_id: user.id, status: "draft" }])
+      .insert([{ title: `${study?.title || "Тест"} (копия)`, user_id: user.id, status: "draft" }])
       .select()
       .single();
 
@@ -1073,7 +1075,7 @@ export default function StudyDetail() {
 
   const handleDelete = async () => {
     if (!study || !studyId) return;
-    if (!confirm(`Удалить тест "${study.title}"? Все блоки, прохождения и ответы будут удалены.`)) return;
+    if (!confirm(`Удалить тест "${study?.title || "Тест"}"? Все блоки, прохождения и ответы будут удалены.`)) return;
 
     const { error: deleteError } = await supabase
       .from("studies")
@@ -1896,10 +1898,11 @@ export default function StudyDetail() {
     published: { label: "Опубликован", variant: "success" as const },
     stopped: { label: "Остановлен", variant: "secondary" as const }
   };
-  const status = statusConfig[study.status];
+  const status = study ? statusConfig[study.status] : statusConfig.draft;
 
   // Сохранение нового названия (инлайн редактирование)
   const saveTitle = async () => {
+    if (!study) return;
     const newTitle = editedTitle.trim();
     if (newTitle && newTitle !== study.title) {
       // 1. Оптимистично обновляем локальный state
@@ -1917,7 +1920,11 @@ export default function StudyDetail() {
         decrementSaving();
       }
     } else {
-      setEditedTitle(study.title);
+      if (study) {
+        if (study) {
+        setEditedTitle(study.title);
+      }
+      }
       setIsEditingTitle(false);
     }
   };
@@ -1977,7 +1984,11 @@ export default function StudyDetail() {
                   onKeyDown={e => {
                     if (e.key === "Enter") saveTitle();
                     if (e.key === "Escape") {
-                      setEditedTitle(study.title);
+                      if (study) {
+                        if (study) {
+        setEditedTitle(study.title);
+      }
+                      }
                       setIsEditingTitle(false);
                     }
                   }}
@@ -1987,11 +1998,15 @@ export default function StudyDetail() {
                 <h1 
                   className="text-[15px] font-medium leading-6 cursor-pointer hover:bg-muted px-2 py-1 rounded transition-colors"
                   onClick={() => {
-                    setEditedTitle(study.title);
-                    setIsEditingTitle(true);
+                    if (study) {
+                      if (study) {
+        setEditedTitle(study.title);
+      }
+                      setIsEditingTitle(true);
+                    }
                   }}
                 >
-                  {study.title}
+                  {study?.title || ""}
                 </h1>
               )}
               <TooltipProvider>
@@ -2000,13 +2015,13 @@ export default function StudyDetail() {
                     <div 
                       className={cn(
                         "w-2 h-2 rounded-full flex-shrink-0",
-                        study.status === "published" 
+                        study?.status === "published" 
                           ? (hasUnpublishedChanges ? "bg-orange-500 cursor-help" : "bg-green-500")
                           : "bg-gray-400"
                       )}
                     />
                   </TooltipTrigger>
-                  {study.status === "published" && hasUnpublishedChanges && (
+                  {study?.status === "published" && hasUnpublishedChanges && (
                     <TooltipContent>
                       <p>В вашем тесте есть неопубликованные изменения</p>
                     </TooltipContent>
@@ -2048,13 +2063,13 @@ export default function StudyDetail() {
             <Button variant="ghost" size="sm" onClick={handleDuplicate}>
               <Copy className="h-4 w-4" />
             </Button>
-            {(study.status === "draft" || study.status === "stopped") && (
+            {(study?.status === "draft" || study?.status === "stopped") && (
               <Button size="sm" onClick={handlePublishClick}>
                 <Rocket className="h-4 w-4 mr-2" />
                 Опубликовать
               </Button>
             )}
-            {study.status === "published" && (
+            {study?.status === "published" && (
               <Button variant="destructive" size="sm" onClick={handleStopClick}>
                 <StopCircle className="h-4 w-4 mr-2" />
                 Остановить
@@ -2323,7 +2338,7 @@ export default function StudyDetail() {
             )}
             {activeTab === "share" && (
               <div className="max-w-3xl mx-auto pt-6">
-                <StudyShareTab studyId={studyId || ""} studyStatus={study.status} shareToken={study.share_token} />
+                <StudyShareTab studyId={studyId || ""} studyStatus={study?.status || "draft"} shareToken={study?.share_token || ""} />
               </div>
             )}
           </div>
@@ -4775,14 +4790,14 @@ function InlineBlockEditor({
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <Checkbox 
                           checked={cardsShowImages}
-                          onCheckedChange={setCardsShowImages}
+                          onCheckedChange={(checked) => setCardsShowImages(checked === true)}
                         />
                         <span>Добавить изображения</span>
                       </label>
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <Checkbox 
                           checked={cardsShowDescriptions}
-                          onCheckedChange={setCardsShowDescriptions}
+                          onCheckedChange={(checked) => setCardsShowDescriptions(checked === true)}
                         />
                         <span>Добавить описания</span>
                       </label>
