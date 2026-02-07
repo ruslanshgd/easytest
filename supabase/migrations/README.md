@@ -11,7 +11,7 @@
 3. **003_storage.sql** — ведра Storage (`recordings`, `study-images`), RLS на `storage.buckets` и политики для `storage.objects`.
 4. **004_send_email_hook.sql** — Send Email Hook для Auth: отправка писем через HTTP API (Resend/Brevo) вместо SMTP. Требует pg_net и настройки GoTrue в docker-compose.
 5. **005_grant_api_access.sql** — GRANT для ролей `anon` и `authenticated`; без них Data API не обращается к таблицам.
-6. **006_cascade_delete_studies.sql** — каскадное удаление при удалении теста (study): блоки, прогоны, ответы и т.д.
+6. **006_cascade_delete_studies.sql** — каскадное удаление при удалении теста (study) или сессии (session): блоки, прогоны, ответы, events, gaze_points и т.д.
 
 ## Как применить
 

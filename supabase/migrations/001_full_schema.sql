@@ -159,7 +159,7 @@ COMMENT ON COLUMN public.sessions.recording_url IS 'URL of the uploaded video re
 -- Events
 CREATE TABLE IF NOT EXISTS public.events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id uuid REFERENCES public.sessions(id),
+  session_id uuid REFERENCES public.sessions(id) ON DELETE CASCADE,
   event_type text,
   screen_id text,
   hotspot_id text,
@@ -210,7 +210,7 @@ COMMENT ON COLUMN public.events.study_id IS 'Link to study (nullable, для leg
 CREATE TABLE IF NOT EXISTS public.gaze_points (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now(),
-  session_id uuid NOT NULL REFERENCES public.sessions(id),
+  session_id uuid NOT NULL REFERENCES public.sessions(id) ON DELETE CASCADE,
   run_id uuid NOT NULL REFERENCES public.study_runs(id),
   study_id uuid NOT NULL REFERENCES public.studies(id),
   block_id uuid NOT NULL REFERENCES public.study_blocks(id),

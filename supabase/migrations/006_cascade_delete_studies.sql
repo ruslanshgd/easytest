@@ -1,8 +1,9 @@
 -- =============================================================================
 -- 006_cascade_delete_studies.sql
 --
--- Каскадное удаление: при удалении теста (study) удаляются связанные блоки,
--- прогоны, ответы и т.д. Без этого удаление теста даёт нарушение FK.
+-- Каскадное удаление: при удалении теста (study) или сессии (session)
+-- удаляются связанные блоки, прогоны, ответы, events, gaze_points и т.д.
+-- Без этого удаление теста или сессии даёт нарушение FK (409 Conflict).
 -- =============================================================================
 
 ALTER TABLE public.study_blocks
@@ -74,3 +75,17 @@ ALTER TABLE public.gaze_points
   DROP CONSTRAINT IF EXISTS gaze_points_block_id_fkey,
   ADD CONSTRAINT gaze_points_block_id_fkey
     FOREIGN KEY (block_id) REFERENCES public.study_blocks(id) ON DELETE CASCADE;
+
+-- events.session_id → sessions(id) ON DELETE CASCADE
+-- Без этого удаление сессии (DELETE FROM sessions) даёт 409 Conflict,
+-- потому что events ссылаются на sessions(id).
+ALTER TABLE public.events
+  DROP CONSTRAINT IF EXISTS events_session_id_fkey,
+  ADD CONSTRAINT events_session_id_fkey
+    FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
+
+-- gaze_points.session_id → sessions(id) ON DELETE CASCADE
+ALTER TABLE public.gaze_points
+  DROP CONSTRAINT IF EXISTS gaze_points_session_id_fkey,
+  ADD CONSTRAINT gaze_points_session_id_fkey
+    FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;

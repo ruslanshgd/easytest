@@ -1206,6 +1206,25 @@ export default function StudyResultsTab({ studyId, blocks, studyStatus, onBlockD
     if (!runId) return;
     setDeletingRespondent(true);
     try {
+      // 1. Удаляем gaze_points (ссылаются на sessions через session_id)
+      const { error: gazeError } = await supabase
+        .from("gaze_points")
+        .delete()
+        .eq("run_id", runId);
+      if (gazeError) {
+        console.error("Error deleting gaze_points:", gazeError);
+        // Не блокируем — gaze_points может не быть
+      }
+      // 2. Удаляем events (ссылаются на sessions через session_id)
+      const { error: eventsError } = await supabase
+        .from("events")
+        .delete()
+        .eq("run_id", runId);
+      if (eventsError) {
+        console.error("Error deleting events:", eventsError);
+        // Не блокируем — events может не быть
+      }
+      // 3. Удаляем sessions (теперь безопасно — дочерние записи удалены)
       const { error: sessionsError } = await supabase
         .from("sessions")
         .delete()
@@ -1216,6 +1235,7 @@ export default function StudyResultsTab({ studyId, blocks, studyStatus, onBlockD
         setDeletingRespondent(false);
         return;
       }
+      // 4. Удаляем ответы на блоки
       const { error: responsesError } = await supabase
         .from("study_block_responses")
         .delete()
@@ -1226,6 +1246,7 @@ export default function StudyResultsTab({ studyId, blocks, studyStatus, onBlockD
         setDeletingRespondent(false);
         return;
       }
+      // 5. Удаляем сам run
       const { error: runsError } = await supabase
         .from("study_runs")
         .delete()
@@ -1265,6 +1286,23 @@ export default function StudyResultsTab({ studyId, blocks, studyStatus, onBlockD
     const { blockId, targetRunIds } = payload;
     setDeleteSessionsDialog(null);
     try {
+      // 1. Удаляем gaze_points (ссылаются на sessions через session_id)
+      const { error: gazeError } = await supabase
+        .from("gaze_points")
+        .delete()
+        .eq("block_id", blockId)
+        .in("run_id", targetRunIds);
+      if (gazeError) console.error("Error deleting gaze_points:", gazeError);
+
+      // 2. Удаляем events (ссылаются на sessions через session_id)
+      const { error: eventsError } = await supabase
+        .from("events")
+        .delete()
+        .eq("block_id", blockId)
+        .in("run_id", targetRunIds);
+      if (eventsError) console.error("Error deleting events:", eventsError);
+
+      // 3. Удаляем sessions (теперь безопасно)
       const { error: deleteSessionsError } = await supabase
         .from("sessions")
         .delete()
