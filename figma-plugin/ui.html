@@ -1707,6 +1707,9 @@
           } else if (msg.type === "FIGMA_FILE_FETCH_ERROR") {
             window.removeEventListener("message", messageHandler);
             reject(new Error(msg.error));
+          } else if (msg.type === "FIGMA_FILE_FETCH_STATUS") {
+            // Промежуточный статус (retry при rate limit) — показываем пользователю
+            showImportStatus(msg.message, "loading");
           }
         };
         
@@ -2098,101 +2101,54 @@
           };
         });
         
-        // FALLBACK: Если flows не найдены через Plugin API, но есть nodeId в URL, добавляем его
+        // FALLBACK: Если flows не найдены через Plugin API, но есть nodeId в URL,
+        // ищем фрейм через Plugin API (без REST API — обходим rate limit)
         if (flows.length === 0 && parsed.nodeId) {
-          console.log("No flows found via Plugin API, trying to add flow from URL nodeId:", parsed.nodeId);
-          
-          // Получаем данные файла через REST API для поиска фрейма по nodeId
-          const fileData = await getFileDataFromREST(parsed.fileKey, FIGMA_ACCESS_TOKEN);
-          currentFileData = fileData;
-          currentFileKey = parsed.fileKey; // НОВОЕ: Сохраняем fileKey для передачи в generateFromRESTAPI
+          console.log("No flows found via Plugin API, trying to find frame by URL nodeId via Plugin API:", parsed.nodeId);
           
           // Нормализуем nodeId из URL (формат "143-552" -> "143:552")
           const normalizedNodeId = parsed.nodeId.replace(/-/g, ':');
           
-          // Вспомогательная функция для поиска узла по ID в REST API данных
-          function findNodeById(node, targetId) {
-            if (!node) return null;
-            if (node.id === targetId) return node;
-            if (node.children) {
-              for (const child of node.children) {
-                const found = findNodeById(child, targetId);
-                if (found) return found;
-              }
-            }
-            return null;
-          }
-          
-          // Ищем фрейм по nodeId в документе
-          let foundNode = null;
-          let foundPage = null;
-          
-          if (fileData.document && fileData.document.children) {
-            for (const page of fileData.document.children) {
-              if (page.id === normalizedNodeId) {
-                // Если nodeId указывает на страницу, ищем первый фрейм на этой странице
-                if (page.children) {
-                  for (const child of page.children) {
-                    if (child.type === "FRAME") {
-                      foundNode = child;
-                      foundPage = page;
-                      break;
-                    }
-                  }
-                }
-                break;
-              }
-              
-              foundNode = findNodeById(page, normalizedNodeId);
-              if (foundNode) {
-                foundPage = page;
-                
-                if (foundNode.type === "FRAME") {
-                  break;
-                } else {
-                  // Если это не фрейм, ищем первый фрейм-потомок
-                  function findFirstFrame(node) {
-                    if (node.type === "FRAME") return node;
-                    if (node.children) {
-                      for (const child of node.children) {
-                        const frame = findFirstFrame(child);
-                        if (frame) return frame;
-                      }
-                    }
-                    return null;
-                  }
-                  const firstFrame = findFirstFrame(foundNode);
-                  if (firstFrame) {
-                    foundNode = firstFrame;
-                    break;
-                  } else {
-                    foundNode = null;
-                  }
+          // Просим code.js найти фрейм по nodeId через Plugin API
+          const foundFrame = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error("Таймаут поиска фрейма по nodeId"));
+            }, 15000);
+            
+            const handler = (event) => {
+              if (event.data.pluginMessage) {
+                const m = event.data.pluginMessage;
+                if (m.type === "FIND_NODE_RESULT") {
+                  clearTimeout(timeout);
+                  window.removeEventListener("message", handler);
+                  resolve(m.data); // { id, name, pageName } или null
                 }
               }
-            }
-          }
+            };
+            
+            window.addEventListener("message", handler);
+            parent.postMessage({ pluginMessage: { type: "FIND_NODE_BY_ID", nodeId: normalizedNodeId } }, "*");
+          });
           
-          if (foundNode && foundNode.type === "FRAME") {
+          if (foundFrame && foundFrame.id) {
             flows = [{
-              id: foundNode.id,
-              name: foundNode.name || "Flow from URL",
-              path: [foundPage.name || "Page", foundNode.name || foundNode.id],
-              isExplicit: false, // Не явно помечен как prototypeStartingPoint
-              fromUrl: true, // Но добавлен из URL
+              id: foundFrame.id,
+              name: foundFrame.name || "Flow from URL",
+              path: [foundFrame.pageName || "Page", foundFrame.name || foundFrame.id],
+              isExplicit: false,
+              fromUrl: true,
               hasReactions: false,
               hasReactionsInChildren: false
             }];
-            console.log("✓ Added flow from URL as fallback:", foundNode.name, foundNode.id);
+            console.log("✓ Added flow from URL via Plugin API:", foundFrame.name, foundFrame.id);
           } else {
-            console.warn("Could not find frame from URL nodeId:", normalizedNodeId);
+            console.warn("Could not find frame from URL nodeId via Plugin API:", normalizedNodeId);
           }
-        } else {
-          // Если flows найдены, все равно получаем данные файла для генерации прототипа
-          const fileData = await getFileDataFromREST(parsed.fileKey, FIGMA_ACCESS_TOKEN);
-          currentFileData = fileData;
-          currentFileKey = parsed.fileKey; // НОВОЕ: Сохраняем fileKey для передачи в generateFromRESTAPI
         }
+        
+        // fileData не нужен — generateFromRESTAPI использует только Plugin API
+        currentFileData = {}; // Пустой объект (не используется внутри generateFromRESTAPI)
+        currentFileKey = parsed.fileKey;
         
         availableFlows = flows;
         
@@ -2399,9 +2355,12 @@
     }
     
     // Обработчики
+    let _importInProgress = false;
     document.getElementById("importFromLink").addEventListener("click", function(e) {
       e.preventDefault();
-      importFromShareLink();
+      if (_importInProgress) return; // Защита от повторных кликов
+      _importInProgress = true;
+      importFromShareLink().finally(() => { _importInProgress = false; });
     });
     
     document.getElementById("useSelectedFlow").addEventListener("click", function(e) {

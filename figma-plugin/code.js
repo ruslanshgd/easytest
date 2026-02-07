@@ -201,6 +201,49 @@ figma.ui.onmessage = async (msg) => {
     }
   }
   
+  if (msg.type === "FIND_NODE_BY_ID") {
+    // Поиск фрейма по nodeId через Plugin API (без REST API, без rate limit)
+    try {
+      const nodeId = msg.nodeId;
+      console.log("FIND_NODE_BY_ID: searching for", nodeId);
+      
+      await figma.loadAllPagesAsync();
+      const node = await figma.getNodeByIdAsync(nodeId);
+      
+      if (node) {
+        // Находим ближайший фрейм
+        let frame = node;
+        if (frame.type !== "FRAME") {
+          // Если это не фрейм, ищем первый дочерний фрейм
+          if (frame.children) {
+            const childFrame = frame.children.find(c => c.type === "FRAME");
+            if (childFrame) frame = childFrame;
+          }
+        }
+        
+        // Имя страницы
+        let pageName = "";
+        let parent = frame.parent;
+        while (parent) {
+          if (parent.type === "PAGE") { pageName = parent.name; break; }
+          parent = parent.parent;
+        }
+        
+        console.log("FIND_NODE_BY_ID: found", frame.name, frame.id, "on page", pageName);
+        figma.ui.postMessage({
+          type: "FIND_NODE_RESULT",
+          data: { id: frame.id, name: frame.name, pageName: pageName }
+        });
+      } else {
+        console.warn("FIND_NODE_BY_ID: node not found for", nodeId);
+        figma.ui.postMessage({ type: "FIND_NODE_RESULT", data: null });
+      }
+    } catch (error) {
+      console.error("FIND_NODE_BY_ID error:", error);
+      figma.ui.postMessage({ type: "FIND_NODE_RESULT", data: null });
+    }
+  }
+
   if (msg.type === "FETCH_FIGMA_FILE") {
     // Получаем данные файла через REST API из code.js (обход CSP)
     try {
@@ -251,7 +294,10 @@ figma.ui.onmessage = async (msg) => {
         
         if (response.status === 429 && attempt < MAX_RETRIES) {
           // Rate limit — ждём и повторяем
-          const retryAfter = response.headers.get("Retry-After");
+          // В песочнице Figma response.headers может быть undefined
+          const retryAfter = response.headers && typeof response.headers.get === 'function'
+            ? response.headers.get("Retry-After")
+            : null;
           // Figma обычно отдаёт Retry-After в секундах; fallback — экспоненциальный backoff
           const waitSec = retryAfter ? Math.max(parseInt(retryAfter, 10), 1) : Math.pow(2, attempt + 1);
           console.log(`429 Rate limited (attempt ${attempt + 1}/${MAX_RETRIES + 1}), waiting ${waitSec}s...`);
