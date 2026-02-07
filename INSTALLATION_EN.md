@@ -139,7 +139,7 @@ sudo ufw allow 5432/tcp
 
 In Supabase Dashboard:
 1. Open **SQL Editor**
-2. Run the three migration files from the repo **`supabase/migrations/`** in order: `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql` (copy each file's contents and click Run). Details: **[Part 5: Supabase on Your Server and Clean Database](#part-5-supabase-on-your-server-and-clean-database)** (section 5.2).
+2. Run **six** migration files from the repo **`supabase/migrations/`** in order: `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql`, `004_send_email_hook.sql`, `005_grant_api_access.sql`, `006_cascade_delete_studies.sql` (copy each file's contents and click Run). Details: **[Part 5: Supabase on Your Server and Clean Database](#part-5-supabase-on-your-server-and-clean-database)** (section 5.2). For self-hosted email (login codes, password recovery), see **[5.6. Email (Send Email Hook)](#56-email-send-email-hook-self-hosted)**.
 
 ### Step 5: Configure Figma OAuth (Embed Kit 2.0)
 
@@ -248,6 +248,8 @@ The plugin is published in Figma Community and can be installed automatically:
 
 ## Part 4: Deploying on Your Domain
 
+You need three subdomains: **viewer**, **analytics**, and **api** (for Supabase when self-hosted on the same server). Add three A records pointing to your server IP; below are Nginx and SSL for all three.
+
 ### Step 1: Choose Hosting
 
 **Options in Russia:**
@@ -290,7 +292,13 @@ The plugin is published in Figma Community and can be installed automatically:
    apt install -y nginx
    ```
 
-5. Install PM2 (process manager):
+5. If Supabase will run on this server, install Docker:
+   ```bash
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sh get-docker.sh
+   ```
+
+6. Install PM2 (process manager):
    ```bash
    npm install -g pm2
    ```
@@ -344,7 +352,9 @@ Add:
 ```env
 VITE_SUPABASE_URL=https://your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_VIEWER_URL=https://viewer.your-domain.com
 ```
+`VITE_VIEWER_URL` ensures test links point to the viewer, not analytics.
 
 **Important:** Rebuild after changing `.env`:
 ```bash
@@ -394,10 +404,38 @@ server {
 }
 ```
 
+**Third config — Supabase API** (when Supabase is self-hosted on this server):
+
+```bash
+nano /etc/nginx/sites-available/supabase-api
+```
+
+Add (replace with your domain):
+
+```nginx
+server {
+    listen 80;
+    server_name api.your-domain.com;
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+`client_max_body_size 10m` is required so the plugin can upload large prototypes (otherwise 413).
+
 Activate configurations:
 ```bash
 ln -s /etc/nginx/sites-available/viewer /etc/nginx/sites-enabled/
 ln -s /etc/nginx/sites-available/analytics /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/supabase-api /etc/nginx/sites-enabled/
 ```
 
 Check configuration:
@@ -416,6 +454,7 @@ systemctl restart nginx
 2. Add A records:
    - `viewer.your-domain.com` → your server IP
    - `analytics.your-domain.com` → your server IP
+   - `api.your-domain.com` → your server IP (for Supabase when self-hosted)
 3. Wait 10–30 minutes (for DNS to update)
 
 ### Step 7: Set Up SSL (HTTPS)
@@ -429,9 +468,10 @@ Get certificates:
 ```bash
 certbot --nginx -d viewer.your-domain.com
 certbot --nginx -d analytics.your-domain.com
+certbot --nginx -d api.your-domain.com
 ```
 
-Certbot will automatically update Nginx configuration.
+Certbot will automatically update Nginx configuration. After that set `VITE_SUPABASE_URL=https://api.your-domain.com` in `.env.production` (instead of IP:8000) and rebuild both apps.
 
 ### Step 8: Update Plugin Settings
 
@@ -439,8 +479,11 @@ Certbot will automatically update Nginx configuration.
 2. Run plugin
 3. Click "⚙️ Settings"
 4. Update:
+   - **Supabase URL**: `https://api.your-domain.com` (or your Supabase URL)
+   - **Supabase Anon Key**: your anon key
    - **Viewer URL**: `https://viewer.your-domain.com`
    - **Analytics URL**: `https://analytics.your-domain.com`
+   - **Figma Personal Access Token**: token from Figma (Account → Personal Access Tokens)
 5. Save
 
 ---
@@ -459,7 +502,10 @@ In the repo under **`supabase/migrations/`**:
 |------|----------|
 | **001_full_schema.sql** | Extensions (uuid-ossp, pgcrypto), all `public` tables, foreign keys, index on `events.session_id`. |
 | **002_functions_triggers_rls.sql** | Functions and triggers (`set_user_id`, `is_team_member`, etc.), all RPCs (study run, teams, invitations), enable RLS, all table policies. |
-| **003_storage.sql** | Storage buckets `recordings` and `study-images`, policies for `storage.objects`. |
+| **003_storage.sql** | Storage buckets `recordings` and `study-images`, RLS on `storage.buckets`, policies for `storage.objects`. |
+| **004_send_email_hook.sql** | Send Email Hook for Auth: send mail via HTTP API (Resend/Brevo) instead of SMTP. Required on self-hosted when ports 587/465 are blocked. |
+| **005_grant_api_access.sql** | GRANTs for `anon` and `authenticated` — without these, Data API cannot access tables. |
+| **006_cascade_delete_studies.sql** | Cascade delete when a study is removed: blocks, runs, responses. |
 
 See **`supabase/migrations/README.md`** for more detail.
 
@@ -475,10 +521,8 @@ See **`supabase/migrations/README.md`** for more detail.
 #### Step 2: Apply migrations via SQL Editor
 
 1. In Supabase Dashboard open **SQL Editor**.
-2. Run the three migration files **in order**, each in full:
-   - Open `supabase/migrations/001_full_schema.sql` from the repo → copy contents → paste in SQL Editor → **Run**.
-   - Then do the same for `002_functions_triggers_rls.sql` → **Run**.
-   - Then do the same for `003_storage.sql` → **Run**.
+2. Run the **six** migration files **in order**, each in full: `001_full_schema.sql`, then `002_functions_triggers_rls.sql`, `003_storage.sql`, `004_send_email_hook.sql`, `005_grant_api_access.sql`, `006_cascade_delete_studies.sql`.
+3. In **004_send_email_hook.sql** replace `YOUR_RESEND_API_KEY` with your [Resend](https://resend.com) API key before running (if you need email via hook; on Cloud you can skip 004 or leave a placeholder).
 
 If you get errors like "relation already exists" or "policy already exists", that object was already created (e.g. on a previous run). You can skip that part or remove the already-created objects from the script.
 
@@ -541,9 +585,29 @@ To run Supabase on the same or a separate server:
    docker-compose up -d
    ```
 6. Check: `docker-compose ps`. Open `http://your-ip:8000` in a browser.
-7. Create a project in the web UI, then as in **5.2** open SQL Editor and run `001_full_schema.sql`, `002_functions_triggers_rls.sql`, and `003_storage.sql` in order.
+7. Create a project in the web UI, then as in **5.2** open SQL Editor and run all six migrations (001 … 006) in order.
 
-**Domain and SSL (optional):** Configure a subdomain (e.g. `api.your-domain.com`), Nginx as reverse proxy to port 8000, then `certbot --nginx -d api.your-domain.com`. In the apps' `.env` set `VITE_SUPABASE_URL=https://api.your-domain.com`.
+**Scripts for generating .env:** In the repo folder **`scripts/`** you will find helpers: `setup_env.sh` (creates .env with secrets in the Supabase directory) and `generate-supabase-keys.js` (generates valid ANON_KEY and SERVICE_ROLE_KEY as JWTs). Without JWT keys, Auth will not work. See **`scripts/README.md`** for details.
+
+**Domain and SSL (optional):** Configure a subdomain (e.g. `api.your-domain.com`), Nginx as reverse proxy to port 8000, then `certbot --nginx -d api.your-domain.com`. In the apps' `.env` set `VITE_SUPABASE_URL=https://api.your-domain.com`. For production, in **figma-analytics** add `VITE_VIEWER_URL=https://viewer.your-domain.com` so test links point to the viewer.
+
+---
+
+### 5.6. Email (Send Email Hook) — self-hosted
+
+Many VPS providers (e.g. Reg.ru) block outbound SMTP ports (587, 465). Login codes and password recovery emails then never arrive.
+
+**Solution:** Send Email Hook — send mail via HTTP API (Resend or Brevo) on port 443.
+
+1. Sign up at [resend.com](https://resend.com) and create an API key.
+2. In **004_send_email_hook.sql** replace `YOUR_RESEND_API_KEY` with that key and run the file in SQL Editor (if you haven’t already).
+3. On the server, in the Supabase directory, open `docker-compose.yml`, section **auth** → **environment**. Enable the hook:
+   - `GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true"`
+   - `GOTRUE_HOOK_SEND_EMAIL_URI: "pg-functions://postgres/public/send_email_hook"`
+   - `GOTRUE_HOOK_SEND_EMAIL_SECRETS: "v1,whsec_aXppdGVzdHNlY3JldGtleWZvcmVtYWls"`
+4. Restart: `docker compose restart auth kong`.
+
+Emails with codes will then go through Resend. Alternatively, Brevo is described in comments in `004_send_email_hook.sql`.
 
 ---
 
@@ -604,6 +668,20 @@ Figma plugin: send a prototype to a new or existing test, to a folder or to the 
 - Wait up to 24 hours (usually 10–30 minutes)
 - Check A records in domain panel
 - Use `nslookup viewer.your-domain.com` to verify
+
+### Storage: “Failed to retrieve buckets”
+
+- Ensure **all six** migrations (001 … 006) have been run; 003 enables RLS on `storage.buckets`.
+- Check: `docker compose ps storage`, and if needed `docker compose restart storage`.
+
+### 504 when sending login code / emails not arriving
+
+- Many VPS providers (e.g. Reg.ru) block SMTP ports (587, 465). Use **Send Email Hook** — see [section 5.6](#56-email-send-email-hook--self-hosted).
+
+### CORS or 413 when sending prototype from plugin
+
+- **413:** The Nginx config for `api.your-domain.com` must include `client_max_body_size 10m;` (see Step 5 in Part 4).
+- **CORS:** The Figma plugin sends requests with `Origin: null`. In Kong, allow this origin: in `~/supabase/docker/volumes/api/kong.yml`, in the `cors` plugin for `rest-v1` and `auth-v1`, add `"null"` and your domains (viewer, analytics, api) to `origins`. Then run: `docker compose up -d --force-recreate kong`.
 
 ---
 

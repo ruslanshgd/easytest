@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, CheckCircle2, XCircle, Home } from "lucide-react";
 
 export default function InvitePage() {
-  const token = (useParams()["*"] ?? "").replace(/\/$/, "");
+  const params = useParams();
+  const location = useLocation();
+  // Token может содержать "/" и "=" (base64), поэтому используем splat вместо :token
+  const token = params["*"] ?? location.pathname.replace(/^\/invite\/?/, "");
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

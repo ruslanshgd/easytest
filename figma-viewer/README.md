@@ -1,73 +1,37 @@
-# React + TypeScript + Vite
+# FigmaTest Viewer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Веб-приложение, в котором респонденты проходят UX-тесты с прототипами Figma: открывают ссылку из плагина, вводят код из email, проходят блоки теста и смотрят прототип во встроенном Figma Embed.
 
-Currently, two official plugins are available:
+## Требования
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 20.19+ или 22.12+
+- npm 10+
 
-## React Compiler
+## Установка и запуск
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd figma-viewer
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Приложение откроется на http://localhost:5173 (или порт из вывода терминала).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Переменные окружения
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Создайте файл `.env` в корне `figma-viewer`:
+
+| Переменная | Описание |
+|------------|----------|
+| `VITE_SUPABASE_URL` | URL проекта Supabase (например `https://xxxxx.supabase.co` или `https://api.ваш-домен.ru`) |
+| `VITE_SUPABASE_ANON_KEY` | Anon-ключ из Supabase (Settings → API) |
+
+Для production используйте `.env.production` с теми же переменными и пересоберите: `npm run build`.
+
+## Figma OAuth (Embed)
+
+Для аналитики кликов и переходов между экранами нужен Figma Embed (OAuth). В [Figma Developer Console](https://www.figma.com/developers/apps) создайте приложение и укажите в **Allowed origins** домен viewer (например `http://localhost:5173` и production URL). Client ID задаётся в коде: `figma-viewer/src/TestView.tsx` → константа `FIGMA_CLIENT_ID`.
+
+## Документация
+
+Полная установка (локально и на сервере), миграции БД и деплой: **[INSTALLATION_RU.md](../INSTALLATION_RU.md)** (или [INSTALLATION_EN.md](../INSTALLATION_EN.md)).

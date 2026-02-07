@@ -50,11 +50,19 @@
 ```
 figmaTest/
 ├── supabase/
-│   └── migrations/       # SQL-схема для Supabase (таблицы, RLS, RPC, Storage)
+│   └── migrations/       # SQL-схема для Supabase (таблицы, RLS, RPC, Storage, email hook)
 │       ├── 001_full_schema.sql
 │       ├── 002_functions_triggers_rls.sql
 │       ├── 003_storage.sql
+│       ├── 004_send_email_hook.sql
+│       ├── 005_grant_api_access.sql
+│       ├── 006_cascade_delete_studies.sql
 │       └── README.md
+│
+├── scripts/              # Скрипты для деплоя (self-hosted Supabase)
+│   ├── setup_env.sh      # Создание .env с секретами
+│   ├── generate-supabase-keys.js   # JWT для ANON_KEY и SERVICE_ROLE_KEY
+│   └── README.md
 │
 ├── figma-plugin/         # Плагин для Figma
 │   ├── code.js           # Логика плагина
@@ -91,7 +99,7 @@ figmaTest/
 
 ## 🔐 Настройка
 
-1. **Supabase:** создайте проект на [supabase.com](https://supabase.com) или разверните self-hosted. В SQL Editor выполните по очереди файлы из `supabase/migrations/`: `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql`. Подробно — в [INSTALLATION_RU.md](INSTALLATION_RU.md) (Часть 5).
+1. **Supabase:** создайте проект на [supabase.com](https://supabase.com) или разверните self-hosted. В SQL Editor выполните по очереди все шесть миграций из `supabase/migrations/` (001 … 006). Подробно — в [INSTALLATION_RU.md](INSTALLATION_RU.md) (Часть 5). Для self-hosted с блокировкой SMTP на VPS — Send Email Hook (миграция 004, Resend/Brevo), см. п. 5.6 в инструкции.
 
 2. **Переменные окружения:** в корне `figma-viewer` и `figma-analytics` создайте `.env` (по образцу `.env.example`):
 

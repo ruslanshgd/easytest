@@ -139,9 +139,9 @@ sudo ufw allow 5432/tcp
 
 В Supabase Dashboard:
 1. Откройте **SQL Editor**
-2. Выполните по очереди три файла из репозитория **`supabase/migrations/`**: `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql` (скопировать содержимое каждого файла и нажать Run)
+2. Выполните по очереди **шесть** файлов из репозитория **`supabase/migrations/`**: `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql`, `004_send_email_hook.sql`, `005_grant_api_access.sql`, `006_cascade_delete_studies.sql` (скопировать содержимое каждого и нажать Run).
 
-Подробно: **[Часть 5: Supabase на своем сервере и база с нуля](#часть-5-supabase-на-своем-сервере-и-база-с-нуля)** (п. 5.2).
+Подробно: **[Часть 5: Supabase на своем сервере и база с нуля](#часть-5-supabase-на-своем-сервере-и-база-с-нуля)** (п. 5.2). Для отправки писем (коды входа, восстановление пароля) на self-hosted см. **[п. 5.6. Email (Send Email Hook)](#56-email-send-email-hook-self-hosted)**.
 
 ### Шаг 5: Настройте Figma OAuth (Embed Kit 2.0)
 
@@ -250,6 +250,8 @@ npm run dev
 
 ## Часть 4: Развертывание на своем домене
 
+Нужны три поддомена: **viewer**, **analytics** и **api** (для Supabase, если он self-hosted на том же сервере). В панели домена добавьте три A-записи на IP сервера; ниже — Nginx и SSL для всех трёх.
+
 ### Шаг 1: Выберите хостинг
 
 **Варианты в РФ:**
@@ -292,7 +294,13 @@ npm run dev
    apt install -y nginx
    ```
 
-5. Установите PM2 (менеджер процессов):
+5. Если Supabase будет на этом же сервере — установите Docker:
+   ```bash
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sh get-docker.sh
+   ```
+
+6. Установите PM2 (менеджер процессов):
    ```bash
    npm install -g pm2
    ```
@@ -346,7 +354,9 @@ nano .env.production
 ```env
 VITE_SUPABASE_URL=https://ваш-supabase-url
 VITE_SUPABASE_ANON_KEY=ваш-anon-ключ
+VITE_VIEWER_URL=https://viewer.ваш-домен.ru
 ```
+`VITE_VIEWER_URL` — чтобы ссылки на тесты вели на viewer, а не на analytics.
 
 **Важно:** Пересоберите после изменения `.env`:
 ```bash
@@ -396,10 +406,38 @@ server {
 }
 ```
 
+**Третий конфиг — Supabase API** (если Supabase self-hosted на этом сервере):
+
+```bash
+nano /etc/nginx/sites-available/supabase-api
+```
+
+Добавьте (подставьте свой домен):
+
+```nginx
+server {
+    listen 80;
+    server_name api.ваш-домен.ru;
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+`client_max_body_size 10m` нужен, чтобы плагин мог загружать большие прототипы (иначе 413).
+
 Активируйте конфигурации:
 ```bash
 ln -s /etc/nginx/sites-available/viewer /etc/nginx/sites-enabled/
 ln -s /etc/nginx/sites-available/analytics /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/supabase-api /etc/nginx/sites-enabled/
 ```
 
 Проверьте конфигурацию:
@@ -418,6 +456,7 @@ systemctl restart nginx
 2. Добавьте A-записи:
    - `viewer.ваш-домен.ru` → IP вашего сервера
    - `analytics.ваш-домен.ru` → IP вашего сервера
+   - `api.ваш-домен.ru` → IP вашего сервера (для Supabase, если self-hosted)
 3. Подождите 10–30 минут (пока DNS обновится)
 
 ### Шаг 7: Настройте SSL (HTTPS)
@@ -431,9 +470,10 @@ apt install -y certbot python3-certbot-nginx
 ```bash
 certbot --nginx -d viewer.ваш-домен.ru
 certbot --nginx -d analytics.ваш-домен.ru
+certbot --nginx -d api.ваш-домен.ru
 ```
 
-Certbot автоматически обновит конфигурацию Nginx.
+Certbot автоматически обновит конфигурацию Nginx. После этого в `.env.production` укажите `VITE_SUPABASE_URL=https://api.ваш-домен.ru` (вместо IP:8000) и пересоберите оба приложения.
 
 ### Шаг 8: Обновите настройки плагина
 
@@ -441,8 +481,11 @@ Certbot автоматически обновит конфигурацию Nginx
 2. Запустите плагин
 3. Нажмите "⚙️ Настройки"
 4. Обновите:
+   - **Supabase URL**: `https://api.ваш-домен.ru` (или ваш URL Supabase)
+   - **Supabase Anon Key**: ваш anon-ключ
    - **Viewer URL**: `https://viewer.ваш-домен.ru`
    - **Analytics URL**: `https://analytics.ваш-домен.ru`
+   - **Figma Personal Access Token**: токен из Figma (Account → Personal Access Tokens)
 5. Сохраните
 
 ---
@@ -461,7 +504,10 @@ Certbot автоматически обновит конфигурацию Nginx
 |------|------------|
 | **001_full_schema.sql** | Расширения (uuid-ossp, pgcrypto), все таблицы `public`, внешние ключи, индекс по `events.session_id`. |
 | **002_functions_triggers_rls.sql** | Функции и триггеры (`set_user_id`, `is_team_member` и др.), все RPC (study run, команды, инвайты), включение RLS и все политики для таблиц. |
-| **003_storage.sql** | Ведра Storage `recordings` и `study-images`, политики для `storage.objects`. |
+| **003_storage.sql** | Ведра Storage `recordings` и `study-images`, RLS на `storage.buckets`, политики для `storage.objects`. |
+| **004_send_email_hook.sql** | Send Email Hook для Auth: отправка писем через HTTP API (Resend/Brevo) вместо SMTP. Нужен для self-hosted, если хостинг блокирует порты 587/465. |
+| **005_grant_api_access.sql** | GRANT для ролей `anon` и `authenticated` — без них Data API не обращается к таблицам. |
+| **006_cascade_delete_studies.sql** | Каскадное удаление при удалении теста (study): блоки, прогоны, ответы. |
 
 Подробнее: см. **`supabase/migrations/README.md`**.
 
@@ -477,10 +523,8 @@ Certbot автоматически обновит конфигурацию Nginx
 #### Шаг 2: Применить миграции через SQL Editor
 
 1. В Dashboard Supabase откройте **SQL Editor**.
-2. Выполните скрипты **по очереди**, целиком каждый файл:
-   - Откройте `supabase/migrations/001_full_schema.sql` из репозитория → скопируйте содержимое → вставьте в SQL Editor → **Run**.
-   - Затем то же для `002_functions_triggers_rls.sql` → **Run**.
-   - Затем то же для `003_storage.sql` → **Run**.
+2. Выполните скрипты **по очереди**, целиком каждый файл: `001_full_schema.sql`, затем `002_functions_triggers_rls.sql`, `003_storage.sql`, `004_send_email_hook.sql`, `005_grant_api_access.sql`, `006_cascade_delete_studies.sql`.
+3. В **004_send_email_hook.sql** перед запуском замените `YOUR_RESEND_API_KEY` на ваш API-ключ от [Resend](https://resend.com) (если планируете отправку писем через хук; для Cloud можно пропустить 004 или оставить ключ-заглушку).
 
 Если появится ошибка вида «relation already exists» или «policy already exists», объект уже создан (например, при повторном запуске). Можно пропустить этот шаг или точечно убрать из скрипта уже созданные объекты.
 
@@ -543,9 +587,29 @@ VITE_SUPABASE_ANON_KEY=ваш-anon-ключ
    docker-compose up -d
    ```
 6. Проверка: `docker-compose ps`. Откройте в браузере `http://ваш-ip:8000`.
-7. Создайте проект через веб-интерфейс, затем **как в 5.2** откройте SQL Editor и выполните по очереди `001_full_schema.sql`, `002_functions_triggers_rls.sql`, `003_storage.sql`.
+7. Создайте проект через веб-интерфейс, затем **как в 5.2** откройте SQL Editor и выполните по очереди все шесть миграций (001 … 006).
 
-**Домен и SSL (по желанию):** настройте поддомен (например `api.ваш-домен.ru`), Nginx как reverse proxy на порт 8000, затем `certbot --nginx -d api.ваш-домен.ru`. В `.env` приложений укажите `VITE_SUPABASE_URL=https://api.ваш-домен.ru`.
+**Скрипты для генерации .env:** в репозитории в папке **`scripts/`** лежат вспомогательные скрипты: `setup_env.sh` (создаёт .env с секретами в каталоге Supabase) и `generate-supabase-keys.js` (генерирует корректные ANON_KEY и SERVICE_ROLE_KEY в формате JWT). Без JWT-ключей Auth не будет работать. Подробнее: **`scripts/README.md`**.
+
+**Домен и SSL (по желанию):** настройте поддомен (например `api.ваш-домен.ru`), Nginx как reverse proxy на порт 8000, затем `certbot --nginx -d api.ваш-домен.ru`. В `.env` приложений укажите `VITE_SUPABASE_URL=https://api.ваш-домен.ru`. Для production в **figma-analytics** добавьте `VITE_VIEWER_URL=https://viewer.ваш-домен.ru`, чтобы ссылки на тесты вели на viewer.
+
+---
+
+### 5.6. Email (Send Email Hook) — self-hosted
+
+На многих VPS (Reg.ru и др.) заблокированы исходящие SMTP-порты (587, 465). Из-за этого коды входа и восстановление пароля не приходят по почте.
+
+**Решение:** Send Email Hook — отправка писем через HTTP API (Resend или Brevo), порт 443.
+
+1. Зарегистрируйтесь на [resend.com](https://resend.com), создайте API-ключ.
+2. В миграции **004_send_email_hook.sql** замените `YOUR_RESEND_API_KEY` на этот ключ и выполните файл в SQL Editor (если ещё не выполняли).
+3. На сервере в каталоге Supabase откройте `docker-compose.yml`, секция **auth** → **environment**. Включите хук:
+   - `GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true"`
+   - `GOTRUE_HOOK_SEND_EMAIL_URI: "pg-functions://postgres/public/send_email_hook"`
+   - `GOTRUE_HOOK_SEND_EMAIL_SECRETS: "v1,whsec_aXppdGVzdHNlY3JldGtleWZvcmVtYWls"`
+4. Перезапустите: `docker compose restart auth kong`.
+
+После этого письма с кодами будут уходить через Resend. Альтернатива: Brevo — в комментариях в `004_send_email_hook.sql` описан вариант функции для Brevo.
 
 ---
 
@@ -605,6 +669,20 @@ VITE_SUPABASE_ANON_KEY=ваш-anon-ключ
 - Подождите до 24 часов (обычно 10–30 минут)
 - Проверьте A-записи в панели домена
 - Используйте `nslookup viewer.ваш-домен.ru` для проверки
+
+### Storage: «Failed to retrieve buckets»
+
+- Убедитесь, что выполнены **все шесть** миграций (001 … 006); в 003 включён RLS на `storage.buckets`.
+- Проверьте: `docker compose ps storage`, при необходимости `docker compose restart storage`.
+
+### 504 при отправке кода на email / письма не приходят
+
+- На многих VPS (Reg.ru и др.) закрыты порты SMTP (587, 465). Используйте **Send Email Hook** — см. [п. 5.6](#56-email-send-email-hook-self-hosted).
+
+### CORS или 413 при отправке прототипа из плагина
+
+- **413:** В Nginx-конфиге для `api.ваш-домен.ru` должна быть строка `client_max_body_size 10m;` (см. Шаг 5 Части 4).
+- **CORS:** Плагин Figma шлёт запросы с `Origin: null`. В Kong нужно разрешить этот origin: в `~/supabase/docker/volumes/api/kong.yml` в плагине `cors` для `rest-v1` и `auth-v1` добавьте в `origins` значение `"null"` и ваши домены (viewer, analytics, api). Затем: `docker compose up -d --force-recreate kong`.
 
 ---
 

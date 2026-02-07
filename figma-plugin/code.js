@@ -28,7 +28,7 @@ figma.showUI(__html__, { width: 400, height: 500 });
     const savedConfig = await figma.clientStorage.getAsync("pluginConfig");
     if (savedConfig && savedConfig.SUPABASE_URL && savedConfig.SUPABASE_ANON_KEY && savedConfig.VIEWER_URL) {
       CONFIG = {
-        SUPABASE_URL: savedConfig.SUPABASE_URL || "",
+        SUPABASE_URL: (savedConfig.SUPABASE_URL || "").replace(/\/+$/, ""),
         SUPABASE_ANON_KEY: savedConfig.SUPABASE_ANON_KEY || "",
         VIEWER_URL: savedConfig.VIEWER_URL || "",
         ANALYTICS_URL: savedConfig.ANALYTICS_URL || "",
@@ -60,7 +60,7 @@ figma.ui.onmessage = async (msg) => {
       var cleanFigmaToken = (msg.config.FIGMA_ACCESS_TOKEN || "").trim().replace(/[^\x20-\x7E]/g, '');
       
       var cleanConfig = {
-        SUPABASE_URL: msg.config.SUPABASE_URL || "",
+        SUPABASE_URL: (msg.config.SUPABASE_URL || "").replace(/\/+$/, ""),
         SUPABASE_ANON_KEY: msg.config.SUPABASE_ANON_KEY || "",
         VIEWER_URL: msg.config.VIEWER_URL || "",
         ANALYTICS_URL: msg.config.ANALYTICS_URL || "",
@@ -221,24 +221,51 @@ figma.ui.onmessage = async (msg) => {
       
       console.log("Fetching Figma file data via REST API, fileKey:", fileKey);
       
-      const response = await fetch(`https://api.figma.com/v1/files/${fileKey}`, {
-        headers: {
-          'X-Figma-Token': figmaToken
-        }
-      });
+      // Retry с экспоненциальным backoff при 429 (rate limit)
+      const MAX_RETRIES = 4;
+      let lastError = null;
       
-      if (!response.ok) {
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+          // Сообщаем UI, что ждём перед повтором
+          figma.ui.postMessage({
+            type: "FIGMA_FILE_FETCH_STATUS",
+            message: `Превышен лимит API. Повтор ${attempt}/${MAX_RETRIES} через несколько секунд...`
+          });
+        }
+        
+        const response = await fetch(`https://api.figma.com/v1/files/${fileKey}`, {
+          headers: {
+            'X-Figma-Token': figmaToken
+          }
+        });
+        
+        if (response.ok) {
+          const fileData = await response.json();
+          figma.ui.postMessage({
+            type: "FIGMA_FILE_FETCHED",
+            fileData: fileData
+          });
+          return; // Успех — выходим
+        }
+        
+        if (response.status === 429 && attempt < MAX_RETRIES) {
+          // Rate limit — ждём и повторяем
+          const retryAfter = response.headers.get("Retry-After");
+          // Figma обычно отдаёт Retry-After в секундах; fallback — экспоненциальный backoff
+          const waitSec = retryAfter ? Math.max(parseInt(retryAfter, 10), 1) : Math.pow(2, attempt + 1);
+          console.log(`429 Rate limited (attempt ${attempt + 1}/${MAX_RETRIES + 1}), waiting ${waitSec}s...`);
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          continue;
+        }
+        
+        // Другая ошибка или исчерпаны попытки
         const errorText = await response.text();
-        throw new Error(`REST API error: ${response.status} - ${errorText}`);
+        lastError = new Error(`REST API error: ${response.status} - ${errorText}`);
+        break;
       }
       
-      const fileData = await response.json();
-      
-      // Отправляем данные обратно в UI
-      figma.ui.postMessage({
-        type: "FIGMA_FILE_FETCHED",
-        fileData: fileData
-      });
+      throw lastError || new Error("Не удалось загрузить данные файла после нескольких попыток");
       
     } catch (error) {
       console.error("Error fetching Figma file data:", error);

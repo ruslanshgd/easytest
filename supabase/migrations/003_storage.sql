@@ -28,8 +28,34 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
+-- RLS: Enable RLS on storage.buckets if not already enabled
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------------
+-- RLS: storage.buckets policies (required for Storage API to work)
+-- ---------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "Public can read buckets" ON storage.buckets;
+CREATE POLICY "Public can read buckets"
+ON storage.buckets FOR SELECT
+TO public
+USING (true);
+
+DROP POLICY IF EXISTS "Authenticated can read buckets" ON storage.buckets;
+CREATE POLICY "Authenticated can read buckets"
+ON storage.buckets FOR SELECT
+TO authenticated
+USING (true);
+
+-- ---------------------------------------------------------------------------
 -- RLS: storage.objects policies for recordings
 -- ---------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "Public can read recordings" ON storage.objects;
+DROP POLICY IF EXISTS "Anon can upload session recordings" ON storage.objects;
+DROP POLICY IF EXISTS "Anon can delete session recordings" ON storage.objects;
 
 CREATE POLICY "Public can read recordings"
 ON storage.objects FOR SELECT
@@ -55,6 +81,11 @@ USING (
 -- ---------------------------------------------------------------------------
 -- RLS: storage.objects policies for study-images
 -- ---------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "Public can read study images" ON storage.objects;
+DROP POLICY IF EXISTS "Users can read own images" ON storage.objects;
+DROP POLICY IF EXISTS "Users can upload images to own folder" ON storage.objects;
+DROP POLICY IF EXISTS "Users can delete own images" ON storage.objects;
 
 CREATE POLICY "Public can read study images"
 ON storage.objects FOR SELECT

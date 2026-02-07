@@ -8,9 +8,11 @@
 
 1. **Запустите плагин:** Plugins → Изи Тест
 2. **Заполните форму настройки:**
-   - **Supabase URL:** URL вашего Supabase проекта (например: `https://xxxxx.supabase.co`)
-   - **Supabase Anon Key:** Anon ключ из Supabase Dashboard (Settings → API)
-   - **Viewer URL:** URL вашего viewer приложения (для локальной разработки: `http://localhost:5173`)
+   - **Supabase URL** — URL вашего Supabase (Cloud или self-hosted, например `https://xxxxx.supabase.co`)
+   - **Supabase Anon Key** — anon-ключ из Supabase (Settings → API)
+   - **Viewer URL** — URL viewer (локально: `http://localhost:5173`; production: `https://viewer.ваш-домен.ru`)
+   - **Analytics URL** — URL панели аналитики (локально: `http://localhost:5174`; production: `https://analytics.ваш-домен.ru`)
+   - **Figma Personal Access Token** — токен для Figma REST API (Figma Settings → Account → Personal Access Tokens)
 3. **Нажмите "Сохранить настройки"**
 4. Конфигурация сохранится автоматически и будет использоваться при следующих запусках
 
@@ -33,9 +35,11 @@
 const CONFIG = {
   SUPABASE_URL: "https://your-project.supabase.co",
   SUPABASE_ANON_KEY: "your-anon-key-here",
-  VIEWER_URL: "http://localhost:5173" // или ваш production URL
+  VIEWER_URL: "http://localhost:5173",
+  ANALYTICS_URL: "http://localhost:5174"
 };
 ```
+(Figma Personal Access Token задаётся в форме настроек плагина.)
 
 **Важно:** Конфигурация плагина должна совпадать с настройками в `figma-viewer/.env`:
 - `VITE_SUPABASE_URL` → `CONFIG.SUPABASE_URL`
@@ -116,4 +120,8 @@ const CONFIG = {
 - **Прототипы** (`prototypes`): Хранят JSON данные прототипа, могут быть без `user_id`
 - **Сессии** (`sessions`): Создаются при открытии прототипа, привязаны к `user_id` через RLS
 - **События** (`events`): Записываются во время тестирования, привязаны к сессии и `user_id`
+
+### Синхронизация экранов с viewer
+
+Идентификаторы экранов в экспорте плагина унифицированы с форматом Figma Embed (`figmaNodeId`, формат `pageId:nodeId`): `screen.id`, `scene.id`, `hotspot.frame`, `edge.from`/`edge.to`, `output.start`/`output.end` используют один и тот же идентификатор. Это нужно для корректной синхронизации текущего экрана в viewer при событии `PRESENTED_NODE_CHANGED`.
 

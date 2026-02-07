@@ -8,7 +8,10 @@
 
 1. **001_full_schema.sql** — расширения, все таблицы `public`, внешние ключи, индекс.
 2. **002_functions_triggers_rls.sql** — функции, триггеры, RPC, включение RLS, все политики для таблиц `public`.
-3. **003_storage.sql** — ведра Storage (`recordings`, `study-images`) и политики для `storage.objects`.
+3. **003_storage.sql** — ведра Storage (`recordings`, `study-images`), RLS на `storage.buckets` и политики для `storage.objects`.
+4. **004_send_email_hook.sql** — Send Email Hook для Auth: отправка писем через HTTP API (Resend/Brevo) вместо SMTP. Требует pg_net и настройки GoTrue в docker-compose.
+5. **005_grant_api_access.sql** — GRANT для ролей `anon` и `authenticated`; без них Data API не обращается к таблицам.
+6. **006_cascade_delete_studies.sql** — каскадное удаление при удалении теста (study): блоки, прогоны, ответы и т.д.
 
 ## Как применить
 
@@ -16,9 +19,7 @@
 
 1. Создайте проект в [Supabase Cloud](https://supabase.com) или разверните self-hosted Supabase.
 2. Откройте **SQL Editor** в Dashboard.
-3. Скопируйте целиком содержимое `001_full_schema.sql` → **Run**.
-4. Затем скопируйте `002_functions_triggers_rls.sql` → **Run**.
-5. Затем скопируйте `003_storage.sql` → **Run**.
+3. Скопируйте целиком содержимое `001_full_schema.sql` → **Run**, затем по очереди `002` … `006`.
 
 Если какой-то шаг выдаст ошибку (например, «relation already exists»), значит объект уже создан — можно править скрипт (например, заменить `CREATE TABLE` на `CREATE TABLE IF NOT EXISTS`) или пропустить соответствующую часть.
 

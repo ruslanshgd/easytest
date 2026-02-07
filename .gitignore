@@ -48,6 +48,9 @@ Thumbs.db
 # Internal docs (не для репозитория)
 docs/
 
+# Deploy-specific files (миграции и гайды с продакшена — не коммитить)
+.forDeploy/
+
 # Figma plugin code is now in the repository
 # (see README.md for installation from Figma Community)
 

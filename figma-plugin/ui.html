@@ -894,8 +894,8 @@
         return;
       }
 
-      // Обновляем конфигурацию
-      SUPABASE_URL = url;
+      // Обновляем конфигурацию (без завершающего слэша, чтобы избежать // в путях)
+      SUPABASE_URL = url.replace(/\/+$/, "");
       SUPABASE_ANON_KEY = key;
       VIEWER_URL = viewer;
       ANALYTICS_URL = analytics;
@@ -1288,7 +1288,7 @@
       // Получаем конфигурацию от code.js
       if (msg.type === "CONFIG" && msg.config) {
         // Если конфигурация пустая (после сброса), используем пустые строки
-        SUPABASE_URL = msg.config.SUPABASE_URL || "";
+        SUPABASE_URL = (msg.config.SUPABASE_URL || "").replace(/\/+$/, "");
         SUPABASE_ANON_KEY = msg.config.SUPABASE_ANON_KEY || "";
         VIEWER_URL = msg.config.VIEWER_URL || "";
         ANALYTICS_URL = msg.config.ANALYTICS_URL || "";
